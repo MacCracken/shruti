@@ -87,12 +87,12 @@ impl Reverb {
 
         let comb_filters = COMB_LENGTHS
             .iter()
-            .map(|&len| CombFilter::new(((len as f32) * scale) as usize))
+            .map(|&len| CombFilter::new((((len as f32) * scale) as usize).max(1)))
             .collect();
 
         let allpass_filters = ALLPASS_LENGTHS
             .iter()
-            .map(|&len| AllpassFilter::new(((len as f32) * scale) as usize))
+            .map(|&len| AllpassFilter::new((((len as f32) * scale) as usize).max(1)))
             .collect();
 
         let mut reverb = Self {
@@ -327,6 +327,129 @@ mod tests {
         assert!(
             rough_high < rough_low,
             "High damping should produce smoother tail: rough_low={rough_low}, rough_high={rough_high}"
+        );
+    }
+
+    #[test]
+    fn test_reverb_new_at_44100() {
+        let reverb = Reverb::new(44100.0);
+        assert_eq!(reverb.sample_rate, 44100.0);
+        assert_eq!(reverb.comb_filters.len(), 8);
+        assert_eq!(reverb.allpass_filters.len(), 4);
+    }
+
+    #[test]
+    fn test_reverb_new_at_96000() {
+        let reverb = Reverb::new(96000.0);
+        assert_eq!(reverb.sample_rate, 96000.0);
+        // Buffer sizes should be scaled up for higher sample rate
+        assert!(reverb.comb_filters[0].buffer.len() > COMB_LENGTHS[0]);
+    }
+
+    #[test]
+    fn test_reverb_new_at_very_low_sample_rate() {
+        // Very low sample rate: filter sizes are clamped to at least 1
+        let reverb = Reverb::new(100.0);
+        assert_eq!(reverb.comb_filters.len(), 8);
+        for comb in &reverb.comb_filters {
+            assert!(comb.buffer.len() >= 1, "Comb buffer should be at least 1");
+        }
+        for ap in &reverb.allpass_filters {
+            assert!(ap.buffer.len() >= 1, "Allpass buffer should be at least 1");
+        }
+    }
+
+    #[test]
+    fn test_reverb_process_silence_stays_silent() {
+        let mut reverb = Reverb::new(48000.0);
+        reverb.mix = 0.5;
+        let mut buf = AudioBuffer::new(2, 256);
+        reverb.process(&mut buf);
+        // Silence in = silence out
+        for i in 0..256 {
+            assert_eq!(buf.get(i, 0), 0.0);
+            assert_eq!(buf.get(i, 1), 0.0);
+        }
+    }
+
+    #[test]
+    fn test_reverb_process_mono_buffer() {
+        let mut reverb = Reverb::new(48000.0);
+        reverb.mix = 0.5;
+        let frames = 2400;
+        let mut data = vec![0.0f32; frames];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        reverb.process(&mut buf);
+        // Should not panic and should produce a tail
+        let tail_energy: f32 = (240..frames).map(|i| buf.get(i as u32, 0).powi(2)).sum();
+        assert!(tail_energy > 0.0001, "Mono reverb should produce a tail");
+    }
+
+    #[test]
+    fn test_reverb_reset_clears_state() {
+        let mut reverb = Reverb::new(48000.0);
+        reverb.mix = 1.0;
+
+        // Feed an impulse
+        let frames = 2400;
+        let mut data = vec![0.0f32; frames];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        reverb.process(&mut buf);
+
+        // Reset
+        reverb.reset();
+
+        // Process silence: should produce silence (no leftover tail)
+        let mut buf2 = AudioBuffer::new(1, 2400);
+        reverb.process(&mut buf2);
+        let energy: f32 = (0..2400u32).map(|i| buf2.get(i, 0).powi(2)).sum();
+        assert!(
+            energy < 1e-10,
+            "After reset, processing silence should produce silence, got energy={energy}"
+        );
+    }
+
+    #[test]
+    fn test_reverb_mix_zero_preserves_dry() {
+        let mut reverb = Reverb::new(48000.0);
+        reverb.mix = 0.0;
+        let data = vec![0.25, -0.25, 0.5, -0.5];
+        let mut buf = AudioBuffer::from_interleaved(data.clone(), 2);
+        reverb.process(&mut buf);
+        for (i, &expected) in data.iter().enumerate() {
+            assert!(
+                (buf.as_interleaved()[i] - expected).abs() < 1e-6,
+                "mix=0 should preserve dry signal at index {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_reverb_steady_signal() {
+        let mut reverb = Reverb::new(48000.0);
+        reverb.mix = 0.3;
+        // Constant signal
+        let data = vec![0.5f32; 4800];
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        reverb.process(&mut buf);
+        // Output should not contain NaN or infinity
+        for i in 0..4800u32 {
+            let s = buf.get(i, 0);
+            assert!(s.is_finite(), "Output should be finite at frame {i}");
+        }
+    }
+
+    #[test]
+    fn test_set_sample_rate_reinitializes() {
+        let mut reverb = Reverb::new(48000.0);
+        let old_comb_len = reverb.comb_filters[0].buffer.len();
+        reverb.set_sample_rate(96000.0);
+        let new_comb_len = reverb.comb_filters[0].buffer.len();
+        assert!(
+            new_comb_len > old_comb_len,
+            "Doubling sample rate should increase comb buffer size"
         );
     }
 }

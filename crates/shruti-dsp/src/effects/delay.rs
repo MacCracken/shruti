@@ -195,4 +195,142 @@ mod tests {
             buf_wet.get(480, 0)
         );
     }
+
+    #[test]
+    fn test_delay_various_delay_times() {
+        for &time_sec in &[0.001, 0.01, 0.1, 0.5] {
+            let mut delay = Delay::new(48000.0);
+            delay.time = time_sec;
+            delay.feedback = 0.0;
+            delay.mix = 1.0;
+
+            let delay_samples = (time_sec * 48000.0) as usize;
+            let frames = delay_samples * 3;
+            let mut data = vec![0.0f32; frames];
+            data[0] = 1.0;
+
+            let mut buf = AudioBuffer::from_interleaved(data, 1);
+            delay.process(&mut buf);
+
+            // Echo should appear at the expected delay time
+            assert!(
+                buf.get(delay_samples as u32, 0).abs() > 0.5,
+                "Echo should appear at {} samples for delay time {}s",
+                delay_samples,
+                time_sec
+            );
+        }
+    }
+
+    #[test]
+    fn test_delay_zero_feedback_single_echo() {
+        let mut delay = Delay::new(48000.0);
+        delay.time = 0.01; // 480 samples
+        delay.feedback = 0.0;
+        delay.mix = 1.0;
+
+        let frames = 2400;
+        let mut data = vec![0.0f32; frames];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        delay.process(&mut buf);
+
+        // First echo at 480
+        assert!(buf.get(480, 0).abs() > 0.5);
+        // No second echo at 960 (feedback = 0)
+        assert!(
+            buf.get(960, 0).abs() < 0.01,
+            "Zero feedback should produce no second echo, got {}",
+            buf.get(960, 0)
+        );
+    }
+
+    #[test]
+    fn test_delay_high_feedback_sustains_echoes() {
+        let mut delay = Delay::new(48000.0);
+        delay.time = 0.01; // 480 samples
+        delay.feedback = 0.9;
+        delay.mix = 1.0;
+
+        let frames = 4800;
+        let mut data = vec![0.0f32; frames];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        delay.process(&mut buf);
+
+        // Echo at 480 * 5 = 2400 should still have significant energy
+        let echo_5 = buf.get(2400, 0).abs();
+        assert!(
+            echo_5 > 0.1,
+            "High feedback should sustain echoes, echo at 2400 = {echo_5}"
+        );
+    }
+
+    #[test]
+    fn test_delay_stereo_processing() {
+        let mut delay = Delay::new(48000.0);
+        delay.time = 0.01;
+        delay.feedback = 0.0;
+        delay.mix = 1.0;
+
+        let frames = 960;
+        let mut data = vec![0.0f32; frames * 2];
+        // Impulse on left only
+        data[0] = 1.0; // frame 0, ch 0
+        data[1] = 0.0; // frame 0, ch 1
+
+        let mut buf = AudioBuffer::from_interleaved(data, 2);
+        delay.process(&mut buf);
+
+        // Left channel should have echo at frame 480
+        assert!(buf.get(480, 0).abs() > 0.5, "Left should have echo at 480");
+        // Right channel should remain silent (no input)
+        assert!(
+            buf.get(480, 1).abs() < 0.01,
+            "Right should be silent, got {}",
+            buf.get(480, 1)
+        );
+    }
+
+    #[test]
+    fn test_delay_reset_clears_state() {
+        let mut delay = Delay::new(48000.0);
+        delay.time = 0.01;
+        delay.feedback = 0.5;
+        delay.mix = 1.0;
+
+        // Feed an impulse
+        let mut data = vec![0.0f32; 960];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        delay.process(&mut buf);
+
+        // Reset
+        delay.reset();
+
+        // Process silence: should produce silence
+        let mut buf2 = AudioBuffer::new(1, 960);
+        delay.process(&mut buf2);
+        let energy: f32 = (0..960u32).map(|i| buf2.get(i, 0).powi(2)).sum();
+        assert!(
+            energy < 1e-10,
+            "After reset, should be silent, energy={energy}"
+        );
+    }
+
+    #[test]
+    fn test_delay_zero_time_passthrough() {
+        let mut delay = Delay::new(48000.0);
+        delay.time = 0.0; // 0 delay samples -> early return
+        delay.mix = 1.0;
+
+        let data = vec![0.5, -0.5, 0.3, -0.3];
+        let mut buf = AudioBuffer::from_interleaved(data.clone(), 2);
+        delay.process(&mut buf);
+
+        // With 0 delay, process returns early, signal unchanged
+        for (i, &expected) in data.iter().enumerate() {
+            assert_eq!(buf.as_interleaved()[i], expected);
+        }
+    }
 }

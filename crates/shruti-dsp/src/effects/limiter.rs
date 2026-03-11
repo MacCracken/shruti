@@ -111,4 +111,114 @@ mod tests {
             assert!((buf.get(i, 0) - 0.1).abs() < 0.05);
         }
     }
+
+    #[test]
+    fn test_limiter_silence_passthrough() {
+        let mut limiter = Limiter::new(48000.0);
+        limiter.ceiling_db = 0.0;
+        let mut buf = AudioBuffer::new(2, 256);
+        limiter.process(&mut buf);
+        for i in 0..256 {
+            assert_eq!(buf.get(i, 0), 0.0);
+            assert_eq!(buf.get(i, 1), 0.0);
+        }
+    }
+
+    #[test]
+    fn test_limiter_various_ceilings() {
+        for &ceiling_db in &[-12.0, -6.0, -3.0, -1.0, 0.0] {
+            let mut limiter = Limiter::new(48000.0);
+            limiter.ceiling_db = ceiling_db;
+            limiter.release = 0.001;
+
+            let ceiling_linear = 10.0_f32.powf(ceiling_db / 20.0);
+            let frames = 2400;
+            let data: Vec<f32> = (0..frames)
+                .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin())
+                .collect();
+            let mut buf = AudioBuffer::from_interleaved(data, 1);
+            limiter.process(&mut buf);
+
+            for i in 480..frames {
+                let sample = buf.get(i as u32, 0).abs();
+                assert!(
+                    sample <= ceiling_linear + 0.05,
+                    "ceiling_db={ceiling_db}: frame {i}: {sample} exceeds ceiling {ceiling_linear}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_limiter_stereo_limiting() {
+        let mut limiter = Limiter::new(48000.0);
+        limiter.ceiling_db = -6.0;
+        limiter.release = 0.001;
+        let ceiling_linear = 10.0_f32.powf(-6.0 / 20.0);
+
+        let frames = 2400;
+        let mut data = vec![0.0f32; frames * 2];
+        for i in 0..frames {
+            let val = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin();
+            data[i * 2] = val;
+            data[i * 2 + 1] = val * 0.8;
+        }
+        let mut buf = AudioBuffer::from_interleaved(data, 2);
+        limiter.process(&mut buf);
+
+        for i in 480..frames {
+            let l = buf.get(i as u32, 0).abs();
+            let r = buf.get(i as u32, 1).abs();
+            assert!(
+                l <= ceiling_linear + 0.05,
+                "L frame {i}: {l} exceeds ceiling"
+            );
+            assert!(
+                r <= ceiling_linear + 0.05,
+                "R frame {i}: {r} exceeds ceiling"
+            );
+        }
+    }
+
+    #[test]
+    fn test_limiter_reset() {
+        let mut limiter = Limiter::new(48000.0);
+        limiter.ceiling_db = -6.0;
+
+        // Process loud signal
+        let data: Vec<f32> = vec![1.0; 480];
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        limiter.process(&mut buf);
+        assert!(limiter.envelope < 1.0, "Envelope should be reduced");
+
+        limiter.reset();
+        assert_eq!(
+            limiter.envelope, 1.0,
+            "Reset should restore envelope to 1.0"
+        );
+    }
+
+    #[test]
+    fn test_limiter_below_ceiling_minimal_change() {
+        let mut limiter = Limiter::new(48000.0);
+        limiter.ceiling_db = 0.0; // ceiling at 1.0 linear
+
+        // Signal at 0.3 -- well below ceiling
+        let frames = 480;
+        let data: Vec<f32> = (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin() * 0.3)
+            .collect();
+        let original = data.clone();
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        limiter.process(&mut buf);
+
+        // Output should be very close to input
+        for i in 10..frames {
+            let diff = (buf.get(i as u32, 0) - original[i]).abs();
+            assert!(
+                diff < 0.05,
+                "Below ceiling, frame {i} should be ~unchanged, diff={diff}"
+            );
+        }
+    }
 }

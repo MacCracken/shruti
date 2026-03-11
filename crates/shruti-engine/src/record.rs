@@ -77,3 +77,108 @@ fn accumulate_samples(mut consumer: Consumer<f32>) -> Vec<f32> {
 
     samples
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_record_manager_creation() {
+        // Should not panic with various capacities
+        let _rm = RecordManager::new(1024);
+        let _rm = RecordManager::new(1);
+    }
+
+    #[test]
+    fn test_push_samples() {
+        let mut rm = RecordManager::new(1024);
+        let data = vec![0.1, 0.2, 0.3, 0.4];
+        rm.push_samples(&data);
+        // Push more
+        rm.push_samples(&[0.5, 0.6]);
+        // No panic is the success condition; actual data verified via finish()
+    }
+
+    #[test]
+    fn test_push_samples_empty() {
+        let mut rm = RecordManager::new(1024);
+        rm.push_samples(&[]);
+        // No panic
+    }
+
+    #[test]
+    fn test_accumulate_samples_basic() {
+        let (mut producer, consumer) = rtrb::RingBuffer::new(64);
+
+        let handle = thread::spawn(move || accumulate_samples(consumer));
+
+        // Push some data then drop the producer to signal completion
+        for &s in &[1.0f32, 2.0, 3.0, 4.0] {
+            let _ = producer.push(s);
+        }
+        drop(producer);
+
+        let result = handle.join().unwrap();
+        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_accumulate_samples_empty() {
+        let (producer, consumer) = rtrb::RingBuffer::new(64);
+        let handle = thread::spawn(move || accumulate_samples(consumer));
+        drop(producer);
+
+        let result = handle.join().unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_finish_writes_wav() {
+        let mut rm = RecordManager::new(1024);
+        let samples = vec![0.1f32, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4];
+        rm.push_samples(&samples);
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("shruti_test_record.wav");
+
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 2,
+            buffer_size: 256,
+        };
+
+        rm.finish(&path, &format).unwrap();
+
+        // Verify file was created
+        assert!(path.exists());
+        // Clean up
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_finish_empty_recording() {
+        let rm = RecordManager::new(1024);
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("shruti_test_empty_record.wav");
+
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 1,
+            buffer_size: 256,
+        };
+
+        rm.finish(&path, &format).unwrap();
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_push_samples_overflow_does_not_panic() {
+        // Ring buffer of capacity 4, push 10 samples
+        let mut rm = RecordManager::new(4);
+        let data = vec![1.0; 10];
+        rm.push_samples(&data);
+        // Should not panic — overflow samples are silently dropped
+    }
+}

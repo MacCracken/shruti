@@ -84,4 +84,59 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
+
+    #[test]
+    fn test_buffer_duration_secs_various_rates() {
+        // 44100 Hz, 441 samples = 0.01s
+        let fmt = AudioFormat::new(44100, 2, 441);
+        assert!((fmt.buffer_duration_secs() - 0.01).abs() < 1e-9);
+
+        // 96000 Hz, 960 samples = 0.01s
+        let fmt2 = AudioFormat::new(96000, 1, 960);
+        assert!((fmt2.buffer_duration_secs() - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_buffer_duration_ms_various() {
+        let fmt = AudioFormat::new(44100, 2, 4410);
+        assert!((fmt.buffer_duration_ms() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_buffer_duration_zero_buffer_size() {
+        let fmt = AudioFormat::new(48000, 2, 0);
+        assert_eq!(fmt.buffer_duration_secs(), 0.0);
+        assert_eq!(fmt.buffer_duration_ms(), 0.0);
+    }
+
+    #[test]
+    fn test_format_clone_and_copy() {
+        let fmt = AudioFormat::new(48000, 2, 256);
+        let fmt2 = fmt; // Copy
+        let fmt3 = fmt.clone();
+        assert_eq!(fmt, fmt2);
+        assert_eq!(fmt, fmt3);
+    }
+
+    #[test]
+    fn test_format_debug() {
+        let fmt = AudioFormat::new(48000, 2, 256);
+        let debug_str = format!("{:?}", fmt);
+        assert!(debug_str.contains("48000"));
+        assert!(debug_str.contains("256"));
+    }
+
+    #[test]
+    fn test_format_different_channels() {
+        let mono = AudioFormat::new(48000, 1, 256);
+        let stereo = AudioFormat::new(48000, 2, 256);
+        assert_ne!(mono, stereo);
+    }
+
+    #[test]
+    fn test_format_different_buffer_sizes() {
+        let a = AudioFormat::new(48000, 2, 128);
+        let b = AudioFormat::new(48000, 2, 512);
+        assert_ne!(a, b);
+    }
 }

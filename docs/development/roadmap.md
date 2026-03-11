@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
 > **Status**: Phases 1–7C, 7A, 7B, 8A–8D complete — MVP v1 + instruments + audit fixes
-> **Tests**: 549 passing (67 dsp, 9 engine, 115 instruments, 131 session, 3 plugin, 103 ai, 121 ui), 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 723 passing (168 dsp, 55 engine, 120 instruments, 137 session, 19 plugin, 103 ai, 121 ui), 59.4% line coverage (excl. vendor), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -338,21 +338,38 @@ Phases 1–6 complete. Phase 7 and MIDI 2.0 follow as post-MVP milestones.
 
 ---
 
-## Test Coverage Roadmap (40% → 80%)
+## Test Coverage Roadmap (59% → 80%)
 
-Current: 441 tests, 51% line coverage.
+**Current:** 723 tests, 59.4% line coverage (2956/4973 lines, excluding vendor).
+**Tool:** `cargo tarpaulin` with `tarpaulin.toml` excluding `vendor/*`.
 
-| Milestone | Target | Focus Areas | Est. Tests |
-|-----------|--------|-------------|------------|
-| 50% | +300 lines | shruti-ui views (arrangement interactions, mixer logic), shruti-engine backend mocking | +40 |
-| 60% | +300 lines | shruti-session undo/edit commands (all EditCommand variants), store roundtrips, audio_pool edge cases | +30 |
-| 70% | +300 lines | shruti-ui widget interactions (fader drag, knob drag, track selection), shruti-plugin host lifecycle, error recovery paths | +30 |
-| 80% | +300 lines | Integration tests (session→timeline→export pipeline), shruti-ai MCP dispatch coverage, binary CLI arg parsing, edge cases across all crates | +30 |
+### Per-Crate Status
 
-**Strategy:**
-- UI rendering code: mock-free tests for data flow and state transitions; skip pixel-level rendering
-- Engine code: mock audio backends, test graph execution with synthetic nodes
-- Session code: full undo/redo cycle tests for every EditCommand variant
-- Plugin code: mock plugin instances, test scanner with fixture directories
+| Crate | Tests | Coverage | Lines | Gap |
+|-------|-------|----------|-------|-----|
+| shruti-dsp | 168 | 91% | 595/654 | 59 lines — meter LUFS edge cases, delay stereo, limiter above-ceiling |
+| shruti-session | 137 | 95% | 663/699 | 36 lines — session.rs add_track variants, timeline bus overflow |
+| shruti-instruments | 120 | 88% | 654/746 | 92 lines — drum_machine looped playback, synth modulation paths, sampler loop modes |
+| shruti-engine | 55 | 77% | 208/271 | 63 lines — cpal_backend (needs mock), midi_io enumerate |
+| shruti-ai | 103 | 89% | 489/552 | 63 lines — voice.rs command parsing, agent_api error paths |
+| shruti-plugin | 19 | 55% | 119/215 | 96 lines — host.rs load/unload/save_state (needs mock PluginInstance) |
+| shruti-ui | 121 | 22% | 228/841 | **613 lines** — views, widgets, app.rs, engine.rs, style.rs |
+| **Total** | **723** | **59.4%** | **2956/4973** | **2017 lines to 100%** |
 
-*Last Updated: 2026-03-11 (8A–8D complete, code audit rounds 1-3 fixes applied)*
+### Roadmap to 80% (need ~1022 more lines covered)
+
+| Phase | Target | Lines | Focus | Strategy |
+|-------|--------|-------|-------|----------|
+| **T1: Low-hanging fruit** | 65% | +275 | shruti-instruments gaps (drum looped, synth mod paths, sampler loops), shruti-plugin mock PluginInstance, shruti-ai voice commands | Unit tests with existing test patterns |
+| **T2: Engine mocking** | 70% | +250 | cpal_backend mock (struct implementing AudioHost/AudioStream traits), midi_io with mock midir, engine.rs transport/callback logic | Create `MockBackend` implementing `AudioHost` for test-only use |
+| **T3: UI data logic** | 75% | +250 | app.rs action dispatch (extract pure functions from `handle_action`), state.rs transitions, theme/style.rs (test struct construction not rendering), shortcuts.rs | Extract testable logic from egui callbacks; test state machines |
+| **T4: UI widget math** | 80% | +250 | fader dB↔linear conversion, knob angle math, meter peak decay, timeline_ruler grid calculation, waveform zoom level selection | Test pure computation functions; skip egui `Ui` painting code |
+
+### Strategy Notes
+
+- **UI code (841 lines, 22%)** is the biggest gap but hardest to test. Most is egui `Ui` painting code that can't be unit tested without a headless egui context. Focus on extracting and testing the *math and state* behind widgets, not the rendering.
+- **shruti-plugin host.rs** needs a `MockPluginInstance` implementing `PluginInstance` to test load/unload/save_state/load_state flows without real shared libraries.
+- **cpal_backend** (94 lines, 53%) can be tested by implementing `AudioHost` and `AudioStream` traits on mock structs that capture callback invocations.
+- **Diminishing returns** start around 85%: remaining uncovered lines are mostly error branches in I/O code, platform-specific conditionals, and egui draw calls that are impractical to unit test. Integration/screenshot testing would be needed beyond 80%.
+
+*Last Updated: 2026-03-11 — 7-round audit complete, coverage push complete*

@@ -365,4 +365,148 @@ mod tests {
         assert!(meter.lufs_blocks.is_empty());
         assert_eq!(meter.lufs_buffer_pos, 0);
     }
+
+    #[test]
+    fn test_peak_detection_negative_signal() {
+        let mut meter = Meter::new(1, 48000.0);
+        let mut data = vec![0.0f32; 256];
+        data[50] = -0.95;
+        let buf = AudioBuffer::from_interleaved(data, 1);
+        meter.process(&buf);
+        assert!(
+            (meter.peak[0] - 0.95).abs() < 0.001,
+            "Peak should detect absolute value"
+        );
+    }
+
+    #[test]
+    fn test_rms_of_sine_wave() {
+        let mut meter = Meter::new(1, 48000.0);
+        let frames = 48000; // full second at 48kHz
+        let data: Vec<f32> = (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / 48000.0).sin())
+            .collect();
+        let buf = AudioBuffer::from_interleaved(data, 1);
+        meter.process(&buf);
+        // RMS of sine wave = 1/sqrt(2) ~ 0.707
+        assert!(
+            (meter.rms[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01,
+            "RMS of unit sine should be ~0.707, got {}",
+            meter.rms[0]
+        );
+    }
+
+    #[test]
+    fn test_lufs_silence_returns_floor() {
+        let mut meter = Meter::new(1, 48000.0);
+        // Process enough silence to fill several 400ms blocks
+        let frames = 48000; // 1 second
+        let buf = AudioBuffer::new(1, frames);
+        meter.process(&buf);
+        assert_eq!(meter.lufs, -200.0, "LUFS of silence should be -200");
+    }
+
+    #[test]
+    fn test_lufs_loud_signal() {
+        let mut meter = Meter::new(1, 48000.0);
+        let frames = 96000; // 2 seconds
+        let data: Vec<f32> = (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / 48000.0).sin() * 0.5)
+            .collect();
+        let buf = AudioBuffer::from_interleaved(data, 1);
+        meter.process(&buf);
+
+        assert!(
+            meter.lufs > -200.0,
+            "LUFS should be computed, got {}",
+            meter.lufs
+        );
+        assert!(
+            meter.lufs < 0.0,
+            "LUFS should be negative, got {}",
+            meter.lufs
+        );
+    }
+
+    #[test]
+    fn test_meter_single_sample() {
+        let mut meter = Meter::new(1, 48000.0);
+        let buf = AudioBuffer::from_interleaved(vec![0.42], 1);
+        meter.process(&buf);
+        assert!((meter.peak[0] - 0.42).abs() < 0.001);
+        assert!((meter.rms[0] - 0.42).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_meter_very_loud_signal() {
+        let mut meter = Meter::new(1, 48000.0);
+        let data = vec![5.0f32; 1024]; // clipped/over-range signal
+        let buf = AudioBuffer::from_interleaved(data, 1);
+        meter.process(&buf);
+        assert!(
+            (meter.peak[0] - 5.0).abs() < 0.001,
+            "Peak should handle over-range"
+        );
+        assert!(
+            (meter.rms[0] - 5.0).abs() < 0.001,
+            "RMS should handle over-range"
+        );
+        assert!(
+            meter.peak_db(0) > 0.0,
+            "Peak dB should be positive for signal > 1.0"
+        );
+    }
+
+    #[test]
+    fn test_peak_db_and_rms_db_for_known_values() {
+        let mut meter = Meter::new(1, 48000.0);
+        let data = vec![1.0f32; 256];
+        let buf = AudioBuffer::from_interleaved(data, 1);
+        meter.process(&buf);
+        // Peak of 1.0 = 0 dB
+        assert!((meter.peak_db(0)).abs() < 0.1, "1.0 linear should be ~0 dB");
+        assert!(
+            (meter.rms_db(0)).abs() < 0.1,
+            "RMS of constant 1.0 should be ~0 dB"
+        );
+    }
+
+    #[test]
+    fn test_peak_db_invalid_channel() {
+        let meter = Meter::new(1, 48000.0);
+        // Channel 5 does not exist
+        let db = meter.peak_db(5);
+        assert!(db < -100.0, "Invalid channel should return very low dB");
+    }
+
+    #[test]
+    fn test_rms_db_invalid_channel() {
+        let meter = Meter::new(1, 48000.0);
+        let db = meter.rms_db(5);
+        assert!(db < -100.0, "Invalid channel should return very low dB");
+    }
+
+    #[test]
+    fn test_meter_accumulates_across_process_calls() {
+        let mut meter = Meter::new(1, 48000.0);
+
+        // First call: signal of 0.3
+        let buf1 = AudioBuffer::from_interleaved(vec![0.3f32; 512], 1);
+        meter.process(&buf1);
+        let rms1 = meter.rms[0];
+
+        // Second call: signal of 0.6
+        let buf2 = AudioBuffer::from_interleaved(vec![0.6f32; 512], 1);
+        meter.process(&buf2);
+        let rms2 = meter.rms[0];
+
+        // RMS after both calls should reflect both blocks
+        // RMS = sqrt((512*0.3^2 + 512*0.6^2) / 1024) = sqrt((46.08 + 184.32)/1024) = sqrt(0.225) ~ 0.474
+        let expected_rms = ((512.0 * 0.3f32.powi(2) + 512.0 * 0.6f32.powi(2)) / 1024.0).sqrt();
+        assert!(
+            (rms2 - expected_rms).abs() < 0.01,
+            "RMS should accumulate: expected {expected_rms}, got {rms2}"
+        );
+        assert!(rms2 != rms1, "Second process call should change RMS");
+    }
 }

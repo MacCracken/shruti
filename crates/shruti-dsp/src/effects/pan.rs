@@ -116,4 +116,81 @@ mod tests {
         panner.process(&mut buf);
         assert_eq!(buf.get(0, 0), 0.5);
     }
+
+    #[test]
+    fn test_half_left_pan() {
+        let panner = StereoPanner::new(-0.5);
+        let (l, r) = panner.gains();
+        assert!(
+            (l - 1.0).abs() < 0.001,
+            "L should still be 1.0 at pan=-0.5, got {l}"
+        );
+        assert!(
+            (r - 0.5).abs() < 0.001,
+            "R should be 0.5 at pan=-0.5, got {r}"
+        );
+    }
+
+    #[test]
+    fn test_half_right_pan() {
+        let panner = StereoPanner::new(0.5);
+        let (l, r) = panner.gains();
+        assert!(
+            (l - 0.5).abs() < 0.001,
+            "L should be 0.5 at pan=0.5, got {l}"
+        );
+        assert!(
+            (r - 1.0).abs() < 0.001,
+            "R should be 1.0 at pan=0.5, got {r}"
+        );
+    }
+
+    #[test]
+    fn test_pan_clamps_out_of_range() {
+        let panner = StereoPanner::new(-2.0);
+        assert_eq!(panner.pan, -1.0, "Pan should be clamped to -1.0");
+
+        let panner = StereoPanner::new(5.0);
+        assert_eq!(panner.pan, 1.0, "Pan should be clamped to 1.0");
+    }
+
+    #[test]
+    fn test_default_is_center() {
+        let panner = StereoPanner::default();
+        assert_eq!(panner.pan, 0.0);
+        let (l, r) = panner.gains();
+        assert!((l - 1.0).abs() < 0.001);
+        assert!((r - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_hard_right_process() {
+        let mut panner = StereoPanner::new(1.0);
+        let mut buf = AudioBuffer::from_interleaved(vec![0.8, 0.8, 0.4, 0.4], 2);
+        panner.process(&mut buf);
+
+        // Left channel should be silenced
+        assert!(buf.get(0, 0).abs() < 0.001, "L should be 0 at hard right");
+        assert!(buf.get(1, 0).abs() < 0.001);
+        // Right channel should be full
+        assert!((buf.get(0, 1) - 0.8).abs() < 0.001);
+        assert!((buf.get(1, 1) - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_pan_gains_symmetry() {
+        // gains at pan=x should mirror gains at pan=-x (L<->R)
+        for &p in &[0.1, 0.25, 0.5, 0.75, 0.9] {
+            let (l_pos, r_pos) = StereoPanner::new(p).gains();
+            let (l_neg, r_neg) = StereoPanner::new(-p).gains();
+            assert!(
+                (l_pos - r_neg).abs() < 0.001,
+                "Symmetry: L(+{p}) should equal R(-{p})"
+            );
+            assert!(
+                (r_pos - l_neg).abs() < 0.001,
+                "Symmetry: R(+{p}) should equal L(-{p})"
+            );
+        }
+    }
 }

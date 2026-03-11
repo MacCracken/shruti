@@ -1,0 +1,4 @@
+[default]
+exclude-files = ["vendor/*"]
+workspace = true
+skip-clean = true

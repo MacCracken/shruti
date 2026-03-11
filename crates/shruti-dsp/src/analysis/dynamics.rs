@@ -213,4 +213,98 @@ mod tests {
         let result = analyze_dynamics(&buf, 48000);
         assert!(result.dynamic_range_db > 0.0);
     }
+
+    #[test]
+    fn test_empty_buffer() {
+        let buf = AudioBuffer::new(1, 0);
+        let result = analyze_dynamics(&buf, 48000);
+        assert_eq!(result.frame_count, 0);
+        assert_eq!(result.channel_count, 1);
+        assert_eq!(result.peak[0], 0.0);
+        assert_eq!(result.rms[0], 0.0);
+        assert_eq!(result.lufs, -200.0);
+    }
+
+    #[test]
+    fn test_single_frame() {
+        let mut buf = AudioBuffer::new(1, 1);
+        buf.set(0, 0, 0.75);
+        let result = analyze_dynamics(&buf, 48000);
+        assert!((result.peak[0] - 0.75).abs() < 0.001);
+        assert!((result.rms[0] - 0.75).abs() < 0.001);
+        assert!((result.true_peak[0] - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_steady_dc_signal() {
+        let frames = 4096u32;
+        let mut buf = AudioBuffer::new(2, frames);
+        for i in 0..frames {
+            buf.set(i, 0, 0.3);
+            buf.set(i, 1, -0.3);
+        }
+        let result = analyze_dynamics(&buf, 48000);
+        // Peak should be 0.3 on both channels
+        assert!((result.peak[0] - 0.3).abs() < 0.001);
+        assert!((result.peak[1] - 0.3).abs() < 0.001);
+        // RMS should equal peak for DC
+        assert!((result.rms[0] - 0.3).abs() < 0.001);
+        assert!((result.rms[1] - 0.3).abs() < 0.001);
+        // Crest factor should be ~0 for DC
+        assert!(result.crest_factor_db[0].abs() < 0.01);
+        assert!(result.crest_factor_db[1].abs() < 0.01);
+    }
+
+    #[test]
+    fn test_stereo_independent_channels() {
+        let mut buf = AudioBuffer::new(2, 1024);
+        for i in 0..1024 {
+            buf.set(i, 0, 0.8); // loud left
+            buf.set(i, 1, 0.1); // quiet right
+        }
+        let result = analyze_dynamics(&buf, 48000);
+        assert!((result.peak[0] - 0.8).abs() < 0.001);
+        assert!((result.peak[1] - 0.1).abs() < 0.001);
+        assert!(result.peak_db[0] > result.peak_db[1]);
+    }
+
+    #[test]
+    fn test_true_peak_single_frame() {
+        let mut buf = AudioBuffer::new(1, 1);
+        buf.set(0, 0, 0.5);
+        let result = analyze_dynamics(&buf, 48000);
+        // For single frame, true_peak = peak
+        assert!((result.true_peak[0] - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_lufs_finite_for_signal() {
+        let frames = 48000u32;
+        let mut buf = AudioBuffer::new(1, frames);
+        for i in 0..frames {
+            let s = (2.0 * std::f64::consts::PI * 1000.0 * i as f64 / 48000.0).sin() as f32;
+            buf.set(i, 0, s * 0.5);
+        }
+        let result = analyze_dynamics(&buf, 48000);
+        assert!(
+            result.lufs > -200.0,
+            "LUFS should be finite for a real signal"
+        );
+        assert!(result.lufs < 0.0, "LUFS should be negative");
+    }
+
+    #[test]
+    fn test_silence_analysis_all_fields() {
+        let buf = AudioBuffer::new(2, 1024);
+        let result = analyze_dynamics(&buf, 48000);
+        assert_eq!(result.peak[0], 0.0);
+        assert_eq!(result.peak[1], 0.0);
+        assert_eq!(result.rms[0], 0.0);
+        assert_eq!(result.rms[1], 0.0);
+        assert_eq!(result.peak_db[0], -200.0);
+        assert_eq!(result.rms_db[0], -200.0);
+        assert_eq!(result.true_peak[0], 0.0);
+        assert_eq!(result.true_peak_db[0], -200.0);
+        assert_eq!(result.lufs, -200.0);
+    }
 }

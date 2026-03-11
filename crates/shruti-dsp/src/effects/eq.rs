@@ -416,4 +416,124 @@ mod tests {
             "High freq should be boosted by high shelf"
         );
     }
+
+    #[test]
+    fn test_lowpass_passes_low_frequencies() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::LowPass, 5000.0, 0.0, 0.707));
+
+        let frames = 4800;
+        let data = generate_sine(100.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+
+        // Low frequency should pass through mostly unchanged
+        assert!(
+            (rms_after / rms_before - 1.0).abs() < 0.1,
+            "LowPass at 5kHz should pass 100Hz: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_highpass_passes_high_frequencies() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::HighPass, 500.0, 0.0, 0.707));
+
+        let frames = 4800;
+        let data = generate_sine(10000.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+
+        assert!(
+            (rms_after / rms_before - 1.0).abs() < 0.1,
+            "HighPass at 500Hz should pass 10kHz: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_peak_cut_reduces_target_frequency() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::Peak, 1000.0, -12.0, 1.0));
+
+        let frames = 4800;
+        let data = generate_sine(1000.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+
+        assert!(
+            rms_after < rms_before * 0.5,
+            "Peak cut at 1kHz should reduce 1kHz signal: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_low_shelf_leaves_high_frequencies_unchanged() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::LowShelf, 300.0, 12.0, 0.707));
+
+        let frames = 4800;
+        let data = generate_sine(10000.0, 48000.0, frames, 0.3);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+
+        // High frequency far above shelf should be mostly unaffected
+        assert!(
+            (rms_after / rms_before - 1.0).abs() < 0.3,
+            "LowShelf at 300Hz should not significantly change 10kHz: ratio={}",
+            rms_after / rms_before
+        );
+    }
+
+    #[test]
+    fn test_eq_reset_clears_filter_state() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::Peak, 1000.0, 12.0, 1.0));
+
+        // Process some audio to build up state
+        let frames = 480;
+        let data = generate_sine(1000.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        eq.process(&mut buf);
+
+        // Reset
+        eq.reset();
+
+        // Verify state is zeroed
+        for band in &eq.bands {
+            assert_eq!(band.state[0][0], 0.0);
+            assert_eq!(band.state[0][1], 0.0);
+            assert_eq!(band.state[1][0], 0.0);
+            assert_eq!(band.state[1][1], 0.0);
+        }
+    }
+
+    #[test]
+    fn test_three_band_eq() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::LowShelf, 200.0, 6.0, 0.707));
+        eq.add_band(EqBand::new(FilterType::Peak, 1000.0, -6.0, 1.0));
+        eq.add_band(EqBand::new(FilterType::HighShelf, 8000.0, 3.0, 0.707));
+        assert_eq!(eq.bands.len(), 3);
+
+        // Just verify it processes without panicking or producing NaN
+        let frames = 4800;
+        let data = generate_sine(440.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        eq.process(&mut buf);
+
+        for i in 0..frames {
+            assert!(
+                buf.get(i as u32, 0).is_finite(),
+                "Output should be finite at frame {i}"
+            );
+        }
+    }
 }

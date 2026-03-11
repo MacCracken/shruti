@@ -154,4 +154,140 @@ mod tests {
         buf.apply_gain(0.5);
         assert_eq!(buf.as_interleaved(), &[0.5, -0.5, 0.25, -0.25]);
     }
+
+    #[test]
+    fn test_from_interleaved_odd_sample_count_truncates_frames() {
+        // 7 samples with 2 channels: 7/2 = 3 frames (integer division), last sample is orphaned
+        let buf = AudioBuffer::from_interleaved(vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], 2);
+        assert_eq!(buf.frames(), 3);
+        assert_eq!(buf.channels(), 2);
+        // The raw data still contains all 7 samples
+        assert_eq!(buf.sample_count(), 7);
+        // But frame-based access only reaches frames 0..3
+        assert_eq!(buf.get(0, 0), 0.1);
+        assert_eq!(buf.get(2, 1), 0.6);
+    }
+
+    #[test]
+    fn test_from_interleaved_single_channel_odd() {
+        // 5 samples, 3 channels: 5/3 = 1 frame
+        let buf = AudioBuffer::from_interleaved(vec![0.1, 0.2, 0.3, 0.4, 0.5], 3);
+        assert_eq!(buf.frames(), 1);
+        assert_eq!(buf.channels(), 3);
+        assert_eq!(buf.get(0, 0), 0.1);
+        assert_eq!(buf.get(0, 1), 0.2);
+        assert_eq!(buf.get(0, 2), 0.3);
+    }
+
+    #[test]
+    fn test_as_interleaved_returns_raw_data() {
+        let data = vec![0.1, 0.2, 0.3, 0.4];
+        let buf = AudioBuffer::from_interleaved(data.clone(), 2);
+        assert_eq!(buf.as_interleaved(), &data[..]);
+    }
+
+    #[test]
+    fn test_as_interleaved_mut_allows_modification() {
+        let mut buf = AudioBuffer::new(2, 2);
+        let raw = buf.as_interleaved_mut();
+        raw[0] = 0.5;
+        raw[1] = -0.5;
+        raw[2] = 0.25;
+        raw[3] = -0.25;
+        assert_eq!(buf.get(0, 0), 0.5);
+        assert_eq!(buf.get(0, 1), -0.5);
+        assert_eq!(buf.get(1, 0), 0.25);
+        assert_eq!(buf.get(1, 1), -0.25);
+    }
+
+    #[test]
+    fn test_apply_gain_zero() {
+        let mut buf = AudioBuffer::from_interleaved(vec![1.0, -1.0, 0.5, -0.5], 2);
+        buf.apply_gain(0.0);
+        assert!(buf.as_interleaved().iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn test_apply_gain_negative() {
+        let mut buf = AudioBuffer::from_interleaved(vec![1.0, 0.5], 1);
+        buf.apply_gain(-1.0);
+        assert_eq!(buf.as_interleaved(), &[-1.0, -0.5]);
+    }
+
+    #[test]
+    fn test_mix_from_different_lengths() {
+        // When buffers have different data lengths, mix_from uses the smaller
+        let mut a = AudioBuffer::from_interleaved(vec![0.5, 0.5, 0.5, 0.5, 0.5, 0.5], 2);
+        let b = AudioBuffer::from_interleaved(vec![0.3, 0.3], 2);
+        a.mix_from(&b);
+        // Only first 2 samples should be mixed
+        assert!((a.as_interleaved()[0] - 0.8).abs() < 1e-6);
+        assert!((a.as_interleaved()[1] - 0.8).abs() < 1e-6);
+        // Remaining should be unchanged
+        assert_eq!(a.as_interleaved()[2], 0.5);
+        assert_eq!(a.as_interleaved()[5], 0.5);
+    }
+
+    #[test]
+    fn test_clear_zeroes_all_samples() {
+        let mut buf = AudioBuffer::from_interleaved(vec![0.7, -0.3, 0.5, -0.1], 2);
+        buf.clear();
+        assert!(buf.as_interleaved().iter().all(|&s| s == 0.0));
+        assert_eq!(buf.frames(), 2);
+        assert_eq!(buf.channels(), 2);
+    }
+
+    #[test]
+    fn test_empty_buffer() {
+        let buf = AudioBuffer::new(2, 0);
+        assert_eq!(buf.frames(), 0);
+        assert_eq!(buf.channels(), 2);
+        assert_eq!(buf.sample_count(), 0);
+        assert!(buf.as_interleaved().is_empty());
+    }
+
+    #[test]
+    fn test_single_sample_buffer() {
+        let mut buf = AudioBuffer::new(1, 1);
+        assert_eq!(buf.frames(), 1);
+        assert_eq!(buf.sample_count(), 1);
+        buf.set(0, 0, 0.42);
+        assert_eq!(buf.get(0, 0), 0.42);
+    }
+
+    #[test]
+    fn test_large_buffer() {
+        let frames = 192000; // 4 seconds at 48kHz
+        let buf = AudioBuffer::new(2, frames);
+        assert_eq!(buf.frames(), frames);
+        assert_eq!(buf.sample_count(), frames as usize * 2);
+        assert!(buf.as_interleaved().iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn test_from_interleaved_empty_vec() {
+        let buf = AudioBuffer::from_interleaved(vec![], 2);
+        assert_eq!(buf.frames(), 0);
+        assert_eq!(buf.sample_count(), 0);
+    }
+
+    #[test]
+    fn test_apply_gain_on_empty_buffer() {
+        let mut buf = AudioBuffer::new(2, 0);
+        buf.apply_gain(2.0); // should not panic
+        assert_eq!(buf.sample_count(), 0);
+    }
+
+    #[test]
+    fn test_clear_on_empty_buffer() {
+        let mut buf = AudioBuffer::new(1, 0);
+        buf.clear(); // should not panic
+    }
+
+    #[test]
+    fn test_mix_from_empty_buffers() {
+        let mut a = AudioBuffer::new(2, 0);
+        let b = AudioBuffer::new(2, 0);
+        a.mix_from(&b); // should not panic
+    }
 }

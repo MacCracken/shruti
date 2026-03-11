@@ -376,3 +376,132 @@ impl PluginInstance for LoadedPlugin {
         self.active
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_host_empty() {
+        let host = PluginHost::new();
+        assert!(host.registry().is_empty());
+        assert!(host.active_slots().is_empty());
+    }
+
+    #[test]
+    fn default_is_new() {
+        let host = PluginHost::default();
+        assert!(host.registry().is_empty());
+    }
+
+    #[test]
+    fn find_plugin_empty_registry() {
+        let host = PluginHost::new();
+        assert!(host.find_plugin("nonexistent").is_none());
+    }
+
+    #[test]
+    fn instance_empty() {
+        let host = PluginHost::new();
+        assert!(host.instance("slot1").is_none());
+    }
+
+    #[test]
+    fn instance_mut_empty() {
+        let mut host = PluginHost::new();
+        assert!(host.instance_mut("slot1").is_none());
+    }
+
+    #[test]
+    fn unload_nonexistent_slot() {
+        let mut host = PluginHost::new();
+        assert!(host.unload("nothing").is_none());
+    }
+
+    #[test]
+    fn save_all_states_empty() {
+        let host = PluginHost::new();
+        let states = host.save_all_states();
+        assert!(states.is_empty());
+    }
+
+    #[test]
+    fn load_all_states_empty() {
+        let mut host = PluginHost::new();
+        let states = HashMap::new();
+        host.load_all_states(&states); // should not panic
+    }
+
+    #[test]
+    fn scan_empty_paths() {
+        let mut host = PluginHost::new();
+        let results = host.scan();
+        // No real plugin directories — expect empty or whatever system finds
+        // Just verify it doesn't panic
+        let _ = results.len();
+    }
+
+    #[test]
+    fn add_search_path() {
+        let mut host = PluginHost::new();
+        host.add_search_path("/tmp/fake-plugins");
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn find_vst3_binary_missing() {
+        let result = find_vst3_binary(Path::new("/tmp/nonexistent.vst3"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("VST3 binary not found"));
+    }
+
+    #[test]
+    fn loaded_plugin_lifecycle() {
+        // We can't create a LoadedPlugin without a real Library handle,
+        // but we can test the load function error paths
+        let fake_plugin = ScannedPlugin {
+            name: "FakePlugin".into(),
+            path: "/tmp/nonexistent.clap".into(),
+            format: PluginFormat::Clap,
+        };
+        let result = load_plugin(&fake_plugin, 48000.0, 256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_clap_nonexistent() {
+        let result = load_clap_plugin(Path::new("/nonexistent.clap"), 48000.0, 256);
+        match result {
+            Err(msg) => assert!(msg.contains("failed to load CLAP"), "got: {msg}"),
+            Ok(_) => panic!("should have failed"),
+        }
+    }
+
+    #[test]
+    fn load_vst3_nonexistent() {
+        let result = load_vst3_plugin(Path::new("/nonexistent.vst3"), 48000.0, 256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_native_nonexistent() {
+        let result = load_native_plugin(Path::new("/nonexistent.so"), 48000.0, 256);
+        match result {
+            Err(msg) => assert!(msg.contains("failed to load native"), "got: {msg}"),
+            Ok(_) => panic!("should have failed"),
+        }
+    }
+
+    #[test]
+    fn host_load_nonexistent_plugin() {
+        let mut host = PluginHost::new();
+        let fake = ScannedPlugin {
+            name: "Ghost".into(),
+            path: "/dev/null/nope.clap".into(),
+            format: PluginFormat::Clap,
+        };
+        let result = host.load("slot1", &fake, 48000.0, 256);
+        assert!(result.is_err());
+        assert!(host.active_slots().is_empty());
+    }
+}

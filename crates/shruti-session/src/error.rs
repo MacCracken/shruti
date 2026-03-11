@@ -59,3 +59,76 @@ impl From<serde_json::Error> for SessionError {
         SessionError::Serialization(e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_all_variants() {
+        let cases: Vec<(SessionError, &str)> = vec![
+            (
+                SessionError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "gone")),
+                "I/O error",
+            ),
+            (SessionError::Database("corrupt".into()), "database error"),
+            (
+                SessionError::Serialization("bad json".into()),
+                "serialization error",
+            ),
+            (
+                SessionError::TrackNotFound("track_1".into()),
+                "track not found",
+            ),
+            (
+                SessionError::RegionNotFound("region_42".into()),
+                "region not found",
+            ),
+            (
+                SessionError::InvalidOperation("nope".into()),
+                "invalid operation",
+            ),
+            (SessionError::Audio("clipping".into()), "audio error"),
+        ];
+
+        for (err, expected_prefix) in cases {
+            let msg = err.to_string();
+            assert!(
+                msg.contains(expected_prefix),
+                "'{msg}' should contain '{expected_prefix}'"
+            );
+        }
+    }
+
+    #[test]
+    fn source_returns_inner_for_io() {
+        let err = SessionError::Io(std::io::Error::new(std::io::ErrorKind::Other, "x"));
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[test]
+    fn source_returns_none_for_others() {
+        let err = SessionError::Database("x".into());
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    #[test]
+    fn from_io_error() {
+        let err: SessionError =
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied").into();
+        assert!(matches!(err, SessionError::Io(_)));
+    }
+
+    #[test]
+    fn from_rusqlite_error() {
+        let err: SessionError = rusqlite::Error::InvalidQuery.into();
+        assert!(matches!(err, SessionError::Database(_)));
+    }
+
+    #[test]
+    fn from_serde_json_error() {
+        let json_err = serde_json::from_str::<String>("not valid json{{{").unwrap_err();
+        let err: SessionError = json_err.into();
+        assert!(matches!(err, SessionError::Serialization(_)));
+    }
+}

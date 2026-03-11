@@ -234,4 +234,124 @@ mod tests {
 
         std::fs::remove_file(&tmp).ok();
     }
+
+    #[test]
+    fn test_export_config_default() {
+        let config = ExportConfig::default();
+        assert_eq!(config.format, ExportFormat::Wav);
+        assert_eq!(config.bit_depth, BitDepth::Float32);
+        assert_eq!(config.sample_rate, 48000);
+        assert_eq!(config.channels, 2);
+    }
+
+    #[test]
+    fn test_wav_float32_roundtrip_via_write_audio_file() {
+        let original = AudioBuffer::from_interleaved(vec![0.25, -0.75, 0.5, -0.5], 2);
+        let config = ExportConfig {
+            format: ExportFormat::Wav,
+            bit_depth: BitDepth::Float32,
+            sample_rate: 44100,
+            channels: 2,
+        };
+
+        let tmp = std::env::temp_dir().join("shruti_test_float32_export.wav");
+        write_audio_file(&tmp, &original, &config).unwrap();
+
+        let (loaded, loaded_format) = read_audio_file(&tmp).unwrap();
+        assert_eq!(loaded_format.sample_rate, 44100);
+        assert_eq!(loaded.frames(), original.frames());
+
+        for i in 0..original.sample_count() {
+            let diff = (original.as_interleaved()[i] - loaded.as_interleaved()[i]).abs();
+            assert!(diff < 1e-6, "sample {i} differs: {diff}");
+        }
+
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn test_flac_format_falls_back_to_wav() {
+        let original = AudioBuffer::from_interleaved(vec![0.1, -0.1, 0.2, -0.2], 2);
+        let config = ExportConfig {
+            format: ExportFormat::Flac,
+            bit_depth: BitDepth::Float32,
+            sample_rate: 48000,
+            channels: 2,
+        };
+
+        let tmp = std::env::temp_dir().join("shruti_test_flac_fallback.wav");
+        // Should not error (falls back to WAV)
+        write_audio_file(&tmp, &original, &config).unwrap();
+
+        let (loaded, _) = read_audio_file(&tmp).unwrap();
+        assert_eq!(loaded.frames(), original.frames());
+
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn test_16bit_clamps_out_of_range() {
+        // Signal with values outside [-1, 1]
+        let original = AudioBuffer::from_interleaved(vec![1.5, -1.5, 0.5, -0.5], 2);
+        let config = ExportConfig {
+            format: ExportFormat::Wav,
+            bit_depth: BitDepth::Int16,
+            sample_rate: 48000,
+            channels: 2,
+        };
+
+        let tmp = std::env::temp_dir().join("shruti_test_16bit_clamp.wav");
+        write_audio_file(&tmp, &original, &config).unwrap();
+
+        let (loaded, _) = read_audio_file(&tmp).unwrap();
+        // Out-of-range samples should be clamped to [-1, 1]
+        assert!(loaded.as_interleaved()[0] <= 1.0);
+        assert!(loaded.as_interleaved()[1] >= -1.0);
+
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn test_empty_buffer_write() {
+        let original = AudioBuffer::new(2, 0);
+        let config = ExportConfig {
+            format: ExportFormat::Wav,
+            bit_depth: BitDepth::Float32,
+            sample_rate: 48000,
+            channels: 2,
+        };
+
+        let tmp = std::env::temp_dir().join("shruti_test_empty_write.wav");
+        write_audio_file(&tmp, &original, &config).unwrap();
+
+        let (loaded, _) = read_audio_file(&tmp).unwrap();
+        assert_eq!(loaded.frames(), 0);
+
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn test_mono_wav_roundtrip() {
+        let original = AudioBuffer::from_interleaved(vec![0.1, 0.2, 0.3, 0.4], 1);
+        let config = ExportConfig {
+            format: ExportFormat::Wav,
+            bit_depth: BitDepth::Float32,
+            sample_rate: 48000,
+            channels: 1,
+        };
+
+        let tmp = std::env::temp_dir().join("shruti_test_mono_roundtrip.wav");
+        write_audio_file(&tmp, &original, &config).unwrap();
+
+        let (loaded, fmt) = read_audio_file(&tmp).unwrap();
+        assert_eq!(fmt.channels, 1);
+        assert_eq!(loaded.frames(), 4);
+
+        for i in 0..4 {
+            let diff = (original.as_interleaved()[i] - loaded.as_interleaved()[i]).abs();
+            assert!(diff < 1e-6);
+        }
+
+        std::fs::remove_file(&tmp).ok();
+    }
 }

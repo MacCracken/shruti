@@ -46,8 +46,9 @@ pub fn analyze_spectrum(
     let mut imag = vec![0.0f64; fft_size];
 
     // Copy samples and apply Hann window
+    let window_denom = if n <= 1 { 1.0 } else { n as f64 - 1.0 };
     for (i, real_val) in real.iter_mut().enumerate().take(n) {
-        let window = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (n as f64 - 1.0)).cos());
+        let window = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / window_denom).cos());
         *real_val = buffer.get(i as u32, channel) as f64 * window;
     }
 

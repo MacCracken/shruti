@@ -299,4 +299,136 @@ mod tests {
             "Slow attack should let more transient through: slow={peak_slow}, fast={peak_fast}"
         );
     }
+
+    #[test]
+    fn test_hard_knee_above_threshold() {
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.knee_db = 0.0;
+
+        // 6 dB above threshold => should get compressed
+        let gain = comp.compute_gain_db(-14.0);
+        // Expected: threshold + over/ratio - input = -20 + 6/4 - (-14) = -20 + 1.5 + 14 = -4.5
+        assert!(
+            (gain - (-4.5)).abs() < 0.01,
+            "Hard knee above threshold: expected -4.5, got {gain}"
+        );
+    }
+
+    #[test]
+    fn test_hard_knee_below_threshold() {
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.knee_db = 0.0;
+
+        let gain = comp.compute_gain_db(-30.0);
+        assert!(
+            gain.abs() < 0.01,
+            "Below threshold with hard knee should have 0 dB gain reduction, got {gain}"
+        );
+    }
+
+    #[test]
+    fn test_infinite_ratio_acts_as_limiter() {
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -10.0;
+        comp.ratio = f32::INFINITY;
+        comp.knee_db = 0.0;
+
+        // Above threshold, gain should bring signal back to threshold
+        let gain = comp.compute_gain_db(0.0);
+        // threshold + over/inf - input = -10 + 0 - 0 = -10
+        assert!(
+            (gain - (-10.0)).abs() < 0.01,
+            "Infinite ratio should limit to threshold, got {gain}"
+        );
+    }
+
+    #[test]
+    fn test_compressor_reset_clears_envelope() {
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.knee_db = 0.0;
+
+        // Process a loud signal to build up envelope
+        let data: Vec<f32> = vec![1.0; 480];
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        comp.process(&mut buf);
+        assert!(
+            comp.envelope > 0.0,
+            "Envelope should be nonzero after processing"
+        );
+
+        comp.reset();
+        assert_eq!(comp.envelope, 0.0, "Reset should clear envelope");
+    }
+
+    #[test]
+    fn test_compressor_silence_passthrough() {
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.knee_db = 0.0;
+        comp.makeup_db = 0.0;
+
+        let mut buf = AudioBuffer::new(1, 256);
+        comp.process(&mut buf);
+
+        // Silence should remain silence
+        for i in 0..256 {
+            assert_eq!(buf.get(i, 0), 0.0);
+        }
+    }
+
+    #[test]
+    fn test_compressor_stereo_processing() {
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.attack = 0.001;
+        comp.knee_db = 0.0;
+        comp.makeup_db = 0.0;
+
+        let frames = 2400;
+        let mut data = vec![0.0f32; frames * 2];
+        for i in 0..frames {
+            let val = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin();
+            data[i * 2] = val;
+            data[i * 2 + 1] = val * 0.5; // right channel quieter
+        }
+
+        let mut buf = AudioBuffer::from_interleaved(data, 2);
+        comp.process(&mut buf);
+
+        // Both channels should be processed (gain reduction applied based on peak across channels)
+        let peak_l: f32 = (480..frames)
+            .map(|i| buf.get(i as u32, 0).abs())
+            .fold(0.0f32, f32::max);
+        let peak_r: f32 = (480..frames)
+            .map(|i| buf.get(i as u32, 1).abs())
+            .fold(0.0f32, f32::max);
+
+        assert!(peak_l < 1.0, "Left channel should be compressed");
+        assert!(peak_r < 0.5, "Right channel should also be compressed");
+    }
+
+    #[test]
+    fn test_linear_to_db_near_zero() {
+        let db = linear_to_db(1e-11);
+        assert_eq!(db, -200.0);
+    }
+
+    #[test]
+    fn test_db_to_linear_identity() {
+        assert!((db_to_linear(0.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_db_to_linear_minus_6() {
+        let lin = db_to_linear(-6.0206);
+        assert!((lin - 0.5).abs() < 0.001);
+    }
 }

@@ -65,8 +65,11 @@ impl Filter {
     /// Recompute coefficients when cutoff or resonance have changed.
     #[inline]
     fn update_coefficients(&mut self) {
-        self.cached_g = (std::f32::consts::PI * self.cutoff / self.sample_rate).tan();
-        self.cached_k = 2.0 - 2.0 * self.resonance;
+        let clamped_res = self.resonance.clamp(0.0, 1.0);
+        self.cached_g = (std::f32::consts::PI * self.cutoff.clamp(20.0, self.sample_rate * 0.49)
+            / self.sample_rate)
+            .tan();
+        self.cached_k = 2.0 - 2.0 * clamped_res;
         self.cached_a1 = 1.0 / (1.0 + self.cached_g * (self.cached_g + self.cached_k));
         self.cached_a2 = self.cached_g * self.cached_a1;
         self.cached_a3 = self.cached_g * self.cached_a2;
@@ -209,5 +212,62 @@ mod tests {
             out.abs() < f32::EPSILON,
             "After reset, 0 input should give 0 output, got {out}"
         );
+    }
+
+    #[test]
+    fn set_sample_rate_updates_coefficients() {
+        let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.5, 48000.0);
+        let g_before = filter.cached_g;
+        filter.set_sample_rate(96000.0);
+        // Doubling sample rate with same cutoff should halve g (approximately)
+        assert!(
+            filter.cached_g < g_before,
+            "g should decrease at higher sample rate"
+        );
+    }
+
+    #[test]
+    fn dynamic_cutoff_change_triggers_recompute() {
+        let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.0, SR);
+        let g_before = filter.cached_g;
+        filter.cutoff = 5000.0;
+        // Processing should trigger recompute
+        filter.process_sample(1.0);
+        assert_ne!(filter.cached_g, g_before);
+        assert_eq!(filter.cached_cutoff, 5000.0);
+    }
+
+    #[test]
+    fn resonance_above_one_clamped() {
+        let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.5, SR);
+        filter.resonance = 1.5; // out of range
+        filter.process_sample(1.0); // triggers recompute with clamping
+        // k = 2 - 2*clamp(1.5, 0, 1) = 2 - 2 = 0
+        assert!(
+            filter.cached_k.abs() < f32::EPSILON,
+            "k should be 0 for resonance=1.0 (clamped from 1.5)"
+        );
+    }
+
+    #[test]
+    fn cutoff_clamped_to_nyquist() {
+        let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.0, SR);
+        filter.cutoff = 100_000.0; // way above nyquist
+        filter.process_sample(1.0);
+        // Should not produce NaN/infinity
+        assert!(
+            filter.cached_g.is_finite(),
+            "g should be finite even with extreme cutoff"
+        );
+    }
+
+    #[test]
+    fn output_is_finite_under_stress() {
+        let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.99, SR);
+        for i in 0..10000 {
+            let input = if i % 2 == 0 { 1.0 } else { -1.0 };
+            let out = filter.process_sample(input);
+            assert!(out.is_finite(), "Output should be finite at sample {i}");
+        }
     }
 }

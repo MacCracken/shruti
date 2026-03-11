@@ -185,7 +185,22 @@ Format: CalVer (YYYY.M.D-N).
 - **HIGH fix**: Atomics ordering — all `SharedTransport` operations upgraded from `Relaxed` to `Acquire`/`Release` pairs for correct cross-thread visibility
 - **HIGH fix**: `update_session()` — meter_levels resize now happens inside session_data lock to prevent track count / meter slot mismatch
 - **HIGH fix**: `points_in_range()` — boundary guard `end_idx.max(start_idx)` prevents panic when binary search returns inverted indices
-- 549 tests passing (103 ai, 67 dsp, 9 engine, 115 instruments, 3 plugin, 131 session, 121 ui)
+
+### Code Review & Audit (Round 7)
+- **CRITICAL fix**: `FilePlayerNode` — empty buffer with looping no longer panics (early-return silence)
+- **CRITICAL fix**: Reverb comb/allpass filters — buffer size clamped to min 1 (prevents modulo-by-zero panic at very low sample rates)
+- **CRITICAL fix**: Spectral analysis Hann window — handles n=1 without division by zero
+- **CRITICAL fix**: `MoveTrack` undo — bounds check on `from_index` before `remove()` (prevents panic on invalid command)
+- **HIGH fix**: SVF filter — resonance clamped to [0,1] and cutoff clamped to [20, 0.49×sr] in coefficient computation (prevents NaN/infinity)
+- 723 tests, 59.4% line coverage (excluding vendor code)
+
+### Test Coverage Push
+- `shruti-dsp`: 67→168 tests (+101) — error types, reverb, compressor, delay, limiter, buffer, meter, format
+- `shruti-engine`: 9→55 tests (+46) — FilePlayerNode (empty buffer, looping, reset), GainNode, NodeId, graph compilation, topological sort, record manager
+- `shruti-instruments`: 115→120 tests (+5) — filter set_sample_rate, dynamic cutoff, resonance clamping, nyquist clamping, stress test
+- `shruti-plugin`: 3→19 tests (+16) — PluginHost lifecycle, load error paths (CLAP/VST3/Native), find_vst3_binary, scanner
+- `shruti-session`: 131→137 tests (+6) — SessionError Display/source/From impls, RecordingConfig
+- Added `tarpaulin.toml` to exclude vendor code from coverage metrics
 
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)

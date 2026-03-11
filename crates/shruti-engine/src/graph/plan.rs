@@ -293,4 +293,213 @@ mod tests {
         assert!((output[0] - 0.25).abs() < 1e-6);
         assert!((output[1] - -0.25).abs() < 1e-6);
     }
+
+    #[test]
+    fn test_empty_graph_compiles() {
+        let graph = Graph::new();
+        let plan = graph.compile().unwrap();
+        assert!(plan.order.is_empty());
+    }
+
+    #[test]
+    fn test_single_node_graph() {
+        let mut graph = Graph::new();
+        let id = NodeId::next();
+        let src = AudioBuffer::from_interleaved(vec![0.5, -0.5], 2);
+        graph.add_node(id, Box::new(FilePlayerNode::new(src, false)));
+
+        let plan = graph.compile().unwrap();
+        assert_eq!(plan.order.len(), 1);
+        assert_eq!(plan.order[0], id);
+    }
+
+    #[test]
+    fn test_disconnected_nodes_all_present() {
+        let mut graph = Graph::new();
+        let a = NodeId::next();
+        let b = NodeId::next();
+        let c = NodeId::next();
+        graph.add_node(a, Box::new(GainNode::new(1.0)));
+        graph.add_node(b, Box::new(GainNode::new(1.0)));
+        graph.add_node(c, Box::new(GainNode::new(1.0)));
+        // No connections
+
+        let plan = graph.compile().unwrap();
+        assert_eq!(plan.order.len(), 3);
+        // All nodes present
+        assert!(plan.order.contains(&a));
+        assert!(plan.order.contains(&b));
+        assert!(plan.order.contains(&c));
+    }
+
+    #[test]
+    fn test_self_loop_detected() {
+        let mut nodes: HashMap<NodeId, Box<dyn AudioNode>> = HashMap::new();
+        let a = NodeId::next();
+        nodes.insert(a, Box::new(GainNode::new(1.0)));
+
+        let connections = vec![Connection { from: a, to: a }];
+        let result = topological_sort(&nodes, &connections);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "cycle detected in audio graph");
+    }
+
+    #[test]
+    fn test_three_node_chain_order() {
+        let mut nodes: HashMap<NodeId, Box<dyn AudioNode>> = HashMap::new();
+        let a = NodeId::next();
+        let b = NodeId::next();
+        let c = NodeId::next();
+        nodes.insert(a, Box::new(GainNode::new(1.0)));
+        nodes.insert(b, Box::new(GainNode::new(1.0)));
+        nodes.insert(c, Box::new(GainNode::new(1.0)));
+
+        let connections = vec![Connection { from: a, to: b }, Connection { from: b, to: c }];
+        let order = topological_sort(&nodes, &connections).unwrap();
+        // a must come before b, b before c
+        let pos_a = order.iter().position(|&x| x == a).unwrap();
+        let pos_b = order.iter().position(|&x| x == b).unwrap();
+        let pos_c = order.iter().position(|&x| x == c).unwrap();
+        assert!(pos_a < pos_b);
+        assert!(pos_b < pos_c);
+    }
+
+    #[test]
+    fn test_diamond_graph() {
+        // A -> B, A -> C, B -> D, C -> D
+        let mut nodes: HashMap<NodeId, Box<dyn AudioNode>> = HashMap::new();
+        let a = NodeId::next();
+        let b = NodeId::next();
+        let c = NodeId::next();
+        let d = NodeId::next();
+        nodes.insert(a, Box::new(GainNode::new(1.0)));
+        nodes.insert(b, Box::new(GainNode::new(1.0)));
+        nodes.insert(c, Box::new(GainNode::new(1.0)));
+        nodes.insert(d, Box::new(GainNode::new(1.0)));
+
+        let connections = vec![
+            Connection { from: a, to: b },
+            Connection { from: a, to: c },
+            Connection { from: b, to: d },
+            Connection { from: c, to: d },
+        ];
+        let order = topological_sort(&nodes, &connections).unwrap();
+        let pos = |id: NodeId| order.iter().position(|&x| x == id).unwrap();
+        assert!(pos(a) < pos(b));
+        assert!(pos(a) < pos(c));
+        assert!(pos(b) < pos(d));
+        assert!(pos(c) < pos(d));
+    }
+
+    #[test]
+    fn test_processor_with_none_plan() {
+        let mut processor = GraphProcessor::new();
+        let mut output = vec![1.0f32; 8];
+        processor.process(&mut output, 2, 4);
+        // No plan means silence
+        for &s in &output {
+            assert_eq!(s, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_processor_is_finished_no_plan() {
+        let processor = GraphProcessor::new();
+        // No plan => is_finished returns true
+        assert!(processor.is_finished());
+    }
+
+    #[test]
+    fn test_processor_is_finished_with_active_player() {
+        let src = AudioBuffer::from_interleaved(vec![1.0, 1.0, 1.0, 1.0], 2);
+        let player_id = NodeId::next();
+
+        let mut graph = Graph::new();
+        graph.add_node(player_id, Box::new(FilePlayerNode::new(src, false)));
+
+        let plan = graph.compile().unwrap();
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        handle.swap(plan);
+
+        // Player has 2 frames, not yet processed
+        assert!(!processor.is_finished());
+
+        // Process enough to finish
+        let mut output = vec![0.0f32; 4];
+        processor.process(&mut output, 2, 2);
+        assert!(processor.is_finished());
+    }
+
+    #[test]
+    fn test_plan_swap_replaces_plan() {
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+
+        // First plan: gain=0.5
+        let src1 = AudioBuffer::from_interleaved(vec![1.0, 1.0], 1);
+        let p1 = NodeId::next();
+        let g1 = NodeId::next();
+        let mut graph1 = Graph::new();
+        graph1.add_node(p1, Box::new(FilePlayerNode::new(src1, true)));
+        graph1.add_node(g1, Box::new(GainNode::new(0.5)));
+        graph1.connect(p1, g1);
+        handle.swap(graph1.compile().unwrap());
+
+        let mut output = vec![0.0f32; 1];
+        processor.process(&mut output, 1, 1);
+        assert!((output[0] - 0.5).abs() < 1e-6);
+
+        // Second plan: gain=0.25
+        let src2 = AudioBuffer::from_interleaved(vec![1.0, 1.0], 1);
+        let p2 = NodeId::next();
+        let g2 = NodeId::next();
+        let mut graph2 = Graph::new();
+        graph2.add_node(p2, Box::new(FilePlayerNode::new(src2, true)));
+        graph2.add_node(g2, Box::new(GainNode::new(0.25)));
+        graph2.connect(p2, g2);
+        handle.swap(graph2.compile().unwrap());
+
+        let mut output2 = vec![0.0f32; 1];
+        processor.process(&mut output2, 1, 1);
+        assert!((output2[0] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_processor_empty_plan_fills_silence() {
+        let graph = Graph::new();
+        let plan = graph.compile().unwrap();
+
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        handle.swap(plan);
+
+        let mut output = vec![1.0f32; 4];
+        processor.process(&mut output, 2, 2);
+        for &s in &output {
+            assert_eq!(s, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_graph_default() {
+        let graph = Graph::default();
+        let plan = graph.compile().unwrap();
+        assert!(plan.order.is_empty());
+    }
+
+    #[test]
+    fn test_processor_default() {
+        let processor = GraphProcessor::default();
+        assert!(processor.is_finished());
+    }
+
+    #[test]
+    fn test_connection_debug() {
+        let a = NodeId::next();
+        let b = NodeId::next();
+        let conn = Connection { from: a, to: b };
+        let cloned = conn.clone();
+        assert_eq!(format!("{:?}", conn), format!("{:?}", cloned));
+    }
 }

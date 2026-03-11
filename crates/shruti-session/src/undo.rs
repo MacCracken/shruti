@@ -233,9 +233,11 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
             from_index,
             to_index,
         } => {
-            let track = session.tracks.remove(*from_index);
-            let actual_to = (*to_index).min(session.tracks.len());
-            session.tracks.insert(actual_to, track);
+            if *from_index < session.tracks.len() {
+                let track = session.tracks.remove(*from_index);
+                let actual_to = (*to_index).min(session.tracks.len());
+                session.tracks.insert(actual_to, track);
+            }
         }
         EditCommand::SetInstrumentParam {
             track_id,
@@ -416,9 +418,11 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
         } => {
             // Reverse: move from to_index back to from_index
             let actual_to = (*to_index).min(session.tracks.len().saturating_sub(1));
-            let track = session.tracks.remove(actual_to);
-            let actual_from = (*from_index).min(session.tracks.len());
-            session.tracks.insert(actual_from, track);
+            if actual_to < session.tracks.len() {
+                let track = session.tracks.remove(actual_to);
+                let actual_from = (*from_index).min(session.tracks.len());
+                session.tracks.insert(actual_from, track);
+            }
         }
         EditCommand::SetInstrumentParam {
             track_id,
