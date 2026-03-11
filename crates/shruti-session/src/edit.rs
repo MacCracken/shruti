@@ -98,6 +98,13 @@ pub enum EditCommand {
     ToggleTrackSolo { track_id: TrackId },
     /// Move a track from one index to another.
     MoveTrack { from_index: usize, to_index: usize },
+    /// Set an instrument parameter on a track by index.
+    SetInstrumentParam {
+        track_id: TrackId,
+        param_index: usize,
+        old_value: f32,
+        new_value: f32,
+    },
     /// Compound command (multiple edits as one undoable action).
     Compound { commands: Vec<EditCommand> },
 }

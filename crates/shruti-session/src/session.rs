@@ -89,6 +89,32 @@ impl Session {
         id
     }
 
+    /// Add a new instrument track, returning its ID.
+    pub fn add_instrument_track(
+        &mut self,
+        name: impl Into<String>,
+        instrument_type: Option<String>,
+    ) -> TrackId {
+        let track = Track::new_instrument(name, instrument_type);
+        let id = track.id;
+        let master_idx = self
+            .tracks
+            .iter()
+            .position(|t| t.kind == TrackKind::Master)
+            .unwrap_or(self.tracks.len());
+        self.tracks.insert(master_idx, track);
+        self.dirty = true;
+        id
+    }
+
+    /// Get instrument tracks.
+    pub fn instrument_tracks(&self) -> Vec<&Track> {
+        self.tracks
+            .iter()
+            .filter(|t| matches!(t.kind, TrackKind::Instrument { .. }))
+            .collect()
+    }
+
     /// Remove a track by ID. Cannot remove the master bus.
     pub fn remove_track(&mut self, id: TrackId) -> Option<Track> {
         let pos = self.tracks.iter().position(|t| t.id == id)?;
@@ -142,8 +168,7 @@ impl Session {
                 && self
                     .tracks
                     .last()
-                    .map(|t| t.kind)
-                    .is_some_and(|k| k == TrackKind::Master)
+                    .is_some_and(|t| t.kind == TrackKind::Master)
         {
             // Prevent moving anything past master
             let master_idx = self.tracks.iter().position(|t| t.kind == TrackKind::Master);
@@ -580,6 +605,61 @@ mod tests {
         let mut session = Session::new("Test", 48000, 512);
         let bogus_id = TrackId::new();
         assert!(!session.remove_send(bogus_id, 0));
+    }
+
+    #[test]
+    fn test_add_instrument_track() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_instrument_track("Synth", Some("SubtractiveSynth".to_string()));
+        assert_eq!(session.track_count(), 2); // instrument + master
+        let track = session.track(id).unwrap();
+        assert_eq!(track.name, "Synth");
+        assert_eq!(
+            track.kind,
+            TrackKind::Instrument {
+                instrument_type: Some("SubtractiveSynth".to_string())
+            }
+        );
+        // Master is still last
+        assert_eq!(session.tracks.last().unwrap().kind, TrackKind::Master);
+    }
+
+    #[test]
+    fn test_instrument_tracks_accessor() {
+        let mut session = Session::new("Test", 48000, 256);
+        session.add_instrument_track("Synth", Some("SubtractiveSynth".to_string()));
+        session.add_instrument_track("Drums", Some("DrumMachine".to_string()));
+        session.add_audio_track("Guitar");
+
+        let instruments = session.instrument_tracks();
+        assert_eq!(instruments.len(), 2);
+        assert!(matches!(
+            instruments[0].kind,
+            TrackKind::Instrument { .. }
+        ));
+    }
+
+    #[test]
+    fn test_instrument_track_with_no_instrument() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_instrument_track("Empty", None);
+        let track = session.track(id).unwrap();
+        assert_eq!(
+            track.kind,
+            TrackKind::Instrument {
+                instrument_type: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_remove_instrument_track() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_instrument_track("Synth", Some("SubtractiveSynth".to_string()));
+        assert_eq!(session.track_count(), 2);
+        let removed = session.remove_track(id);
+        assert!(removed.is_some());
+        assert_eq!(session.track_count(), 1); // only master
     }
 
     #[test]

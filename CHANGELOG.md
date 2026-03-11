@@ -121,8 +121,33 @@ Format: CalVer (YYYY.M.D-N).
 - `Voice`: state machine (Idle/Active/Releasing), MIDI note→frequency conversion, phase accumulator, age tracking
 - `Oscillator`: PolyBLEP anti-aliased waveforms (Sine, Saw, Square, Triangle, Noise), detune in cents
 - `Envelope`: ADSR generator with per-stage sample counting, trigger/release, smooth release from any level
-- `SubtractiveSynth`: 16-voice polyphonic synth implementing `InstrumentNode` — 7 parameters (waveform, ADSR, volume, detune)
-- 31 new tests: voice management, oscillator waveforms, envelope stages, synth audio output
+- `SubtractiveSynth`: 16-voice polyphonic synth — 23 parameters (waveform, amp ADSR, volume, detune, filter cutoff/resonance/mode, filter envelope ADSR + depth, dual LFO with rate/depth/target/shape)
+- `Filter`: state-variable filter (Cytomic SVF) with LowPass, HighPass, BandPass, Notch modes
+- `Lfo`: 6 shapes (Sine, Triangle, Square, SawUp, SawDown, SampleAndHold), configurable rate/depth
+- Dual LFO system: LFO1 + LFO2 with independent targets (None, Cutoff, Pitch, Volume)
+- Filter envelope: separate ADSR for filter cutoff modulation with bipolar depth (-1..+1)
+
+### Phase 8A: MIDI Routing & Presets
+- `MidiRoute`: channel filter, note range, velocity curve (Linear/Soft/Hard/Fixed)
+- `InstrumentPreset`: JSON-serializable parameter snapshots with save/load, `from_instrument()` / `apply_to()`
+- `TrackKind::Instrument`: new track kind with instrument_type field, `Session::add_instrument_track()`
+- `EditCommand::SetInstrumentParam`: per-instrument parameter undo/redo
+
+### Phase 8B: Synthesizer Expansion
+- Multi-mode SVF filter per voice integrated into SubtractiveSynth
+- LFO→filter cutoff modulation (octave-scaled), LFO→pitch (semitone-scaled), LFO→volume (tremolo)
+- Filter envelope→cutoff modulation with configurable depth and independent ADSR
+
+### Phase 8C: Drum Machine
+- `DrumMachine`: 16-pad sample player implementing `InstrumentNode`, GM drum map (note 36+)
+- `DrumPad`: one-shot/looped playback, fractional pitch shifting, decay envelope, equal-power pan law, velocity sensitivity
+- `StepSequencer`: 16/32/64-step grid per pad, swing, per-step probability, accent, BPM-synced timing
+
+### Phase 8D: Sampler
+- `Sampler`: multi-sample instrument with key zones, velocity zones, 16-voice polyphony
+- `SampleZone`: root key, key/velocity range mapping, loop modes (NoLoop, Forward, PingPong)
+- Linear interpolation playback with pitch ratio calculation, voice stealing (oldest)
+- 115 instrument tests total
 
 ### Phase 7A: AGNOS Agent API
 - `AgentApi` — structured JSON API for AI agents to control sessions

@@ -237,6 +237,18 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
             let actual_to = (*to_index).min(session.tracks.len());
             session.tracks.insert(actual_to, track);
         }
+        EditCommand::SetInstrumentParam {
+            track_id,
+            param_index,
+            new_value,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(val) = track.instrument_params.get_mut(*param_index)
+            {
+                *val = *new_value;
+            }
+        }
         EditCommand::Compound { commands } => {
             for sub in commands.iter_mut() {
                 apply_command(sub, session);
@@ -407,6 +419,18 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
             let track = session.tracks.remove(actual_to);
             let actual_from = (*from_index).min(session.tracks.len());
             session.tracks.insert(actual_from, track);
+        }
+        EditCommand::SetInstrumentParam {
+            track_id,
+            param_index,
+            old_value,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(val) = track.instrument_params.get_mut(*param_index)
+            {
+                *val = *old_value;
+            }
         }
         EditCommand::Compound { commands } => {
             for sub in commands.iter().rev() {
@@ -1286,6 +1310,59 @@ mod tests {
         assert_eq!(session.tracks[2].name, "C");
         assert_eq!(session.tracks[3].name, "D");
         assert_eq!(session.tracks[4].name, "Master");
+    }
+
+    #[test]
+    fn test_set_instrument_param_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let track_id = session.add_instrument_track("Synth", Some("SubtractiveSynth".to_string()));
+        // Set up some instrument params on the track
+        session.track_mut(track_id).unwrap().instrument_params = vec![0.5, 0.8, 1.0];
+
+        let mut um = UndoManager::new(100);
+
+        um.execute(
+            EditCommand::SetInstrumentParam {
+                track_id,
+                param_index: 1,
+                old_value: 0.8,
+                new_value: 0.3,
+            },
+            &mut session,
+        );
+
+        assert!((session.track(track_id).unwrap().instrument_params[1] - 0.3).abs() < f32::EPSILON);
+
+        // Undo
+        um.undo(&mut session);
+        assert!((session.track(track_id).unwrap().instrument_params[1] - 0.8).abs() < f32::EPSILON);
+
+        // Redo
+        um.redo(&mut session);
+        assert!((session.track(track_id).unwrap().instrument_params[1] - 0.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_set_instrument_param_out_of_bounds_is_noop() {
+        let mut session = Session::new("Test", 48000, 256);
+        let track_id = session.add_instrument_track("Synth", Some("SubtractiveSynth".to_string()));
+        session.track_mut(track_id).unwrap().instrument_params = vec![0.5];
+
+        let mut um = UndoManager::new(100);
+
+        // param_index 5 is out of bounds — should be a no-op, not panic
+        um.execute(
+            EditCommand::SetInstrumentParam {
+                track_id,
+                param_index: 5,
+                old_value: 0.0,
+                new_value: 1.0,
+            },
+            &mut session,
+        );
+
+        // Original params unchanged
+        assert!((session.track(track_id).unwrap().instrument_params[0] - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -2975,6 +2975,7 @@ dependencies = [
  "serde_json",
  "shruti-dsp",
  "shruti-session",
+ "uuid",
 ]
 
 [[package]]

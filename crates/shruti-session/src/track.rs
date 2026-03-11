@@ -22,7 +22,7 @@ impl Default for TrackId {
 }
 
 /// The kind of track.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrackKind {
     /// Audio track with regions on the timeline.
     Audio,
@@ -32,6 +32,13 @@ pub enum TrackKind {
     Midi,
     /// Master output bus.
     Master,
+    /// Instrument track — hosts a virtual instrument identified by type name.
+    Instrument {
+        /// The instrument type loaded on this track (e.g. "SubtractiveSynth").
+        /// `None` means no instrument is loaded yet.
+        #[serde(default)]
+        instrument_type: Option<String>,
+    },
 }
 
 /// Pre/post fader send position.
@@ -80,6 +87,9 @@ pub struct Track {
     pub automation: Vec<AutomationLane>,
     /// MIDI clips on this track (only used for Midi tracks).
     pub midi_clips: Vec<MidiClip>,
+    /// Instrument parameter values for Instrument tracks (indexed by param position).
+    #[serde(default)]
+    pub instrument_params: Vec<f32>,
 }
 
 impl Track {
@@ -98,6 +108,7 @@ impl Track {
             sends: Vec::new(),
             automation: Vec::new(),
             midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
         }
     }
 
@@ -116,6 +127,7 @@ impl Track {
             sends: Vec::new(),
             automation: Vec::new(),
             midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
         }
     }
 
@@ -134,6 +146,26 @@ impl Track {
             sends: Vec::new(),
             automation: Vec::new(),
             midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
+        }
+    }
+
+    pub fn new_instrument(name: impl Into<String>, instrument_type: Option<String>) -> Self {
+        Self {
+            id: TrackId::new(),
+            name: name.into(),
+            kind: TrackKind::Instrument { instrument_type },
+            regions: Vec::new(),
+            gain: 1.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            armed: false,
+            channels: 2,
+            sends: Vec::new(),
+            automation: Vec::new(),
+            midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
         }
     }
 
@@ -152,6 +184,7 @@ impl Track {
             sends: Vec::new(),
             automation: Vec::new(),
             midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
         }
     }
 
@@ -214,6 +247,56 @@ mod tests {
         let removed = track.remove_region(r1_id).unwrap();
         assert_eq!(removed.id, r1_id);
         assert_eq!(track.regions.len(), 1);
+    }
+
+    #[test]
+    fn test_instrument_track_creation() {
+        let track = Track::new_instrument("Synth Lead", Some("SubtractiveSynth".to_string()));
+        assert_eq!(
+            track.kind,
+            TrackKind::Instrument {
+                instrument_type: Some("SubtractiveSynth".to_string())
+            }
+        );
+        assert_eq!(track.name, "Synth Lead");
+        assert!(track.midi_clips.is_empty());
+        assert!(track.regions.is_empty());
+    }
+
+    #[test]
+    fn test_instrument_track_no_instrument() {
+        let track = Track::new_instrument("Empty Inst", None);
+        assert_eq!(
+            track.kind,
+            TrackKind::Instrument {
+                instrument_type: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_list_tracks_by_kind() {
+        let tracks = [
+            Track::new_audio("Audio 1"),
+            Track::new_instrument("Synth", Some("SubtractiveSynth".to_string())),
+            Track::new_midi("MIDI 1"),
+            Track::new_instrument("Drums", Some("DrumMachine".to_string())),
+            Track::new_master(),
+        ];
+        let instrument_count = tracks
+            .iter()
+            .filter(|t| matches!(t.kind, TrackKind::Instrument { .. }))
+            .count();
+        assert_eq!(instrument_count, 2);
+    }
+
+    #[test]
+    fn test_instrument_track_serde_roundtrip() {
+        let track = Track::new_instrument("Synth", Some("SubtractiveSynth".to_string()));
+        let json = serde_json::to_string(&track).unwrap();
+        let restored: Track = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.kind, track.kind);
+        assert_eq!(restored.name, "Synth");
     }
 
     #[test]
