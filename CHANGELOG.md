@@ -43,6 +43,19 @@ Format: CalVer (YYYY.M.D-N).
 - View switcher: Arrangement/Mixer toggle with quick-add track button
 - Scroll zoom: Ctrl+scroll for horizontal zoom, shift/trackpad for horizontal scroll
 
+### Phase 6: Export & Polish
+- Multi-format export: WAV with Int16, Int24, Float32 bit depth via `ExportConfig`
+- `write_audio_file()` dispatcher with configurable `ExportFormat` and `BitDepth`
+- `AgentApi::export_audio()` — export with format and bit depth parameters
+- MIDI track support: `TrackKind::Midi`, `MidiClip` with `NoteEvent` and `ControlChange`
+- `MidiClip` queries: `notes_at()`, `note_ons_at()`, `note_offs_at()` for per-frame lookup
+- `Session::add_midi_track()`, `Session::midi_tracks()`
+- Drag-and-drop file import: audio files dropped onto arrangement or browser are auto-imported
+- Visual drop zone overlay indicator when hovering files
+- Preferences system: `Preferences` struct with audio device, sample rate, buffer size, project dir, recent sessions, UI scale, theme path, auto-save interval
+- JSON persistence with XDG-aware default paths, `load_or_default()`
+- Error types: `AudioError` (I/O, format, decoding, export, buffer mismatch) and `SessionError` (I/O, database, serialization, track/region not found)
+
 ### Phase 4: Plugin Hosting
 - `PluginInstance` trait — unified API for all plugin formats
 - CLAP host — load .clap plugins, verify `clap_entry` symbol

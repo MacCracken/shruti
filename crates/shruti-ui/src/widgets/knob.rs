@@ -146,3 +146,207 @@ impl Widget for Knob<'_> {
         response.on_hover_text(display_val)
     }
 }
+
+#[cfg(test)]
+fn format_knob_display(value: f32, min: f32, max: f32) -> String {
+    if min == -1.0 && max == 1.0 {
+        if value.abs() < 0.01 {
+            "C".to_string()
+        } else if value < 0.0 {
+            format!("L{:.0}", (-value * 100.0))
+        } else {
+            format!("R{:.0}", (value * 100.0))
+        }
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeColors;
+
+    fn colors() -> ThemeColors {
+        ThemeColors::default()
+    }
+
+    // --- normalized tests ---
+
+    #[test]
+    fn normalized_at_min_is_zero() {
+        let mut val = -1.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+        assert!((knob.normalized() - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn normalized_at_max_is_one() {
+        let mut val = 1.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+        assert!((knob.normalized() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn normalized_at_center() {
+        let mut val = 0.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+        assert!((knob.normalized() - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn normalized_custom_range() {
+        let mut val = 50.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, 0.0, 100.0, &colors);
+        assert!((knob.normalized() - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn normalized_quarter() {
+        let mut val = 25.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, 0.0, 100.0, &colors);
+        assert!((knob.normalized() - 0.25).abs() < 0.001);
+    }
+
+    // --- set_from_normalized tests ---
+
+    #[test]
+    fn set_from_normalized_zero_gives_min() {
+        let mut val = 0.5;
+        let colors = colors();
+        let mut knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+        knob.set_from_normalized(0.0);
+        assert!((*knob.value - (-1.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_from_normalized_one_gives_max() {
+        let mut val = 0.0;
+        let colors = colors();
+        let mut knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+        knob.set_from_normalized(1.0);
+        assert!((*knob.value - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_from_normalized_half_gives_center() {
+        let mut val = -1.0;
+        let colors = colors();
+        let mut knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+        knob.set_from_normalized(0.5);
+        assert!((*knob.value - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_from_normalized_clamps_above_one() {
+        let mut val = 0.0;
+        let colors = colors();
+        let mut knob = Knob::new(&mut val, 0.0, 100.0, &colors);
+        knob.set_from_normalized(1.5);
+        assert!((*knob.value - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_from_normalized_clamps_below_zero() {
+        let mut val = 50.0;
+        let colors = colors();
+        let mut knob = Knob::new(&mut val, 0.0, 100.0, &colors);
+        knob.set_from_normalized(-0.5);
+        assert!((*knob.value - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_from_normalized_roundtrip() {
+        let mut val = 0.0;
+        let colors = colors();
+        for &n in &[0.0, 0.25, 0.5, 0.75, 1.0] {
+            let mut knob = Knob::new(&mut val, -1.0, 1.0, &colors);
+            knob.set_from_normalized(n);
+            let result = knob.normalized();
+            assert!(
+                (result - n).abs() < 0.001,
+                "roundtrip failed for n={n}: got {result}"
+            );
+        }
+    }
+
+    // --- pan display formatting ---
+
+    #[test]
+    fn pan_display_center() {
+        assert_eq!(format_knob_display(0.0, -1.0, 1.0), "C");
+    }
+
+    #[test]
+    fn pan_display_near_center() {
+        assert_eq!(format_knob_display(0.005, -1.0, 1.0), "C");
+        assert_eq!(format_knob_display(-0.005, -1.0, 1.0), "C");
+    }
+
+    #[test]
+    fn pan_display_full_left() {
+        assert_eq!(format_knob_display(-1.0, -1.0, 1.0), "L100");
+    }
+
+    #[test]
+    fn pan_display_full_right() {
+        assert_eq!(format_knob_display(1.0, -1.0, 1.0), "R100");
+    }
+
+    #[test]
+    fn pan_display_half_left() {
+        assert_eq!(format_knob_display(-0.5, -1.0, 1.0), "L50");
+    }
+
+    #[test]
+    fn pan_display_half_right() {
+        assert_eq!(format_knob_display(0.5, -1.0, 1.0), "R50");
+    }
+
+    #[test]
+    fn non_pan_display_format() {
+        assert_eq!(format_knob_display(0.75, 0.0, 1.0), "0.75");
+        assert_eq!(format_knob_display(50.0, 0.0, 100.0), "50.00");
+    }
+
+    // --- builder tests ---
+
+    #[test]
+    fn pan_constructor() {
+        let mut val = 0.0;
+        let colors = colors();
+        let knob = Knob::pan(&mut val, &colors);
+        assert_eq!(knob.min, -1.0);
+        assert_eq!(knob.max, 1.0);
+        assert_eq!(knob.label, "Pan");
+    }
+
+    #[test]
+    fn with_label() {
+        let mut val = 0.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, 0.0, 1.0, &colors).with_label("Gain");
+        assert_eq!(knob.label, "Gain");
+    }
+
+    #[test]
+    fn default_radius() {
+        let mut val = 0.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, 0.0, 1.0, &colors);
+        assert_eq!(knob.radius, 14.0);
+    }
+
+    #[test]
+    fn default_label_is_empty() {
+        let mut val = 0.0;
+        let colors = colors();
+        let knob = Knob::new(&mut val, 0.0, 1.0, &colors);
+        assert_eq!(knob.label, "");
+    }
+}

@@ -201,3 +201,149 @@ impl Default for ThemeColors {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_colors_have_expected_values() {
+        let colors = ThemeColors::default();
+        assert_eq!(colors.bg_primary, [24, 24, 28, 255]);
+        assert_eq!(colors.bg_secondary, [32, 32, 38, 255]);
+        assert_eq!(colors.bg_tertiary, [38, 38, 44, 255]);
+        assert_eq!(colors.surface, [48, 48, 56, 255]);
+        assert_eq!(colors.surface_hover, [58, 58, 68, 255]);
+        assert_eq!(colors.text_primary, [220, 220, 225, 255]);
+        assert_eq!(colors.text_secondary, [140, 140, 150, 255]);
+        assert_eq!(colors.accent, [60, 130, 240, 255]);
+        assert_eq!(colors.accent_hover, [80, 150, 255, 255]);
+        assert_eq!(colors.transport_active, [60, 180, 80, 255]);
+        assert_eq!(colors.record_red, [220, 50, 50, 255]);
+        assert_eq!(colors.solo_yellow, [220, 190, 40, 255]);
+        assert_eq!(colors.mute_orange, [200, 120, 40, 255]);
+        assert_eq!(colors.meter_green, [40, 200, 80, 255]);
+        assert_eq!(colors.meter_yellow, [220, 200, 40, 255]);
+        assert_eq!(colors.meter_red, [220, 50, 50, 255]);
+        assert_eq!(colors.waveform, [80, 160, 220, 180]);
+        assert_eq!(colors.waveform_outline, [100, 180, 240, 220]);
+        assert_eq!(colors.playhead, [255, 255, 255, 200]);
+        assert_eq!(colors.grid, [60, 60, 68, 255]);
+        assert_eq!(colors.region_bg, [55, 80, 120, 200]);
+        assert_eq!(colors.region_selected, [70, 110, 170, 220]);
+        assert_eq!(colors.automation_curve, [180, 100, 220, 255]);
+        assert_eq!(colors.automation_point, [220, 130, 255, 255]);
+        assert_eq!(colors.separator, [50, 50, 58, 255]);
+        assert_eq!(colors.scrollbar, [70, 70, 80, 150]);
+        assert_eq!(colors.track_header, [36, 36, 42, 255]);
+    }
+
+    #[test]
+    fn color_accessor_returns_correct_color32() {
+        let colors = ThemeColors::default();
+
+        // Test a representative subset of accessors
+        assert_eq!(
+            colors.bg_primary(),
+            Color32::from_rgba_premultiplied(24, 24, 28, 255)
+        );
+        assert_eq!(
+            colors.text_primary(),
+            Color32::from_rgba_premultiplied(220, 220, 225, 255)
+        );
+        assert_eq!(
+            colors.accent(),
+            Color32::from_rgba_premultiplied(60, 130, 240, 255)
+        );
+        assert_eq!(
+            colors.waveform(),
+            Color32::from_rgba_premultiplied(80, 160, 220, 180)
+        );
+        assert_eq!(
+            colors.playhead(),
+            Color32::from_rgba_premultiplied(255, 255, 255, 200)
+        );
+        assert_eq!(
+            colors.meter_green(),
+            Color32::from_rgba_premultiplied(40, 200, 80, 255)
+        );
+        assert_eq!(
+            colors.record_red(),
+            Color32::from_rgba_premultiplied(220, 50, 50, 255)
+        );
+        assert_eq!(
+            colors.separator(),
+            Color32::from_rgba_premultiplied(50, 50, 58, 255)
+        );
+    }
+
+    #[test]
+    fn c_helper_converts_rgba_to_color32() {
+        let c = ThemeColors::c([100, 200, 50, 128]);
+        assert_eq!(c, Color32::from_rgba_premultiplied(100, 200, 50, 128));
+    }
+
+    #[test]
+    fn all_accessors_match_their_fields() {
+        let colors = ThemeColors::default();
+
+        assert_eq!(colors.bg_primary(), ThemeColors::c(colors.bg_primary));
+        assert_eq!(colors.bg_secondary(), ThemeColors::c(colors.bg_secondary));
+        assert_eq!(colors.bg_tertiary(), ThemeColors::c(colors.bg_tertiary));
+        assert_eq!(colors.surface(), ThemeColors::c(colors.surface));
+        assert_eq!(colors.surface_hover(), ThemeColors::c(colors.surface_hover));
+        assert_eq!(colors.text_primary(), ThemeColors::c(colors.text_primary));
+        assert_eq!(
+            colors.text_secondary(),
+            ThemeColors::c(colors.text_secondary)
+        );
+        assert_eq!(colors.accent(), ThemeColors::c(colors.accent));
+        assert_eq!(colors.accent_hover(), ThemeColors::c(colors.accent_hover));
+        assert_eq!(
+            colors.transport_active(),
+            ThemeColors::c(colors.transport_active)
+        );
+        assert_eq!(colors.record_red(), ThemeColors::c(colors.record_red));
+        assert_eq!(colors.solo_yellow(), ThemeColors::c(colors.solo_yellow));
+        assert_eq!(colors.mute_orange(), ThemeColors::c(colors.mute_orange));
+        assert_eq!(colors.meter_green(), ThemeColors::c(colors.meter_green));
+        assert_eq!(colors.meter_yellow(), ThemeColors::c(colors.meter_yellow));
+        assert_eq!(colors.meter_red(), ThemeColors::c(colors.meter_red));
+        assert_eq!(colors.waveform(), ThemeColors::c(colors.waveform));
+        assert_eq!(
+            colors.waveform_outline(),
+            ThemeColors::c(colors.waveform_outline)
+        );
+        assert_eq!(colors.playhead(), ThemeColors::c(colors.playhead));
+        assert_eq!(colors.grid(), ThemeColors::c(colors.grid));
+        assert_eq!(colors.region_bg(), ThemeColors::c(colors.region_bg));
+        assert_eq!(
+            colors.region_selected(),
+            ThemeColors::c(colors.region_selected)
+        );
+        assert_eq!(
+            colors.automation_curve(),
+            ThemeColors::c(colors.automation_curve)
+        );
+        assert_eq!(
+            colors.automation_point(),
+            ThemeColors::c(colors.automation_point)
+        );
+        assert_eq!(colors.separator(), ThemeColors::c(colors.separator));
+        assert_eq!(colors.scrollbar(), ThemeColors::c(colors.scrollbar));
+        assert_eq!(colors.track_header(), ThemeColors::c(colors.track_header));
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        let original = ThemeColors::default();
+        let json = serde_json::to_string(&original).expect("serialize");
+        let deserialized: ThemeColors = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.bg_primary, original.bg_primary);
+        assert_eq!(deserialized.accent, original.accent);
+        assert_eq!(deserialized.waveform, original.waveform);
+        assert_eq!(deserialized.scrollbar, original.scrollbar);
+        assert_eq!(deserialized.track_header, original.track_header);
+    }
+}

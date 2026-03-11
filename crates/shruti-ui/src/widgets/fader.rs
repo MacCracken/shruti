@@ -128,3 +128,148 @@ impl Widget for Fader<'_> {
         response.on_hover_text(format!("{:.1} dB", Self::linear_to_db(*self.value)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeColors;
+
+    fn make_fader(value: &mut f32) -> Fader<'_> {
+        let colors = Box::leak(Box::new(ThemeColors::default()));
+        Fader::new(value, colors)
+    }
+
+    // --- linear_to_db tests ---
+
+    #[test]
+    fn linear_to_db_unity_is_zero() {
+        let db = Fader::linear_to_db(1.0);
+        assert!(
+            (db - 0.0).abs() < 0.001,
+            "Unity gain should be 0 dB, got {db}"
+        );
+    }
+
+    #[test]
+    fn linear_to_db_zero_is_minus_60() {
+        let db = Fader::linear_to_db(0.0);
+        assert_eq!(db, -60.0);
+    }
+
+    #[test]
+    fn linear_to_db_very_small_is_minus_60() {
+        let db = Fader::linear_to_db(1e-11);
+        assert_eq!(db, -60.0);
+    }
+
+    #[test]
+    fn linear_to_db_half_is_about_minus_6() {
+        let db = Fader::linear_to_db(0.5);
+        assert!(
+            (db - (-6.0206)).abs() < 0.01,
+            "Half amplitude should be ~-6 dB, got {db}"
+        );
+    }
+
+    #[test]
+    fn linear_to_db_double_is_about_plus_6() {
+        let db = Fader::linear_to_db(2.0);
+        assert!(
+            (db - 6.0206).abs() < 0.01,
+            "Double amplitude should be ~+6 dB, got {db}"
+        );
+    }
+
+    #[test]
+    fn linear_to_db_tenth_is_minus_20() {
+        let db = Fader::linear_to_db(0.1);
+        assert!((db - (-20.0)).abs() < 0.01);
+    }
+
+    // --- db_to_linear tests ---
+
+    #[test]
+    fn db_to_linear_zero_is_unity() {
+        let lin = Fader::db_to_linear(0.0);
+        assert!((lin - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_linear_minus_20_is_tenth() {
+        let lin = Fader::db_to_linear(-20.0);
+        assert!((lin - 0.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_linear_plus_6_is_about_double() {
+        let lin = Fader::db_to_linear(6.0);
+        assert!((lin - 1.9953).abs() < 0.01);
+    }
+
+    #[test]
+    fn db_to_linear_roundtrip() {
+        for &lin in &[0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 4.0] {
+            let db = Fader::linear_to_db(lin);
+            let back = Fader::db_to_linear(db);
+            assert!(
+                (back - lin).abs() < 0.001,
+                "Roundtrip failed for {lin}: db={db}, back={back}"
+            );
+        }
+    }
+
+    // --- db_to_normalized tests ---
+
+    #[test]
+    fn db_to_normalized_min_is_zero() {
+        let mut val = 1.0;
+        let fader = make_fader(&mut val);
+        assert!((fader.db_to_normalized(-60.0) - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_normalized_max_is_one() {
+        let mut val = 1.0;
+        let fader = make_fader(&mut val);
+        assert!((fader.db_to_normalized(12.0) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_normalized_zero_db() {
+        let mut val = 1.0;
+        let fader = make_fader(&mut val);
+        let n = fader.db_to_normalized(0.0);
+        // 0 dB = (0 - (-60)) / (12 - (-60)) = 60/72 ≈ 0.8333
+        assert!((n - 60.0 / 72.0).abs() < 0.001, "0 dB normalized: {n}");
+    }
+
+    #[test]
+    fn db_to_normalized_midpoint() {
+        let mut val = 1.0;
+        let fader = make_fader(&mut val);
+        // Midpoint dB = (-60 + 12) / 2 = -24
+        let n = fader.db_to_normalized(-24.0);
+        assert!((n - 0.5).abs() < 0.001, "-24 dB should be midpoint: {n}");
+    }
+
+    // --- builder tests ---
+
+    #[test]
+    fn fader_height_builder() {
+        let mut val = 1.0;
+        let colors = ThemeColors::default();
+        let fader = Fader::new(&mut val, &colors).height(200.0);
+        assert_eq!(fader.height, 200.0);
+    }
+
+    #[test]
+    fn fader_default_dimensions() {
+        let mut val = 1.0;
+        let colors = ThemeColors::default();
+        let fader = Fader::new(&mut val, &colors);
+        assert_eq!(fader.height, 160.0);
+        assert_eq!(fader.width, 24.0);
+        assert_eq!(fader.min_db, -60.0);
+        assert_eq!(fader.max_db, 12.0);
+    }
+}

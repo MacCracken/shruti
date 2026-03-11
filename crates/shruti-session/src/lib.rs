@@ -5,6 +5,9 @@
 pub mod audio_pool;
 pub mod automation;
 pub mod edit;
+pub mod error;
+pub mod midi;
+pub mod preferences;
 pub mod region;
 pub mod session;
 pub mod store;
@@ -15,6 +18,9 @@ pub mod undo;
 
 pub use automation::{AutomationLane, AutomationPoint, AutomationTarget, CurveType};
 pub use edit::EditCommand;
+pub use error::SessionError;
+pub use midi::{ControlChange, MidiClip, NoteEvent};
+pub use preferences::Preferences;
 pub use region::{Region, RegionId};
 pub use session::Session;
 pub use timeline::Timeline;

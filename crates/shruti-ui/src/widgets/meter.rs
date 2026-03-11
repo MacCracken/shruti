@@ -124,3 +124,177 @@ impl Widget for LevelMeter<'_> {
         response
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeColors;
+
+    fn colors() -> ThemeColors {
+        ThemeColors::default()
+    }
+
+    // --- db_to_normalized tests ---
+
+    #[test]
+    fn db_to_normalized_at_minus_60_is_zero() {
+        assert!((LevelMeter::db_to_normalized(-60.0) - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_normalized_at_plus_6_is_one() {
+        assert!((LevelMeter::db_to_normalized(6.0) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_normalized_at_zero_db() {
+        // (0 + 60) / 66 = 60/66 ≈ 0.909
+        let n = LevelMeter::db_to_normalized(0.0);
+        assert!((n - 60.0 / 66.0).abs() < 0.001, "0 dB normalized: {n}");
+    }
+
+    #[test]
+    fn db_to_normalized_clamps_below() {
+        assert_eq!(LevelMeter::db_to_normalized(-100.0), 0.0);
+    }
+
+    #[test]
+    fn db_to_normalized_clamps_above() {
+        assert_eq!(LevelMeter::db_to_normalized(20.0), 1.0);
+    }
+
+    #[test]
+    fn db_to_normalized_minus_6_db() {
+        // (-6 + 60) / 66 = 54/66 ≈ 0.818
+        let n = LevelMeter::db_to_normalized(-6.0);
+        assert!((n - 54.0 / 66.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn db_to_normalized_minus_12_db() {
+        let n = LevelMeter::db_to_normalized(-12.0);
+        assert!((n - 48.0 / 66.0).abs() < 0.001);
+    }
+
+    // --- linear_to_db tests ---
+
+    #[test]
+    fn linear_to_db_unity() {
+        let db = LevelMeter::linear_to_db(1.0);
+        assert!((db - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn linear_to_db_zero() {
+        assert_eq!(LevelMeter::linear_to_db(0.0), -60.0);
+    }
+
+    #[test]
+    fn linear_to_db_tiny() {
+        assert_eq!(LevelMeter::linear_to_db(1e-12), -60.0);
+    }
+
+    #[test]
+    fn linear_to_db_half() {
+        let db = LevelMeter::linear_to_db(0.5);
+        assert!((db - (-6.0206)).abs() < 0.01);
+    }
+
+    // --- meter_color tests ---
+
+    #[test]
+    fn meter_color_low_level_is_green() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c);
+        assert_eq!(meter.meter_color(0.5), c.meter_green());
+        assert_eq!(meter.meter_color(0.0), c.meter_green());
+        assert_eq!(meter.meter_color(0.72), c.meter_green());
+    }
+
+    #[test]
+    fn meter_color_mid_level_is_yellow() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c);
+        assert_eq!(meter.meter_color(0.74), c.meter_yellow());
+        assert_eq!(meter.meter_color(0.80), c.meter_yellow());
+        assert_eq!(meter.meter_color(0.90), c.meter_yellow());
+    }
+
+    #[test]
+    fn meter_color_high_level_is_red() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c);
+        assert_eq!(meter.meter_color(0.92), c.meter_red());
+        assert_eq!(meter.meter_color(1.0), c.meter_red());
+    }
+
+    #[test]
+    fn meter_color_boundary_at_073() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c);
+        // 0.73 is NOT > 0.73, so it's green
+        assert_eq!(meter.meter_color(0.73), c.meter_green());
+        // 0.731 IS > 0.73, so it's yellow
+        assert_eq!(meter.meter_color(0.731), c.meter_yellow());
+    }
+
+    #[test]
+    fn meter_color_boundary_at_091() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c);
+        // 0.91 is NOT > 0.91, so it's yellow
+        assert_eq!(meter.meter_color(0.91), c.meter_yellow());
+        // 0.911 IS > 0.91, so it's red
+        assert_eq!(meter.meter_color(0.911), c.meter_red());
+    }
+
+    // --- constructor tests ---
+
+    #[test]
+    fn stereo_constructor() {
+        let c = colors();
+        let meter = LevelMeter::stereo([0.5, 0.6], [0.3, 0.4], &c);
+        assert_eq!(meter.peak_l, 0.5);
+        assert_eq!(meter.peak_r, 0.6);
+        assert_eq!(meter.rms_l, 0.3);
+        assert_eq!(meter.rms_r, 0.4);
+    }
+
+    #[test]
+    fn default_height() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c);
+        assert_eq!(meter.height, 160.0);
+    }
+
+    #[test]
+    fn custom_height() {
+        let c = colors();
+        let meter = LevelMeter::new(0.0, 0.0, 0.0, 0.0, &c).height(200.0);
+        assert_eq!(meter.height, 200.0);
+    }
+
+    // --- integration: linear -> db -> normalized pipeline ---
+
+    #[test]
+    fn full_pipeline_unity_signal() {
+        let db = LevelMeter::linear_to_db(1.0);
+        let n = LevelMeter::db_to_normalized(db);
+        // Unity = 0 dB => normalized ≈ 0.909
+        assert!((n - 60.0 / 66.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn full_pipeline_silence() {
+        let db = LevelMeter::linear_to_db(0.0);
+        let n = LevelMeter::db_to_normalized(db);
+        assert!((n - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn full_pipeline_clipping_signal() {
+        let db = LevelMeter::linear_to_db(2.0); // ~+6 dB
+        let n = LevelMeter::db_to_normalized(db);
+        assert!((n - 1.0).abs() < 0.001);
+    }
+}

@@ -12,6 +12,20 @@ pub enum BrowserTab {
 
 /// Draw the browser panel.
 pub fn browser_panel(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
+    // Handle file drops
+    let dropped_files: Vec<egui::DroppedFile> = ui.ctx().input(|i| i.raw.dropped_files.clone());
+    for file in &dropped_files {
+        if let Some(path) = &file.path {
+            let path_str = path.display().to_string();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if matches!(ext, "wav" | "flac" | "aif" | "aiff")
+                && !state.file_entries.contains(&path_str)
+            {
+                state.file_entries.push(path_str.clone());
+            }
+        }
+    }
+
     // Tab bar
     ui.horizontal(|ui| {
         if ui

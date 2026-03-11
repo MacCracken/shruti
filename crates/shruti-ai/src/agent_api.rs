@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use shruti_dsp::AudioFormat;
-use shruti_dsp::io::write_wav_file;
+use shruti_dsp::io::{BitDepth, ExportConfig, ExportFormat, write_audio_file, write_wav_file};
 use shruti_session::edit::EditCommand;
 use shruti_session::region::Region;
 use shruti_session::session::Session;
@@ -121,6 +121,7 @@ impl AgentApi {
 
         let id = match kind {
             "audio" => session.add_audio_track(name),
+            "midi" => session.add_midi_track(name),
             "bus" => session.add_bus_track(name),
             _ => return ApiResult::err(format!("unknown track kind: {kind}")),
         };
@@ -362,6 +363,60 @@ impl AgentApi {
         }
     }
 
+    /// Export the session to an audio file with configurable format and bit depth.
+    ///
+    /// `format` should be `"wav"` or `"flac"`.
+    /// `bit_depth` should be `"16"`, `"24"`, or `"32"`.
+    pub fn export_audio(&self, path: &str, format: &str, bit_depth: &str) -> ApiResult {
+        let session = match &self.session {
+            Some(s) => s,
+            None => return ApiResult::err("no active session"),
+        };
+
+        let length = session.session_length();
+        if length == 0 {
+            return ApiResult::err("session is empty");
+        }
+
+        let export_format = match format {
+            "wav" => ExportFormat::Wav,
+            "flac" => ExportFormat::Flac,
+            _ => return ApiResult::err(format!("unsupported format: {format}")),
+        };
+
+        let export_bit_depth = match bit_depth {
+            "16" => BitDepth::Int16,
+            "24" => BitDepth::Int24,
+            "32" => BitDepth::Float32,
+            _ => return ApiResult::err(format!("unsupported bit depth: {bit_depth}")),
+        };
+
+        let channels = 2u16;
+        let mut output = shruti_dsp::AudioBuffer::new(channels, length as u32);
+
+        if session.timeline.is_some() {
+            let mut tl = shruti_session::Timeline::new(channels, length as u32);
+            tl.render(
+                &session.tracks,
+                &session.transport,
+                &session.audio_pool,
+                &mut output,
+            );
+        }
+
+        let config = ExportConfig {
+            format: export_format,
+            bit_depth: export_bit_depth,
+            sample_rate: session.sample_rate,
+            channels,
+        };
+
+        match write_audio_file(Path::new(path), &output, &config) {
+            Ok(()) => ApiResult::ok(format!("exported to '{path}' ({format}, {bit_depth}-bit)")),
+            Err(e) => ApiResult::err(format!("export failed: {e}")),
+        }
+    }
+
     // --- Undo/Redo ---
 
     pub fn undo(&mut self) -> ApiResult {
@@ -452,6 +507,31 @@ mod tests {
         assert!(api.solo_track("Vocals").success);
 
         assert!(!api.set_track_gain("NonExistent", 1.0).success);
+    }
+
+    #[test]
+    fn test_agent_export_audio() {
+        let mut api = AgentApi::new();
+        api.create_session("Export Test", 48000, 256);
+
+        // Empty session should fail
+        let r = api.export_audio("/tmp/shruti_test_export.wav", "wav", "16");
+        assert!(!r.success);
+        assert_eq!(r.message, "session is empty");
+
+        // Invalid format
+        let r = api.export_audio("/tmp/shruti_test_export.ogg", "ogg", "16");
+        assert!(!r.success);
+
+        // Invalid bit depth
+        let r = api.export_audio("/tmp/shruti_test_export.wav", "wav", "8");
+        assert!(!r.success);
+
+        // No session
+        let api2 = AgentApi::new();
+        let r = api2.export_audio("/tmp/shruti_test_export.wav", "wav", "16");
+        assert!(!r.success);
+        assert_eq!(r.message, "no active session");
     }
 
     #[test]

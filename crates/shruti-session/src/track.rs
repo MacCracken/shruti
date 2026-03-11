@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::automation::AutomationLane;
+use crate::midi::MidiClip;
 use crate::region::{Region, RegionId};
 
 /// Unique identifier for a track.
@@ -27,6 +28,8 @@ pub enum TrackKind {
     Audio,
     /// Bus track for routing and grouping.
     Bus,
+    /// MIDI track with MIDI clips.
+    Midi,
     /// Master output bus.
     Master,
 }
@@ -75,6 +78,8 @@ pub struct Track {
     pub sends: Vec<Send>,
     /// Automation lanes for this track.
     pub automation: Vec<AutomationLane>,
+    /// MIDI clips on this track (only used for Midi tracks).
+    pub midi_clips: Vec<MidiClip>,
 }
 
 impl Track {
@@ -92,6 +97,7 @@ impl Track {
             channels: 2,
             sends: Vec::new(),
             automation: Vec::new(),
+            midi_clips: Vec::new(),
         }
     }
 
@@ -109,6 +115,25 @@ impl Track {
             channels: 2,
             sends: Vec::new(),
             automation: Vec::new(),
+            midi_clips: Vec::new(),
+        }
+    }
+
+    pub fn new_midi(name: impl Into<String>) -> Self {
+        Self {
+            id: TrackId::new(),
+            name: name.into(),
+            kind: TrackKind::Midi,
+            regions: Vec::new(),
+            gain: 1.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            armed: false,
+            channels: 2,
+            sends: Vec::new(),
+            automation: Vec::new(),
+            midi_clips: Vec::new(),
         }
     }
 
@@ -126,6 +151,7 @@ impl Track {
             channels: 2,
             sends: Vec::new(),
             automation: Vec::new(),
+            midi_clips: Vec::new(),
         }
     }
 
@@ -188,5 +214,22 @@ mod tests {
         let removed = track.remove_region(r1_id).unwrap();
         assert_eq!(removed.id, r1_id);
         assert_eq!(track.regions.len(), 1);
+    }
+
+    #[test]
+    fn test_midi_track() {
+        let mut track = Track::new_midi("Synth Lead");
+        assert_eq!(track.kind, TrackKind::Midi);
+        assert!(track.midi_clips.is_empty());
+
+        let mut clip = crate::midi::MidiClip::new("Intro", 0, 48000);
+        clip.add_note(0, 12000, 60, 100, 0);
+        clip.add_note(12000, 12000, 64, 90, 0);
+        clip.add_cc(0, 1, 64, 0);
+
+        track.midi_clips.push(clip);
+        assert_eq!(track.midi_clips.len(), 1);
+        assert_eq!(track.midi_clips[0].notes.len(), 2);
+        assert_eq!(track.midi_clips[0].control_changes.len(), 1);
     }
 }

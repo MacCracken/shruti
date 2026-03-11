@@ -56,6 +56,122 @@ impl WaveformPeaks {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_samples_mono_basic() {
+        // Mono signal: [0.5, -0.3, 0.8, -0.1]
+        let samples = vec![0.5_f32, -0.3, 0.8, -0.1];
+        let peaks = WaveformPeaks::from_samples(&samples, 0, 1);
+
+        assert!(!peaks.levels.is_empty());
+        // Level 0 should have 4 entries (one per sample)
+        assert_eq!(peaks.levels[0].len(), 4);
+
+        // Positive samples: min=0, max=sample
+        assert_eq!(peaks.levels[0][0], (0.0, 0.5));
+        // Negative samples: min=sample, max=0
+        assert_eq!(peaks.levels[0][1], (-0.3, 0.0));
+        assert_eq!(peaks.levels[0][2], (0.0, 0.8));
+        assert_eq!(peaks.levels[0][3], (-0.1, 0.0));
+    }
+
+    #[test]
+    fn from_samples_stereo_extracts_channel() {
+        // Interleaved stereo: L=0.5, R=-0.5, L=0.3, R=-0.3
+        let samples = vec![0.5_f32, -0.5, 0.3, -0.3];
+        let left = WaveformPeaks::from_samples(&samples, 0, 2);
+        let right = WaveformPeaks::from_samples(&samples, 1, 2);
+
+        assert_eq!(left.levels[0].len(), 2);
+        assert_eq!(left.levels[0][0], (0.0, 0.5));
+        assert_eq!(left.levels[0][1], (0.0, 0.3));
+
+        assert_eq!(right.levels[0].len(), 2);
+        assert_eq!(right.levels[0][0], (-0.5, 0.0));
+        assert_eq!(right.levels[0][1], (-0.3, 0.0));
+    }
+
+    #[test]
+    fn mipmap_levels_halve_in_size() {
+        let samples: Vec<f32> = (0..64).map(|i| (i as f32 / 32.0) - 1.0).collect();
+        let peaks = WaveformPeaks::from_samples(&samples, 0, 1);
+
+        assert!(peaks.levels.len() >= 3);
+        assert_eq!(peaks.levels[0].len(), 64);
+        assert_eq!(peaks.levels[1].len(), 32);
+        assert_eq!(peaks.levels[2].len(), 16);
+
+        // Each subsequent level should be half
+        for i in 1..peaks.levels.len() {
+            let expected = (peaks.levels[i - 1].len() + 1) / 2;
+            assert_eq!(peaks.levels[i].len(), expected);
+        }
+    }
+
+    #[test]
+    fn mipmap_preserves_min_max() {
+        // Two samples: 0.5 and -0.3; level 1 should merge them
+        let samples = vec![0.5_f32, -0.3];
+        let peaks = WaveformPeaks::from_samples(&samples, 0, 1);
+
+        assert!(peaks.levels.len() >= 2);
+        // Level 1 merges the two: min of (0.0, -0.3) = -0.3, max of (0.5, 0.0) = 0.5
+        assert_eq!(peaks.levels[1][0], (-0.3, 0.5));
+    }
+
+    #[test]
+    fn peaks_for_zoom_level_0() {
+        let samples: Vec<f32> = (0..16).map(|i| (i as f32) / 16.0).collect();
+        let peaks = WaveformPeaks::from_samples(&samples, 0, 1);
+
+        // samples_per_pixel = 1.0 => log2(1) = 0 => level 0
+        let data = peaks.peaks_for_zoom(1.0);
+        assert_eq!(data.len(), 16);
+    }
+
+    #[test]
+    fn peaks_for_zoom_higher_levels() {
+        let samples: Vec<f32> = (0..64).map(|i| (i as f32) / 64.0).collect();
+        let peaks = WaveformPeaks::from_samples(&samples, 0, 1);
+
+        // samples_per_pixel = 2.0 => log2(2) = 1 => level 1
+        let level1 = peaks.peaks_for_zoom(2.0);
+        assert_eq!(level1.len(), 32);
+
+        // samples_per_pixel = 4.0 => log2(4) = 2 => level 2
+        let level2 = peaks.peaks_for_zoom(4.0);
+        assert_eq!(level2.len(), 16);
+    }
+
+    #[test]
+    fn peaks_for_zoom_clamps_to_max_level() {
+        let samples = vec![0.5_f32; 4];
+        let peaks = WaveformPeaks::from_samples(&samples, 0, 1);
+        let max_level = peaks.levels.len() - 1;
+
+        // Very high zoom should clamp to last level
+        let data = peaks.peaks_for_zoom(100000.0);
+        assert_eq!(data.len(), peaks.levels[max_level].len());
+    }
+
+    #[test]
+    fn empty_samples() {
+        let peaks = WaveformPeaks::from_samples(&[], 0, 1);
+        assert_eq!(peaks.levels.len(), 1);
+        assert!(peaks.levels[0].is_empty());
+    }
+
+    #[test]
+    fn single_sample() {
+        let peaks = WaveformPeaks::from_samples(&[0.7], 0, 1);
+        assert_eq!(peaks.levels[0].len(), 1);
+        assert_eq!(peaks.levels[0][0], (0.0, 0.7));
+    }
+}
+
 /// Draw a waveform into a given rectangle.
 pub fn draw_waveform(
     ui: &mut Ui,

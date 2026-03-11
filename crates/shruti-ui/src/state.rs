@@ -69,3 +69,83 @@ impl UiState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session() -> Session {
+        Session::new("Test Session", 48000, 512)
+    }
+
+    #[test]
+    fn new_state_has_arrangement_view() {
+        let state = UiState::new(make_session());
+        assert_eq!(state.view_mode, ViewMode::Arrangement);
+    }
+
+    #[test]
+    fn new_state_shows_browser() {
+        let state = UiState::new(make_session());
+        assert!(state.show_browser);
+    }
+
+    #[test]
+    fn new_state_has_files_browser_tab() {
+        let state = UiState::new(make_session());
+        assert_eq!(state.browser_tab, BrowserTab::Files);
+    }
+
+    #[test]
+    fn new_state_scroll_and_zoom_defaults() {
+        let state = UiState::new(make_session());
+        assert_eq!(state.scroll_x, 0.0);
+        assert!((state.pixels_per_frame - 0.01).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn new_state_no_selection() {
+        let state = UiState::new(make_session());
+        assert!(state.selected_track.is_none());
+        assert!(state.selected_region.is_none());
+    }
+
+    #[test]
+    fn new_state_not_recording() {
+        let state = UiState::new(make_session());
+        assert!(!state.recording);
+    }
+
+    #[test]
+    fn new_state_meter_levels_match_track_count() {
+        let session = make_session();
+        let track_count = session.tracks.len();
+        let state = UiState::new(session);
+        assert_eq!(state.meter_levels.len(), track_count);
+        for (peak, rms) in &state.meter_levels {
+            assert_eq!(*peak, [0.0, 0.0]);
+            assert_eq!(*rms, [0.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn new_state_empty_browser_lists() {
+        let state = UiState::new(make_session());
+        assert!(state.file_entries.is_empty());
+        assert!(state.plugin_entries.is_empty());
+        assert!(state.plugin_search.is_empty());
+    }
+
+    #[test]
+    fn new_state_theme_not_applied() {
+        let state = UiState::new(make_session());
+        assert!(!state.theme_applied);
+    }
+
+    #[test]
+    fn view_mode_equality() {
+        assert_eq!(ViewMode::Arrangement, ViewMode::Arrangement);
+        assert_eq!(ViewMode::Mixer, ViewMode::Mixer);
+        assert_ne!(ViewMode::Arrangement, ViewMode::Mixer);
+    }
+}

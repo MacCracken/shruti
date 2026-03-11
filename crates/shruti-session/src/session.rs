@@ -57,6 +57,20 @@ impl Session {
         id
     }
 
+    /// Add a new MIDI track, returning its ID.
+    pub fn add_midi_track(&mut self, name: impl Into<String>) -> TrackId {
+        let track = Track::new_midi(name);
+        let id = track.id;
+        let master_idx = self
+            .tracks
+            .iter()
+            .position(|t| t.kind == TrackKind::Master)
+            .unwrap_or(self.tracks.len());
+        self.tracks.insert(master_idx, track);
+        self.dirty = true;
+        id
+    }
+
     /// Add a new bus track, returning its ID.
     pub fn add_bus_track(&mut self, name: impl Into<String>) -> TrackId {
         let track = Track::new_bus(name);
@@ -96,11 +110,19 @@ impl Session {
         self.tracks.iter().find(|t| t.kind == TrackKind::Master)
     }
 
-    /// Get audio tracks (excludes bus and master).
+    /// Get audio tracks (excludes bus, MIDI, and master).
     pub fn audio_tracks(&self) -> Vec<&Track> {
         self.tracks
             .iter()
             .filter(|t| t.kind == TrackKind::Audio)
+            .collect()
+    }
+
+    /// Get MIDI tracks.
+    pub fn midi_tracks(&self) -> Vec<&Track> {
+        self.tracks
+            .iter()
+            .filter(|t| t.kind == TrackKind::Midi)
             .collect()
     }
 
@@ -109,14 +131,23 @@ impl Session {
         self.tracks.len()
     }
 
-    /// Find the end position of the last region across all tracks.
+    /// Find the end position of the last region or MIDI clip across all tracks.
     pub fn session_length(&self) -> u64 {
-        self.tracks
+        let audio_end = self
+            .tracks
             .iter()
             .flat_map(|t| t.regions.iter())
             .map(|r| r.end_pos())
             .max()
-            .unwrap_or(0)
+            .unwrap_or(0);
+        let midi_end = self
+            .tracks
+            .iter()
+            .flat_map(|t| t.midi_clips.iter())
+            .map(|c| c.end_pos())
+            .max()
+            .unwrap_or(0);
+        audio_end.max(midi_end)
     }
 }
 

@@ -10,6 +10,20 @@ const RULER_HEIGHT: f32 = 24.0;
 
 /// Draw the arrangement/timeline view.
 pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
+    // Handle file drops
+    let dropped_files: Vec<egui::DroppedFile> = ui.ctx().input(|i| i.raw.dropped_files.clone());
+    for file in &dropped_files {
+        if let Some(path) = &file.path {
+            let path_str = path.display().to_string();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if matches!(ext, "wav" | "flac" | "aif" | "aiff")
+                && !state.file_entries.contains(&path_str)
+            {
+                state.file_entries.push(path_str);
+            }
+        }
+    }
+
     let available = ui.available_rect_before_wrap();
 
     // Ruler at top
@@ -157,6 +171,25 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                 });
             }
         });
+
+    // Show drop zone overlay when dragging files
+    let is_hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
+    if is_hovering {
+        let available = ui.available_rect_before_wrap();
+        let painter = ui.painter();
+        painter.rect_filled(
+            available,
+            0.0,
+            egui::Color32::from_rgba_premultiplied(100, 150, 255, 30),
+        );
+        painter.text(
+            available.center(),
+            egui::Align2::CENTER_CENTER,
+            "Drop audio files here",
+            egui::FontId::new(18.0, egui::FontFamily::Proportional),
+            egui::Color32::from_rgba_premultiplied(200, 220, 255, 180),
+        );
+    }
 }
 
 fn draw_grid(

@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
-> **Status**: Phases 1, 2, 3, 4, 5, 7A, 7B complete — Phase 6 next
-> **Tests**: 70 passing (29 dsp, 6 engine, 23 session, 3 plugin, 9 ai), 0 clippy warnings, 0 audit vulnerabilities
+> **Status**: Phases 1–6, 7A, 7B complete — MVP v1 reached
+> **Tests**: 195 passing (31 dsp, 6 engine, 30 session, 3 plugin, 10 ai, 115 ui), 40% line coverage, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -10,126 +10,24 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Phase 1: Foundation (Complete)
+## Completed Phases
 
-**Goal:** Audio plays through the system reliably.
-
-- [x] Workspace setup — Cargo workspace with 6 crates (engine, dsp, plugin, ui, session, ai)
-- [x] Platform audio backends — ALSA, PipeWire, JACK, CoreAudio, WASAPI via cpal abstraction
-- [x] Audio graph — Lock-free node graph with topological execution plan
-- [x] Basic buffer management — `AudioBuffer` with interleaved storage, per-channel access
-- [x] Audio file I/O — WAV/FLAC/ADPCM read (symphonia), WAV write (hound)
-- [x] CLI playback tool — `shruti-play` headless playback binary
-
-**Exit criteria:** Can play back and record a WAV file on all three platforms with <10ms latency.
-
----
-
-## Phase 2: Session & Tracks (Complete)
-
-**Goal:** Multi-track timeline with non-destructive editing.
-
-- [x] Session/project model — `Session` with SQLite persistence + sidecar audio pool
-- [x] Track types — Audio tracks, bus tracks, master bus (`TrackKind` enum)
-- [x] Timeline — Region-based, non-destructive clip arrangement with fade in/out
-- [x] Basic editing — Split, move, trim, fade via `EditCommand` enum + undo integration
-- [x] Transport — Play, pause, stop, loop, seek, tempo/time signature, BPM↔frame conversions
-- [x] Undo/redo — Command-pattern undo/redo with full history (`UndoManager`, 1000 deep)
-
-**Exit criteria:** Can arrange a multi-track session, edit regions, and play it back seamlessly.
+| Phase | Goal | Key Deliverables |
+|-------|------|-----------------|
+| 1 — Foundation | Audio plays reliably | Cargo workspace (6 crates), cpal backends, lock-free audio graph, AudioBuffer, WAV/FLAC I/O, `shruti-play` CLI |
+| 2 — Session & Tracks | Multi-track timeline | Session model (SQLite), Track types (Audio/Bus/Master/Midi), region-based timeline, edit commands, transport, undo/redo |
+| 3 — Mixing | Signal routing & effects | DSP effects (EQ, compressor, reverb, delay, limiter, panner), metering (peak/RMS/LUFS), sends/returns, automation |
+| 4 — Plugin Hosting | Third-party plugins | CLAP/VST3/Native Rust plugin hosts, scanner, state serialization, PluginNode graph integration |
+| 5 — UI | GPU-accelerated interface | egui+eframe (wgpu+winit), arrangement/mixer/transport/browser views, 9 custom widgets, theming, keyboard shortcuts |
+| 6 — Export & Polish | Production-ready output | Multi-format export (WAV 16/24/32-bit), MIDI tracks, drag-and-drop import, preferences system, error types |
+| 7A — Agent API | AI agent control | AgentApi (session/tracks/transport/export), 5 MCP tools, daimon integration |
+| 7B — Agnoshi | Natural language | 7 intent patterns, translate module, curl bridge |
 
 ---
 
-## Phase 3: Mixing (Complete)
+## Phase 7: AGNOS Integration (remaining)
 
-**Goal:** Professional signal routing and built-in effects.
-
-- [x] Mixer — Per-track gain, pan, mute, solo with stereo balance panning in timeline
-- [x] Sends & returns — `Send` struct with pre/post-fader routing to bus tracks
-- [x] Built-in DSP — `ParametricEq` (biquad, multi-band), `Compressor`, `Reverb` (Freeverb), `Delay` (stereo), `Limiter` (brickwall), `StereoPanner`
-- [x] Metering — `Meter` with peak, RMS, integrated LUFS (EBU R128 gating)
-- [x] Automation — `AutomationLane` with points, Linear/Step/SCurve interpolation, per-frame value lookup
-
-**Exit criteria:** Can produce a mixed-down track with EQ, compression, reverb, and automation.
-
----
-
-## Phase 4: Plugin Hosting (Complete)
-
-**Goal:** Load and use third-party audio plugins.
-
-- [x] Plugin abstraction — `PluginInstance` trait with unified API across formats
-- [x] CLAP host — Load CLAP plugins via `clap_entry`, parameter control
-- [x] VST3 host — Load VST3 bundles via `GetPluginFactory`, platform-aware binary discovery
-- [x] Native Rust plugins — Shruti-native plugin API via `shruti_plugin_create`
-- [x] Plugin scanner — Scan standard paths on Linux/macOS/Windows for all formats
-- [x] Plugin state — Serializable `PluginState` with params + opaque chunk data
-- [x] Plugin graph node — `PluginNode` integrates any plugin into the audio graph
-- [ ] Plugin UI — Embed plugin GUIs (deferred to Phase 5)
-- [ ] Sandboxing — Process-isolated hosting (deferred to Phase 6)
-
-**Exit criteria:** Can scan, load, and process audio through CLAP/VST3/Native plugins with parameter control and state save/restore.
-
----
-
-## Phase 5: UI (Complete)
-
-**Goal:** GPU-accelerated interface for the full DAW workflow.
-
-- [x] Rendering backend — egui + eframe with wgpu + winit (GPU-accelerated immediate mode)
-- [x] Arrangement view — Timeline with tracks, region clips, waveform rendering, grid lines, playhead
-- [x] Mixer view — Channel strips with fader, meter, pan knob, M/S buttons, dB readout
-- [x] Transport bar — Play/stop/record buttons, time display, BPM drag, loop toggle
-- [x] Browser — Toggleable bottom panel with Files (rfd import) and Plugins (search filter) tabs
-- [x] Keyboard shortcuts — Configurable `ShortcutRegistry` with 25+ default keybindings
-- [x] Theming — JSON-serializable `ThemeColors` (28 colors), load/save, `apply_theme()` styling
-- [x] Custom widgets — Fader, LevelMeter, Knob, WaveformPeaks, TrackHeader, TimelineRuler, RegionClip, AutomationLane, PluginSlot
-- [x] Scroll & zoom — Ctrl+scroll zoom, shift/trackpad horizontal scroll
-- [ ] Plugin UI — Embed plugin GUIs (deferred to Phase 6)
-
-**Exit criteria:** Full DAW workflow achievable through the GUI without CLI fallback.
-
----
-
-## Phase 6: Export & Polish
-
-**Goal:** Production-ready output and workflow refinements.
-
-- [ ] Export — Bounce to WAV, FLAC, MP3, OGG with format options
-- [ ] MIDI — Basic MIDI track support (record, edit, route to plugins)
-- [ ] Drag and drop — File import via drag and drop
-- [ ] Preferences — Audio device selection, buffer size, sample rate config
-- [ ] Error handling — Graceful recovery from plugin crashes, xruns
-- [ ] Documentation — User guide, keyboard shortcut reference
-
-**Exit criteria:** Can produce and export a finished track. Ready for real-world use.
-
----
-
-## Phase 7: AGNOS Integration
-
-**Goal:** First-class AI agent support on AGNOS. Shruti becomes a native AGNOS
-application with agent-driven music production, MCP tool access, and deep
-integration with daimon, hoosh, and agnoshi.
-
-### 7A — Agent API & MCP Tools (Complete)
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 1 | Session control API | Done | `AgentApi`: create, open, save, info |
-| 2 | Track & region manipulation API | Done | add track, add region, gain/pan/mute/solo |
-| 3 | Mixer control API | Done | list tracks, undo/redo |
-| 4 | Export API | Done | `export_wav()` — bounce session to WAV |
-| 5 | MCP tools (5): `shruti_*` | Done | `McpTools::tool_manifest()` + `dispatch()` |
-| 6 | Register in daimon MCP server | Done | Wired into agnosticos `mcp_server.rs` — 5 tools + dispatch + handlers (30 tests) |
-
-### 7B — Agnoshi Integration (Complete)
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 1 | Agnoshi intent patterns (5) | Done | 7 patterns in `patterns.rs`, parse logic in `parse.rs` (22 tests) |
-| 2 | Translate module | Done | `translate/shruti.rs` calling MCP tools via curl bridge |
-| 3 | Natural language session commands | Medium | "record vocals on track 2", "add reverb to guitar" |
+**Goal:** First-class AI agent support on AGNOS.
 
 ### 7C — AI-Assisted Production
 
@@ -145,13 +43,29 @@ integration with daimon, hoosh, and agnoshi.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Takumi recipe (`recipes/marketplace/shruti.toml`) | Done | Build from source, native binary, desktop entry, systemd service |
-| 2 | Marketplace recipe with `github_release` | Done | Auto-version from release tags |
-| 3 | Sandbox profile | Done | Audio device access (PipeWire/ALSA), Landlock, Wayland protocols |
+| 1 | Takumi recipe | Done | Build from source, native binary, desktop entry |
+| 2 | Marketplace recipe | Done | Auto-version from release tags |
+| 3 | Sandbox profile | Done | PipeWire/ALSA, Landlock, Wayland |
 | 4 | Argonaut service integration | Small | Optional auto-start in Desktop mode |
 | 5 | Aethersafha Wayland integration | Medium | Embed in compositor, proper surface management |
 
-**Exit criteria:** An AGNOS agent can open a session, arrange tracks, apply effects, mix, and export — with human oversight. Shruti installable from mela marketplace.
+**Exit criteria:** An AGNOS agent can open a session, arrange tracks, apply effects, mix, and export — with human oversight.
+
+---
+
+## Post-MVP: MIDI 2.0
+
+**Goal:** Full MIDI 2.0 (UMP) support per the MIDI Association specification.
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Universal MIDI Packet (UMP) | Medium | 32/64/96/128-bit message types, message type routing |
+| 2 | MIDI-CI (Capability Inquiry) | Medium | Profile negotiation, property exchange between devices |
+| 3 | Per-note controllers | Medium | Per-note pitch bend, pressure, CC — higher resolution than MIDI 1.0 |
+| 4 | 32-bit velocity & CC resolution | Small | Upgrade from 7-bit (0-127) to 32-bit resolution |
+| 5 | Property exchange | Medium | JSON-based device/plugin property queries |
+| 6 | MIDI 2.0 device I/O | Large | Platform MIDI 2.0 drivers (ALSA sequencer, CoreMIDI, WinRT MIDI) |
+| 7 | Backward compatibility | Small | Transparent MIDI 1.0 ↔ 2.0 translation layer |
 
 ---
 
@@ -161,7 +75,7 @@ integration with daimon, hoosh, and agnoshi.
 |-------|---------|--------|
 | `shruti-engine` | Real-time audio engine, cpal backend, lock-free graph | Active |
 | `shruti-dsp` | Audio buffers, format types, file I/O, effects, metering | Active |
-| `shruti-session` | Session, tracks, regions, timeline, transport, undo | Active |
+| `shruti-session` | Session, tracks, regions, timeline, transport, undo, MIDI, preferences | Active |
 | `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust | Active |
 | `shruti-ui` | GPU-accelerated DAW UI (egui + eframe) | Active |
 | `shruti-ai` | Agent API + MCP tools for AGNOS | Active |
@@ -170,6 +84,25 @@ integration with daimon, hoosh, and agnoshi.
 
 ## MVP v1 Release
 
-Phases 1–6 complete. Phase 7 follows as the first post-MVP milestone to align with the AGNOS ecosystem.
+Phases 1–6 complete. Phase 7 and MIDI 2.0 follow as post-MVP milestones.
+
+---
+
+## Test Coverage Roadmap (40% → 80%)
+
+Current: 195 tests, 40% line coverage (1200/2997 lines).
+
+| Milestone | Target | Focus Areas | Est. Tests |
+|-----------|--------|-------------|------------|
+| 50% | +300 lines | shruti-ui views (arrangement interactions, mixer logic), shruti-engine backend mocking | +40 |
+| 60% | +300 lines | shruti-session undo/edit commands (all EditCommand variants), store roundtrips, audio_pool edge cases | +30 |
+| 70% | +300 lines | shruti-ui widget interactions (fader drag, knob drag, track selection), shruti-plugin host lifecycle, error recovery paths | +30 |
+| 80% | +300 lines | Integration tests (session→timeline→export pipeline), shruti-ai MCP dispatch coverage, binary CLI arg parsing, edge cases across all crates | +30 |
+
+**Strategy:**
+- UI rendering code: mock-free tests for data flow and state transitions; skip pixel-level rendering
+- Engine code: mock audio backends, test graph execution with synthetic nodes
+- Session code: full undo/redo cycle tests for every EditCommand variant
+- Plugin code: mock plugin instances, test scanner with fixture directories
 
 *Last Updated: 2026-03-11*
