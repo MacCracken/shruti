@@ -2,8 +2,13 @@
 name = "shruti-plugin"
 version = "2026.3.11"
 edition = "2024"
-description = "Plugin hosting (VST3, CLAP) for Shruti"
+description = "Plugin hosting (VST3, CLAP, native Rust) for Shruti"
 license = "GPL-3.0"
 
 [dependencies]
 shruti-engine = { path = "../shruti-engine" }
+shruti-dsp = { path = "../shruti-dsp" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+libloading = "0.8"
+walkdir = "2"

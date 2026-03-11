@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
-> **Status**: Phase 1-2 complete
-> **Tests**: 28 passing (6 dsp, 6 engine, 16 session), 0 clippy warnings, 0 audit vulnerabilities
+> **Status**: Phases 1, 2, 4, 7A complete — Phase 3 next
+> **Tests**: 40 passing (6 dsp, 6 engine, 16 session, 3 plugin, 9 ai), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -54,17 +54,21 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Phase 4: Plugin Hosting
+## Phase 4: Plugin Hosting (Complete)
 
 **Goal:** Load and use third-party audio plugins.
 
-- [ ] CLAP host — Full CLAP plugin hosting support
-- [ ] VST3 host — VST3 plugin scanning, loading, and parameter control
-- [ ] Plugin UI — Embed plugin GUIs or provide generic parameter UI
-- [ ] Plugin state — Save/restore plugin state with sessions
-- [ ] Sandboxing — Process-isolated plugin hosting for crash safety
+- [x] Plugin abstraction — `PluginInstance` trait with unified API across formats
+- [x] CLAP host — Load CLAP plugins via `clap_entry`, parameter control
+- [x] VST3 host — Load VST3 bundles via `GetPluginFactory`, platform-aware binary discovery
+- [x] Native Rust plugins — Shruti-native plugin API via `shruti_plugin_create`
+- [x] Plugin scanner — Scan standard paths on Linux/macOS/Windows for all formats
+- [x] Plugin state — Serializable `PluginState` with params + opaque chunk data
+- [x] Plugin graph node — `PluginNode` integrates any plugin into the audio graph
+- [ ] Plugin UI — Embed plugin GUIs (deferred to Phase 5)
+- [ ] Sandboxing — Process-isolated hosting (deferred to Phase 6)
 
-**Exit criteria:** Can load popular VST3/CLAP synths and effects, automate their parameters, and save/recall state.
+**Exit criteria:** Can scan, load, and process audio through CLAP/VST3/Native plugins with parameter control and state save/restore.
 
 ---
 
@@ -105,16 +109,16 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 application with agent-driven music production, MCP tool access, and deep
 integration with daimon, hoosh, and agnoshi.
 
-### 7A — Agent API & MCP Tools
+### 7A — Agent API & MCP Tools (Complete)
 
-| # | Item | Effort | Notes |
+| # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | Session control API | Medium | Open/create/save session, add/remove tracks, set transport |
-| 2 | Track & region manipulation API | Medium | Add/split/trim/move regions, set gain/pan/mute/solo |
-| 3 | Mixer control API | Small | Get/set channel parameters, send levels, master output |
-| 4 | Export API | Small | Trigger bounce to WAV/FLAC with format options |
-| 5 | MCP tools (5): `shruti_*` | Medium | `shruti_session`, `shruti_tracks`, `shruti_mixer`, `shruti_transport`, `shruti_export` |
-| 6 | Register in daimon MCP server | Small | Add to `build_tool_manifest()` + dispatch + handlers |
+| 1 | Session control API | Done | `AgentApi`: create, open, save, info |
+| 2 | Track & region manipulation API | Done | add track, add region, gain/pan/mute/solo |
+| 3 | Mixer control API | Done | list tracks, undo/redo |
+| 4 | Export API | Done | `export_wav()` — bounce session to WAV |
+| 5 | MCP tools (5): `shruti_*` | Done | `McpTools::tool_manifest()` + `dispatch()` |
+| 6 | Register in daimon MCP server | Pending | Wire into agnosticos `mcp_server.rs` |
 
 ### 7B — Agnoshi Integration
 
@@ -155,9 +159,9 @@ integration with daimon, hoosh, and agnoshi.
 | `shruti-engine` | Real-time audio engine, cpal backend, lock-free graph | Active |
 | `shruti-dsp` | Audio buffers, format types, file I/O | Active |
 | `shruti-session` | Session, tracks, regions, timeline, transport, undo | Active |
-| `shruti-plugin` | VST3/CLAP hosting | Stub |
+| `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust | Active |
 | `shruti-ui` | wgpu-based GPU UI | Stub |
-| `shruti-ai` | AGNOS agent integration | Stub |
+| `shruti-ai` | Agent API + MCP tools for AGNOS | Active |
 
 ---
 

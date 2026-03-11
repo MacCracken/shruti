@@ -930,6 +930,11 @@ dependencies = [
 name = "shruti-ai"
 version = "2026.3.11"
 dependencies = [
+ "serde",
+ "serde_json",
+ "shruti-dsp",
+ "shruti-engine",
+ "shruti-plugin",
  "shruti-session",
 ]
 
@@ -954,7 +959,12 @@ dependencies = [
 name = "shruti-plugin"
 version = "2026.3.11"
 dependencies = [
+ "libloading",
+ "serde",
+ "serde_json",
+ "shruti-dsp",
  "shruti-engine",
+ "walkdir",
 ]
 
 [[package]]
