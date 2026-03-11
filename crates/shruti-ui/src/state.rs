@@ -193,4 +193,103 @@ mod tests {
         assert_eq!(ViewMode::Mixer, ViewMode::Mixer);
         assert_ne!(ViewMode::Arrangement, ViewMode::Mixer);
     }
+
+    #[test]
+    fn test_new_state_no_drag() {
+        let state = UiState::new(make_session());
+        assert!(state.drag.is_none());
+    }
+
+    #[test]
+    fn test_arrangement_drag_move_region() {
+        let region_id = RegionId::new();
+        let drag = ArrangementDrag::MoveRegion {
+            region_id,
+            track_index: 2,
+            start_frame: 48000,
+            grab_offset_px: 15.5,
+        };
+        match &drag {
+            ArrangementDrag::MoveRegion {
+                region_id: rid,
+                track_index,
+                start_frame,
+                grab_offset_px,
+            } => {
+                assert_eq!(*rid, region_id);
+                assert_eq!(*track_index, 2);
+                assert_eq!(*start_frame, 48000);
+                assert!((*grab_offset_px - 15.5).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected MoveRegion variant"),
+        }
+    }
+
+    #[test]
+    fn test_arrangement_drag_trim_start() {
+        let region_id = RegionId::new();
+        let drag = ArrangementDrag::TrimStart {
+            region_id,
+            track_index: 1,
+            original_pos: 1000,
+            original_offset: 200,
+            original_duration: 5000,
+        };
+        match &drag {
+            ArrangementDrag::TrimStart {
+                region_id: rid,
+                track_index,
+                original_pos,
+                original_offset,
+                original_duration,
+            } => {
+                assert_eq!(*rid, region_id);
+                assert_eq!(*track_index, 1);
+                assert_eq!(*original_pos, 1000);
+                assert_eq!(*original_offset, 200);
+                assert_eq!(*original_duration, 5000);
+            }
+            _ => panic!("expected TrimStart variant"),
+        }
+    }
+
+    #[test]
+    fn test_arrangement_drag_trim_end() {
+        let region_id = RegionId::new();
+        let drag = ArrangementDrag::TrimEnd {
+            region_id,
+            track_index: 3,
+            original_duration: 9600,
+        };
+        match &drag {
+            ArrangementDrag::TrimEnd {
+                region_id: rid,
+                track_index,
+                original_duration,
+            } => {
+                assert_eq!(*rid, region_id);
+                assert_eq!(*track_index, 3);
+                assert_eq!(*original_duration, 9600);
+            }
+            _ => panic!("expected TrimEnd variant"),
+        }
+    }
+
+    #[test]
+    fn test_arrangement_drag_reorder_track() {
+        let drag = ArrangementDrag::ReorderTrack {
+            from_index: 0,
+            current_index: 2,
+        };
+        match &drag {
+            ArrangementDrag::ReorderTrack {
+                from_index,
+                current_index,
+            } => {
+                assert_eq!(*from_index, 0);
+                assert_eq!(*current_index, 2);
+            }
+            _ => panic!("expected ReorderTrack variant"),
+        }
+    }
 }

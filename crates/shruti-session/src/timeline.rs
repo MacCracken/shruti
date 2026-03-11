@@ -365,4 +365,141 @@ mod tests {
             output.get(0, 0)
         );
     }
+
+    #[test]
+    fn test_muted_track_send_still_routes() {
+        // Based on the render code: muted tracks are skipped entirely,
+        // so sends from muted tracks do NOT route audio.
+        let mut pool = AudioPool::new();
+        let samples: Vec<f32> = vec![0.5; 8];
+        let buf = AudioBuffer::from_interleaved(samples, 2);
+        pool.insert("src".to_string(), buf);
+
+        let mut audio_track = Track::new_audio("Src");
+        audio_track.muted = true; // mute the track
+        audio_track.add_region(Region::new("src".to_string(), 0, 0, 4));
+
+        let bus_track = Track::new_bus("Bus");
+        let bus_id = bus_track.id;
+
+        audio_track.sends.push(Send {
+            target: bus_id,
+            level: 1.0,
+            position: SendPosition::PostFader,
+            enabled: true,
+        });
+
+        let tracks = vec![audio_track, bus_track];
+
+        let mut tl = Timeline::new(2, 4);
+        let transport = Transport::new(48000);
+        let mut output = AudioBuffer::new(2, 4);
+        tl.render(&tracks, &transport, &pool, &mut output);
+
+        // Muted tracks are skipped, so output should be silent
+        let all_silent = output.as_interleaved().iter().all(|&s| s.abs() < 1e-6);
+        assert!(
+            all_silent,
+            "muted track should not route audio through sends"
+        );
+    }
+
+    #[test]
+    fn test_multiple_sends_to_same_bus() {
+        let mut pool = AudioPool::new();
+        // Two different audio sources
+        let buf1 = AudioBuffer::from_interleaved(vec![0.4; 8], 2);
+        let buf2 = AudioBuffer::from_interleaved(vec![0.3; 8], 2);
+        pool.insert("src1".to_string(), buf1);
+        pool.insert("src2".to_string(), buf2);
+
+        let bus_track = Track::new_bus("FX Bus");
+        let bus_id = bus_track.id;
+
+        let mut track1 = Track::new_audio("Track1");
+        track1.add_region(Region::new("src1".to_string(), 0, 0, 4));
+        track1.sends.push(Send {
+            target: bus_id,
+            level: 1.0,
+            position: SendPosition::PostFader,
+            enabled: true,
+        });
+
+        let mut track2 = Track::new_audio("Track2");
+        track2.add_region(Region::new("src2".to_string(), 0, 0, 4));
+        track2.sends.push(Send {
+            target: bus_id,
+            level: 1.0,
+            position: SendPosition::PostFader,
+            enabled: true,
+        });
+
+        let tracks = vec![track1, track2, bus_track];
+
+        let mut tl = Timeline::new(2, 4);
+        let transport = Transport::new(48000);
+        let mut output = AudioBuffer::new(2, 4);
+        tl.render(&tracks, &transport, &pool, &mut output);
+
+        // Output should have both direct tracks (0.4 + 0.3) and bus contribution
+        // (0.4 + 0.3 from bus). Total per channel ~1.4.
+        let sample = output.get(0, 0);
+        assert!(
+            sample > 0.6,
+            "multiple sends to same bus should sum: got {sample}"
+        );
+    }
+
+    #[test]
+    fn test_bus_gain_affects_send_output() {
+        let mut pool = AudioPool::new();
+        let buf = AudioBuffer::from_interleaved(vec![0.8; 8], 2);
+        pool.insert("src".to_string(), buf);
+
+        let mut bus_track = Track::new_bus("FX Bus");
+        bus_track.gain = 0.5; // bus gain at 50%
+        let bus_id = bus_track.id;
+
+        let mut audio_track = Track::new_audio("Src");
+        audio_track.add_region(Region::new("src".to_string(), 0, 0, 4));
+        audio_track.sends.push(Send {
+            target: bus_id,
+            level: 1.0,
+            position: SendPosition::PostFader,
+            enabled: true,
+        });
+
+        let tracks = vec![audio_track, bus_track];
+
+        let mut tl = Timeline::new(2, 4);
+        let transport = Transport::new(48000);
+        let mut output = AudioBuffer::new(2, 4);
+        tl.render(&tracks, &transport, &pool, &mut output);
+
+        // Direct signal: 0.8, bus contribution: 0.8 * 1.0 (send) * 0.5 (bus gain) = 0.4
+        // Total: 0.8 + 0.4 = 1.2
+        let sample = output.get(0, 0);
+        assert!(
+            (sample - 1.2).abs() < 0.05,
+            "bus gain should scale send output: expected ~1.2, got {sample}"
+        );
+    }
+
+    #[test]
+    fn test_empty_bus_no_crash() {
+        // A bus with no incoming sends should render without error
+        let pool = AudioPool::new();
+        let bus_track = Track::new_bus("Empty Bus");
+
+        let tracks = vec![bus_track];
+
+        let mut tl = Timeline::new(2, 64);
+        let transport = Transport::new(48000);
+        let mut output = AudioBuffer::new(2, 64);
+        tl.render(&tracks, &transport, &pool, &mut output);
+
+        // Output should be all zeros (silence)
+        let all_silent = output.as_interleaved().iter().all(|&s| s.abs() < 1e-6);
+        assert!(all_silent, "empty bus should produce silence");
+    }
 }

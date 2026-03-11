@@ -1254,4 +1254,84 @@ mod tests {
         undo.redo(&mut session);
         assert_eq!(session.tracks[0].name, "B");
     }
+
+    #[test]
+    fn test_move_track_undo_restores_exact_order() {
+        let mut session = Session::new("Test", 48000, 512);
+        session.add_audio_track("A");
+        session.add_audio_track("B");
+        session.add_audio_track("C");
+        session.add_audio_track("D");
+        // Order: A(0), B(1), C(2), D(3), Master(4)
+        let mut undo = UndoManager::default();
+
+        // Move track from index 0 to index 3
+        undo.execute(
+            EditCommand::MoveTrack {
+                from_index: 0,
+                to_index: 3,
+            },
+            &mut session,
+        );
+        // After: B(0), C(1), D(2), A(3), Master(4)
+        assert_eq!(session.tracks[0].name, "B");
+        assert_eq!(session.tracks[1].name, "C");
+        assert_eq!(session.tracks[2].name, "D");
+        assert_eq!(session.tracks[3].name, "A");
+
+        // Undo: should restore exact original order
+        undo.undo(&mut session);
+        assert_eq!(session.tracks[0].name, "A");
+        assert_eq!(session.tracks[1].name, "B");
+        assert_eq!(session.tracks[2].name, "C");
+        assert_eq!(session.tracks[3].name, "D");
+        assert_eq!(session.tracks[4].name, "Master");
+    }
+
+    #[test]
+    fn test_move_track_compound_with_other_edits() {
+        let mut session = Session::new("Test", 48000, 512);
+        let track_id = session.add_audio_track("A");
+        session.add_audio_track("B");
+        session.add_audio_track("C");
+        // Order: A(0), B(1), C(2), Master(3)
+        let mut undo = UndoManager::default();
+
+        let region = make_region(0, 1000);
+        let region_id = region.id;
+
+        // Compound: add a region AND move a track
+        undo.execute(
+            EditCommand::Compound {
+                commands: vec![
+                    EditCommand::AddRegion {
+                        track_id,
+                        region: region.clone(),
+                    },
+                    EditCommand::MoveTrack {
+                        from_index: 0,
+                        to_index: 2,
+                    },
+                ],
+            },
+            &mut session,
+        );
+
+        // After compound: region added, track moved
+        // Order: B(0), C(1), A(2), Master(3)
+        assert_eq!(session.tracks[0].name, "B");
+        assert_eq!(session.tracks[2].name, "A");
+        assert_eq!(session.track(track_id).unwrap().regions.len(), 1);
+
+        // Undo the entire compound
+        undo.undo(&mut session);
+
+        // Track order restored: A(0), B(1), C(2), Master(3)
+        assert_eq!(session.tracks[0].name, "A");
+        assert_eq!(session.tracks[1].name, "B");
+        assert_eq!(session.tracks[2].name, "C");
+        // Region removed
+        assert!(session.track(track_id).unwrap().region(region_id).is_none());
+        assert_eq!(session.track(track_id).unwrap().regions.len(), 0);
+    }
 }

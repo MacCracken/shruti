@@ -494,4 +494,107 @@ mod tests {
         let track = session.track(audio_id).unwrap();
         assert!(track.sends.is_empty());
     }
+
+    // ---------------------------------------------------------------
+    // Track reorder edge cases
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_move_track_out_of_bounds() {
+        let mut session = Session::new("Test", 48000, 512);
+        session.add_audio_track("A");
+        session.add_audio_track("B");
+        // from >= len
+        assert!(!session.move_track(10, 0));
+        // to >= len
+        assert!(!session.move_track(0, 10));
+        // both out of bounds
+        assert!(!session.move_track(99, 99));
+    }
+
+    #[test]
+    fn test_move_track_same_index() {
+        let mut session = Session::new("Test", 48000, 512);
+        session.add_audio_track("A");
+        session.add_audio_track("B");
+        // Moving to the same index should succeed but be a no-op
+        assert!(session.move_track(0, 0));
+        assert_eq!(session.tracks[0].name, "A");
+        assert_eq!(session.tracks[1].name, "B");
+    }
+
+    #[test]
+    fn test_move_track_sets_dirty() {
+        let mut session = Session::new("Test", 48000, 512);
+        session.add_audio_track("A");
+        session.add_audio_track("B");
+        session.dirty = false;
+        assert!(session.move_track(0, 1));
+        assert!(session.dirty);
+    }
+
+    #[test]
+    fn test_swap_tracks_same_index() {
+        let mut session = Session::new("Test", 48000, 512);
+        session.add_audio_track("A");
+        // a == b returns false
+        assert!(!session.swap_tracks(0, 0));
+    }
+
+    #[test]
+    fn test_swap_tracks_out_of_bounds() {
+        let mut session = Session::new("Test", 48000, 512);
+        session.add_audio_track("A");
+        session.add_audio_track("B");
+        // index >= len returns false
+        assert!(!session.swap_tracks(0, 10));
+        assert!(!session.swap_tracks(10, 0));
+        assert!(!session.swap_tracks(10, 10));
+    }
+
+    // ---------------------------------------------------------------
+    // Send routing — more coverage
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_add_send_invalid_source_track() {
+        let mut session = Session::new("Test", 48000, 512);
+        let bus_id = session.add_bus_track("FX Bus");
+        let bogus_id = TrackId::new();
+        assert!(!session.add_send(bogus_id, bus_id, 0.5, SendPosition::PostFader));
+    }
+
+    #[test]
+    fn test_remove_send_out_of_bounds() {
+        let mut session = Session::new("Test", 48000, 512);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("FX Bus");
+        session.add_send(audio_id, bus_id, 0.5, SendPosition::PostFader);
+        // send_index >= sends.len()
+        assert!(!session.remove_send(audio_id, 1));
+        assert!(!session.remove_send(audio_id, 99));
+    }
+
+    #[test]
+    fn test_remove_send_invalid_track() {
+        let mut session = Session::new("Test", 48000, 512);
+        let bogus_id = TrackId::new();
+        assert!(!session.remove_send(bogus_id, 0));
+    }
+
+    #[test]
+    fn test_add_multiple_sends() {
+        let mut session = Session::new("Test", 48000, 512);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus1 = session.add_bus_track("Reverb");
+        let bus2 = session.add_bus_track("Delay");
+        assert!(session.add_send(audio_id, bus1, 0.5, SendPosition::PostFader));
+        assert!(session.add_send(audio_id, bus2, 0.3, SendPosition::PreFader));
+        let track = session.track(audio_id).unwrap();
+        assert_eq!(track.sends.len(), 2);
+        assert_eq!(track.sends[0].target, bus1);
+        assert_eq!(track.sends[1].target, bus2);
+        assert!((track.sends[0].level - 0.5).abs() < f32::EPSILON);
+        assert!((track.sends[1].level - 0.3).abs() < f32::EPSILON);
+    }
 }

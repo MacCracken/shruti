@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
 > **Status**: Phases 1–7C, 7A, 7B complete — MVP v1 reached
-> **Tests**: 389 passing (66 dsp, 9 engine, 93 session, 3 plugin, 103 ai, 115 ui), 51% line coverage, 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 409 passing (66 dsp, 9 engine, 103 session, 3 plugin, 103 ai, 125 ui), 51% line coverage, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 

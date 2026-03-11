@@ -97,6 +97,7 @@ Format: CalVer (YYYY.M.D-N).
 - Track header drag-to-reorder with visual drop indicator line
 - `ArrangementDrag` enum (MoveRegion, TrimStart, TrimEnd, ReorderTrack) for drag state tracking
 - Pending action collection pattern to avoid borrow conflicts in egui immediate mode
+- 20 new tests: track reorder edge cases (out-of-bounds, same-index, dirty flag), send routing (invalid source, out-of-bounds remove, multiple sends, bus gain, muted track, empty bus), ArrangementDrag state construction, MoveTrack compound undo
 
 ### Phase 7C: AI-Assisted Production
 - Spectral analysis API: radix-2 FFT, `analyze_spectrum()` returning peak frequency, spectral centroid, spectral rolloff, magnitude spectrum in dB
