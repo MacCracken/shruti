@@ -215,147 +215,105 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Engineering Backlog (from Code Audit)
+## Engineering Backlog
 
-Items identified during 6-round code audit. CRITICAL and HIGH issues have been fixed. MEDIUM and LOW items listed here for future work.
+Items from 6-round code audit. All CRITICAL/HIGH issues fixed. Remaining MEDIUM/LOW grouped by domain, sorted by priority.
 
-### Performance (Medium)
+### Audio Engine (ui/engine)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Per-sample `powf` in synth pitch modulation | instruments | Use fast approximation (e.g. `2^x` via bit manipulation) for pitch bend per sample |
-| 2 | Waveform peaks recomputed every UI frame | ui | Cache `WaveformPeaks` per region, invalidate on region change only |
-| 3 | `read_meters()` clones entire Vec under lock | ui/engine | Use lock-free ring buffer or atomic array for meter levels |
-| 4 | `AudioPool::load` decodes entire file synchronously | session | Async/background loading with placeholder buffer |
-| 5 | Single-threaded timeline render | session | Render source tracks in parallel with rayon/thread pool |
+| Pri | Item | Notes |
+|-----|------|-------|
+| H | Lock-free session updates | Replace `Arc<Mutex<SharedSessionData>>` with lock-free triple buffer or crossbeam channel; eliminates `try_lock` silence and `Vec<Track>` clone under lock |
+| H | Double-buffered graph plan swap | GraphProcessor should keep stale plan as fallback instead of outputting silence on `try_lock` failure |
+| M | Lock-free meter levels | Replace `Arc<Mutex<Vec<[f32;2]>>>` with atomic array or ring buffer — removes lock from both audio callback and UI read |
+| M | Mono→stereo channel upmix | FilePlayerNode silently drops right channel for mono sources; duplicate mono to both channels |
+| M | Poisoned mutex recovery | Log events; use `into_inner()` to recover instead of silent fallback to silence |
+| M | Render failure logging | Add debug logging when interleaved buffer is shorter than expected (currently silent zero-fill) |
+| L | DeviceCache diff-based refresh | Diff instead of full rebuild on device enumeration |
 
-### Performance (Low)
+### DSP (dsp)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | StereoPanner created per-track per-buffer | session | Reuse panner instances |
-| 2 | Unnecessary `to_vec()` in analysis calls | ai | Pass slice references instead of cloning |
-| 3 | `as_interleaved()` may copy in hot path | dsp | Ensure zero-copy interleaved access |
+| Pri | Item | Notes |
+|-----|------|-------|
+| M | EBU R128 compliant LUFS | Current calc divides by `channels*frames`; should average RMS² per channel then convert |
+| M | Compressor soft knee verification | Verify formula against standard curves (Fabfilter reference) |
+| M | Audio file parsing safety | Wrap symphonia decoding in `catch_unwind` for malformed files |
+| L | Reverb/allpass min buffer size | Ensure comb/allpass buffer is at least 1 sample (panic if scale rounds to 0) |
+| L | Delay samples explicit clamp | Add `delay_samples.min(buf_len - 1)` instead of relying on implicit modulo behavior |
+| L | Zero-copy `as_interleaved()` | Ensure no unnecessary copy in hot audio path |
 
-### Security (Medium)
+### Instruments (instruments)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | MCP JSON input not size-limited | ai | Add max request body size in MCP dispatch |
-| 2 | Plugin scanner follows symlinks | plugin | Limit symlink depth during directory traversal |
-| 3 | Session deserialization from untrusted sources | session | Add schema validation on SQLite/JSON load |
-| 4 | Audio file parsing with symphonia | dsp | Wrap in catch_unwind or sandbox for malformed files |
-| 5 | No rate limiting on Agent API | ai | Add request throttling for MCP/agent endpoints |
+| Pri | Item | Notes |
+|-----|------|-------|
+| H | Type-safe parameter system | Replace magic number indices (`PARAM_WAVEFORM=0`) with enum-based parameter IDs |
+| M | PolyBLEP rising edge correction | Sawtooth only corrects trailing edge; add phase=0 correction for better anti-aliasing |
+| M | Envelope stage_pos reset | Reset to 0 on every state transition, not just specific ones |
+| M | LFO S&H double-sample at cycle boundary | Move phase advance before S&H check to prevent sampling twice at wrap |
+| M | Per-sample `powf` in pitch modulation | Use fast `2^x` approximation (bit manipulation) for real-time pitch bend |
+| M | LFO/ADSR helper deduplication | Merge `current_adsr()`/`current_filter_adsr()` into generic; share `lfo_shape_from_param()` |
+| M | Sample rate observer trait | Propagate sample rate changes to all child components (oscillator, filter, LFO, envelope) |
+| L | InstrumentPreset clone overhead | Use `Cow` or `Arc` for shared preset data |
+| L | Filter cutoff modulation docs | Document octave depth mapping for LFO/envelope mod range |
 
-### Security (Low)
+### Session (session)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Preferences file permissions | session | Set 0600 on preferences.json |
-| 2 | Plugin state opaque blob not validated | plugin | Size limit and magic byte check on plugin state blobs |
-| 3 | Theme JSON not schema-validated | ui | Reject malformed theme files gracefully |
-| 4 | No Content Security Policy for egui | ui | Low risk (not web-facing) but consider for embedded webviews |
+| Pri | Item | Notes |
+|-----|------|-------|
+| H | Newtypes for domain IDs | `FramePos(u64)`, `TrackSlot(usize)`, `RegionId(Uuid)` — prevent primitive type confusion |
+| M | Audio pool LRU eviction | Keep loaded files in memory up to limit; evict LRU with re-load on demand |
+| M | Region list sorted for binary search | Sort by `timeline_pos` for O(log n) `regions_in_range` lookups |
+| M | Undo history delta/COW | Current stores full command copies; reduce memory for large sessions |
+| M | `VecDeque` for undo stack | Replace `Vec::remove(0)` O(n) with `VecDeque::pop_front()` O(1) |
+| M | Schema validation on load | Validate SQLite/JSON session files from untrusted sources |
+| L | MidiClip sorted events | Use `BTreeMap` for efficient per-frame MIDI lookup |
+| L | SmallString for Track names | Interning or SmallString for hot-path string fields |
+| L | Automation dead code cleanup | Remove unreachable `right_idx == 0` check in `value_at()` |
 
-### Memory (Medium)
+### UI / UX (ui)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Undo history stores full command copies | session | Consider delta/COW for large commands |
-| 2 | Audio pool keeps all loaded files in memory | session | LRU eviction for audio pool with re-load on demand |
-| 3 | Region list not sorted for binary search | session | Sort regions by timeline_pos for O(log n) lookups in `regions_in_range` |
-| 4 | Theme colors allocated on every `apply_theme()` | ui | Cache theme application, only reapply on theme change |
-| 5 | Plugin scanner results not cached to disk | plugin | Persist scan results, only re-scan on directory change |
+| Pri | Item | Notes |
+|-----|------|-------|
+| **C** | **Auto-save + crash recovery** | Save `.shruti_backup` every 60s; offer recovery on startup; unsaved `*` indicator in title bar |
+| **C** | **Background file I/O** | Move save/load/export/audio-pool-load to background thread with progress dialog |
+| **C** | **Save prompt on New/Open** | Confirm dialog before discarding unsaved changes |
+| H | Error toast notifications | Display user-facing errors for failed operations (currently silent `let _ =`) |
+| H | Comprehensive undo/redo | Wrap mute/solo/gain/pan/track-add in `EditCommand`; currently only move/trim are undoable |
+| H | Audio engine init feedback | Error dialog if audio device unavailable; offer device selection fallback |
+| H | Playhead engine sync | Bidirectional sync between UI transport and `SharedTransport` |
+| M | Waveform peaks caching | Cache `WaveformPeaks` per region; invalidate on change only (currently recomputed every frame) |
+| M | Snap-to-grid / quantize | Region drag positions quantized to bar/beat grid |
+| M | Drag visual feedback | Ghost/opacity on dragged regions; cursor hints on interactive elements |
+| M | Recording animation | Blinking red indicator during recording |
+| M | Grid level-of-detail | Skip grid lines when closer than 5px at high zoom |
+| M | Zoom boundary clamping | Prevent zoom-out making session invisible; handle empty session zoom-to-fit |
+| M | Missing keyboard shortcuts | Bind solo, arm, FFwd, export actions to keys |
+| M | Audio pool persistence | Save imported/recorded audio alongside session file |
+| L | Theme colors caching | Only reapply on theme change (currently re-allocated every `apply_theme()` call) |
+| L | Theme JSON validation | Reject malformed theme files gracefully |
 
-### Memory (Low)
+### Security (ai/plugin)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | String allocations in Track name/audio_file_id | session | Consider interning or SmallString for hot-path strings |
-| 2 | InstrumentPreset clones all params | instruments | Use Cow or Arc for shared preset data |
-| 3 | MidiClip events stored in Vec (unsorted) | session | Use sorted BTreeMap for efficient per-frame lookup |
-| 4 | DeviceCache rebuilt from scratch on refresh | engine | Diff-based update instead of full rebuild |
+| Pri | Item | Notes |
+|-----|------|-------|
+| M | MCP request size limit | Add max body size in MCP dispatch |
+| M | Agent API rate limiting | Throttle MCP/agent endpoints |
+| M | Plugin scanner symlink depth | Limit symlink following during directory traversal |
+| L | Preferences file permissions | Set 0600 on `preferences.json` |
+| L | Plugin state blob validation | Size limit + magic byte check on opaque blobs |
+| L | Plugin scanner disk cache | Persist scan results; only re-scan on directory change |
 
-### Refactoring (High)
+### Code Quality (cross-cutting)
 
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Type-safe parameter system | instruments | Replace magic number indices (PARAM_WAVEFORM=0, etc.) with enum-based parameter identifiers |
-| 2 | Unified `ShrutiError` type | all | Consistent error handling across crates instead of mixed `Box<dyn Error>`, `String`, `Result` types |
-| 3 | Newtypes for domain IDs | session/instruments | `FrameIndex(u32)`, `TimelinePos(u64)`, `PluginSlotId(String)`, `InstrumentType(String)` |
-
-### Refactoring (Medium)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Extract shared test utilities | all | Deduplicate `generate_sine()`, `rms_of_buffer()` helpers across effect tests |
-| 2 | LFO shape converter reuse | instruments | Share `lfo_shape_from_param()` between synth and LFO modules |
-| 3 | ADSR helper deduplication | instruments | Merge `current_adsr()` and `current_filter_adsr()` into generic `get_adsr_params(indices)` |
-| 4 | Sample rate observer pattern | instruments/dsp | Trait for propagating sample rate changes to all child components |
-| 5 | Consistent setter patterns | instruments | Standardize on either setter methods or public fields, not both |
-| 6 | Integration test crate | all | Cross-crate integration tests (synth→filter→delay→output pipeline) |
-| 7 | Magic number constants | all | Centralize hardcoded values (window size, max delay, frequency ranges) into config module |
-| 8 | `VecDeque` for undo stack | session | Replace `Vec::remove(0)` O(n) with `VecDeque::pop_front()` O(1) |
-
-### UX / User Flow (Critical)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Auto-save system | ui | Save backup every 60s; recover on crash; show unsaved indicator in title bar |
-| 2 | Background file I/O | ui | Move session save/load/export to background thread with progress dialog |
-| 3 | Save prompt on New/Open | ui | Confirm dialog before discarding unsaved changes |
-
-### UX / User Flow (High)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Error toast notifications | ui | Display user-facing errors for all failed operations (currently silent `let _ =`) |
-| 2 | Comprehensive undo/redo | ui/session | Wrap mute/solo/gain/pan/track-add in EditCommand; currently only move/trim are undoable |
-| 3 | Audio engine init feedback | ui | Show error dialog if audio device unavailable; provide fallback |
-| 4 | Playhead engine sync | ui/engine | Bidirectional sync between UI transport and audio thread SharedTransport |
-| 5 | Unsaved changes indicator | ui | Append `*` to title bar; highlight save button |
-| 6 | Crash recovery | ui | Write `.shruti_backup`; offer recovery on startup |
-
-### UX / User Flow (Medium)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Snap-to-grid / quantize | ui | Region drag positions quantized to bar/beat grid |
-| 2 | Drag visual feedback | ui | Ghost/opacity on dragged regions; cursor hints on all interactive elements |
-| 3 | Recording animation | ui | Blinking red indicator during recording |
-| 4 | Grid level-of-detail | ui | Skip grid lines when closer than 5px at high zoom |
-| 5 | Zoom boundary clamping | ui | Prevent zoom-out making session invisible; handle empty session zoom-to-fit |
-| 6 | Missing keyboard shortcuts | ui | Bind solo, arm, FFwd, export actions to keys |
-| 7 | Audio pool persistence | ui/session | Save imported/recorded audio alongside session file |
-
-### Correctness (Medium — from Round 6a)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Envelope stage_pos reset on state transitions | instruments | Reset stage_pos to 0 when entering any new stage (not just specific transitions) |
-| 2 | LFO S&H phase advancement order | instruments | S&H may sample twice at cycle boundaries due to phase advance after check |
-| 3 | PolyBLEP sawtooth — only trailing edge corrected | instruments | Add correction at phase=0 rising edge for better anti-aliasing |
-| 4 | Compressor soft knee formula verification | dsp | Verify against standard soft-knee curves (Fabfilter-style) |
-| 5 | FilePlayerNode mono→stereo silent right channel | engine | Consider channel upmixing (mono duplication to stereo) |
-| 6 | GraphProcessor try_lock fallback to stale plan | engine | Implement double-buffering or lock-free queue for plan swap |
-
-### Correctness (Low — from Round 6a)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | LUFS calculation — simplified, not EBU R128 compliant | dsp | Average per-channel RMS² across channels, not channels*frames |
-| 2 | Automation value_at dead code (lines 102-104) | session | Remove unreachable `right_idx == 0` check |
-| 3 | Synth filter cutoff modulation depth undocumented | instruments | Document octave depth mapping for LFO/envelope mod |
-| 4 | Reverb/allpass buffer size=0 panic on low sample rate | dsp | Ensure buffer size is at least 1: `.max(1)` |
-| 5 | Delay — implicit clamp of delay_samples to buffer length | dsp | Add explicit `delay_samples.min(buf_len - 1)` |
-
-### Concurrency (Medium — from Round 6b)
-
-| # | Item | Crate | Notes |
-|---|------|-------|-------|
-| 1 | Poisoned mutex silent fallback | ui/engine | Log poisoned mutex events; consider `into_inner()` recovery |
-| 2 | seek() + play() ordering not guaranteed | ui/engine | Addressed by Acquire/Release upgrade; consider SeqCst if issues persist |
-| 3 | Silent failure in audio callback render | ui/engine | Add debug logging when interleaved buffer is shorter than expected |
-| 4 | Clone of large Vec<Track> under lock | ui/engine | Use Arc<Track> or COW to avoid deep clones in update_session |
+| Pri | Item | Notes |
+|-----|------|-------|
+| H | Unified `ShrutiError` type | Consistent error handling across all crates; replace mixed `Box<dyn Error>` / `String` |
+| M | Shared test utilities crate | Deduplicate `generate_sine()`, `rms_of_buffer()` helpers |
+| M | Integration test crate | Cross-crate tests: synth→filter→delay→output pipeline |
+| M | Centralize magic numbers | Config module for hardcoded values (window size, max delay, frequency ranges) |
+| M | Consistent setter patterns | Standardize on setter methods or public fields in instruments, not both |
+| L | Unnecessary `to_vec()` in AI analysis | Pass slice references instead of cloning |
+| L | StereoPanner reuse | Reuse panner instances instead of creating per-track per-buffer |
 
 ---
 
