@@ -184,6 +184,9 @@ mod tests {
 
         preset.apply_to(&mut synth);
         let vol = synth.params().iter().find(|p| p.name == "Volume").unwrap();
-        assert!((vol.value - 1.0).abs() < f32::EPSILON, "should be clamped to max");
+        assert!(
+            (vol.value - 1.0).abs() < f32::EPSILON,
+            "should be clamped to max"
+        );
     }
 }

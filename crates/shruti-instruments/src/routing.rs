@@ -161,7 +161,10 @@ mod tests {
         assert_eq!(curve.apply(127), 127);
         // A mid-range value should be boosted
         let mid = curve.apply(32);
-        assert!(mid > 32, "soft curve should boost low velocities: got {mid}");
+        assert!(
+            mid > 32,
+            "soft curve should boost low velocities: got {mid}"
+        );
     }
 
     #[test]
@@ -171,7 +174,10 @@ mod tests {
         assert_eq!(curve.apply(127), 127);
         // A mid-range value should be reduced
         let mid = curve.apply(90);
-        assert!(mid < 90, "hard curve should reduce mid velocities: got {mid}");
+        assert!(
+            mid < 90,
+            "hard curve should reduce mid velocities: got {mid}"
+        );
     }
 
     #[test]

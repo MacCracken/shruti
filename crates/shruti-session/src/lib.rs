@@ -20,7 +20,7 @@ pub use automation::{AutomationLane, AutomationPoint, AutomationTarget, CurveTyp
 pub use edit::EditCommand;
 pub use error::SessionError;
 pub use midi::{ControlChange, MidiClip, NoteEvent};
-pub use preferences::Preferences;
+pub use preferences::{Preferences, RecordingConfig};
 pub use region::{Region, RegionId};
 pub use session::Session;
 pub use timeline::Timeline;

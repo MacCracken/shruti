@@ -61,6 +61,20 @@ impl AgentApi {
         }
     }
 
+    /// Validate that a path does not contain path traversal sequences.
+    fn validate_path(path: &str) -> Result<&Path, ApiResult> {
+        let p = Path::new(path);
+        // Reject paths with ".." components to prevent directory traversal
+        for component in p.components() {
+            if matches!(component, std::path::Component::ParentDir) {
+                return Err(ApiResult::err(
+                    "path traversal not allowed: '..' components are rejected",
+                ));
+            }
+        }
+        Ok(p)
+    }
+
     // --- Session Control ---
 
     pub fn create_session(&mut self, name: &str, sample_rate: u32, buffer_size: u32) -> ApiResult {
@@ -69,7 +83,11 @@ impl AgentApi {
     }
 
     pub fn open_session(&mut self, path: &str) -> ApiResult {
-        match SessionStore::open(Path::new(path)) {
+        let p = match Self::validate_path(path) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        match SessionStore::open(p) {
             Ok((store, session)) => {
                 self.session = Some(session);
                 self.store = Some(store);
@@ -84,8 +102,12 @@ impl AgentApi {
             Some(s) => s,
             None => return ApiResult::err("no active session"),
         };
+        let p = match Self::validate_path(path) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
 
-        match SessionStore::create(Path::new(path), session) {
+        match SessionStore::create(p, session) {
             Ok(_) => ApiResult::ok(format!("session saved to '{path}'")),
             Err(e) => ApiResult::err(format!("failed to save session: {e}")),
         }
@@ -256,7 +278,11 @@ impl AgentApi {
         let file_id = if session.audio_pool.get(audio_file).is_some() {
             audio_file.to_string()
         } else {
-            match session.audio_pool.load(Path::new(audio_file)) {
+            let audio_path = match Self::validate_path(audio_file) {
+                Ok(p) => p,
+                Err(e) => return e,
+            };
+            match session.audio_pool.load(audio_path) {
                 Ok(id) => id,
                 Err(e) => return ApiResult::err(format!("failed to load audio: {e}")),
             }
@@ -336,10 +362,17 @@ impl AgentApi {
             Some(s) => s,
             None => return ApiResult::err("no active session"),
         };
+        let p = match Self::validate_path(path) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
 
         let length = session.session_length();
         if length == 0 {
             return ApiResult::err("session is empty");
+        }
+        if length > u32::MAX as u64 {
+            return ApiResult::err("session too long for single-buffer export");
         }
 
         let channels = 2u16;
@@ -357,7 +390,7 @@ impl AgentApi {
         }
 
         let format = AudioFormat::new(session.sample_rate, channels, 0);
-        match write_wav_file(Path::new(path), &output, &format) {
+        match write_wav_file(p, &output, &format) {
             Ok(()) => ApiResult::ok(format!("exported to '{path}'")),
             Err(e) => ApiResult::err(format!("export failed: {e}")),
         }
@@ -372,10 +405,19 @@ impl AgentApi {
             Some(s) => s,
             None => return ApiResult::err("no active session"),
         };
+        let p = match Self::validate_path(path) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
 
         let length = session.session_length();
         if length == 0 {
             return ApiResult::err("session is empty");
+        }
+
+        // Guard against u64→u32 overflow (max ~24 hours at 192kHz stereo)
+        if length > u32::MAX as u64 {
+            return ApiResult::err("session too long for single-buffer export");
         }
 
         let export_format = match format {
@@ -411,7 +453,7 @@ impl AgentApi {
             channels,
         };
 
-        match write_audio_file(Path::new(path), &output, &config) {
+        match write_audio_file(p, &output, &config) {
             Ok(()) => ApiResult::ok(format!("exported to '{path}' ({format}, {bit_depth}-bit)")),
             Err(e) => ApiResult::err(format!("export failed: {e}")),
         }
@@ -442,7 +484,15 @@ impl AgentApi {
             let channels = source.channels();
             let buf = shruti_dsp::AudioBuffer::from_interleaved(samples.to_vec(), channels);
 
-            let analysis = shruti_dsp::analyze_spectrum(&buf, 0, session.sample_rate, fft_size);
+            let analysis =
+                match shruti_dsp::analyze_spectrum(&buf, 0, session.sample_rate, fft_size) {
+                    Some(a) => a,
+                    None => {
+                        return ApiResult::err(format!(
+                            "invalid FFT size {fft_size}: must be a power of 2 and <= 65536"
+                        ));
+                    }
+                };
 
             let data = serde_json::json!({
                 "peak_frequency_hz": analysis.peak_frequency,
@@ -538,7 +588,8 @@ impl AgentApi {
                         / dyn_analysis.peak_db.len() as f32;
                     let avg_rms =
                         dyn_analysis.rms_db.iter().sum::<f32>() / dyn_analysis.rms_db.len() as f32;
-                    (avg_peak, avg_rms, spec_analysis.spectral_centroid)
+                    let centroid = spec_analysis.map(|s| s.spectral_centroid).unwrap_or(0.0);
+                    (avg_peak, avg_rms, centroid)
                 } else {
                     continue;
                 };

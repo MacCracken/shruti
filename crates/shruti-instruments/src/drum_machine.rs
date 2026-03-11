@@ -337,7 +337,10 @@ mod tests {
             }
         }
         // At pitch 2.0, should finish in ~50 ticks instead of 100
-        assert!(ticks <= 55, "pitch=2.0 should halve playback time, got {ticks}");
+        assert!(
+            ticks <= 55,
+            "pitch=2.0 should halve playback time, got {ticks}"
+        );
         assert!(!pad.is_playing());
     }
 
@@ -351,7 +354,10 @@ mod tests {
 
         let (l, r) = pad.tick();
         assert!(l.abs() > 0.01, "left channel should have signal");
-        assert!(r.abs() < 0.001, "right channel should be near zero for full left pan");
+        assert!(
+            r.abs() < 0.001,
+            "right channel should be near zero for full left pan"
+        );
     }
 
     #[test]
@@ -363,7 +369,10 @@ mod tests {
         pad.trigger(127);
 
         let (l, r) = pad.tick();
-        assert!(l.abs() < 0.001, "left channel should be near zero for full right pan");
+        assert!(
+            l.abs() < 0.001,
+            "left channel should be near zero for full right pan"
+        );
         assert!(r.abs() > 0.01, "right channel should have signal");
     }
 
@@ -425,7 +434,10 @@ mod tests {
                 break;
             }
         }
-        assert!(has_nonzero, "drum machine should produce audio after trigger");
+        assert!(
+            has_nonzero,
+            "drum machine should produce audio after trigger"
+        );
     }
 
     #[test]

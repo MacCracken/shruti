@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::audio_pool::AudioPool;
 use crate::automation::AutomationTarget;
 use crate::region::Region;
@@ -8,16 +6,37 @@ use crate::transport::Transport;
 use shruti_dsp::AudioBuffer;
 use shruti_dsp::effects::StereoPanner;
 
+/// Maximum number of bus tracks supported for pre-allocated buffers.
+const MAX_BUS_TRACKS: usize = 16;
+/// Maximum number of source tracks supported for pre-allocated buffers.
+const MAX_SOURCE_TRACKS: usize = 64;
+
 /// The timeline manages multi-track playback and rendering.
 pub struct Timeline {
     /// Per-track scratch buffer.
     track_buffer: AudioBuffer,
+    /// Pre-allocated bus accumulation buffers (reused across render calls).
+    bus_buffers: Vec<AudioBuffer>,
+    /// TrackIds corresponding to each bus buffer slot.
+    bus_ids: Vec<TrackId>,
+    /// Pre-allocated source track buffers (reused across render calls).
+    source_buffers: Vec<AudioBuffer>,
+    /// Number of active source buffers in the current render pass.
+    source_count: usize,
 }
 
 impl Timeline {
     pub fn new(channels: u16, buffer_size: u32) -> Self {
         Self {
             track_buffer: AudioBuffer::new(channels, buffer_size),
+            bus_buffers: (0..MAX_BUS_TRACKS)
+                .map(|_| AudioBuffer::new(channels, buffer_size))
+                .collect(),
+            bus_ids: Vec::with_capacity(MAX_BUS_TRACKS),
+            source_buffers: (0..MAX_SOURCE_TRACKS)
+                .map(|_| AudioBuffer::new(channels, buffer_size))
+                .collect(),
+            source_count: 0,
         }
     }
 
@@ -43,16 +62,22 @@ impl Timeline {
         // Determine if any track is soloed
         let has_solo = tracks.iter().any(|t| t.solo);
 
-        // Accumulation buffers for bus tracks (keyed by TrackId)
-        let mut bus_buffers: HashMap<TrackId, AudioBuffer> = HashMap::new();
+        // Map bus tracks to pre-allocated bus buffers (no HashMap allocation)
+        self.bus_ids.clear();
+        let mut bus_count = 0;
         for track in tracks {
-            if track.kind == TrackKind::Bus {
-                bus_buffers.insert(track.id, AudioBuffer::new(channels, frames));
+            if track.kind == TrackKind::Bus && bus_count < MAX_BUS_TRACKS {
+                // Ensure the pre-allocated buffer matches the current frame size
+                if self.bus_buffers[bus_count].frames() != frames {
+                    self.bus_buffers[bus_count] = AudioBuffer::new(channels, frames);
+                }
+                self.bus_buffers[bus_count].clear();
+                self.bus_ids.push(track.id);
+                bus_count += 1;
             }
         }
 
-        // Collect post-fader buffers for non-bus, non-master tracks to mix into output
-        let mut source_buffers: Vec<AudioBuffer> = Vec::new();
+        self.source_count = 0;
 
         // First pass: render source tracks (Audio, MIDI) and route sends
         for track in tracks {
@@ -91,13 +116,13 @@ impl Timeline {
                     continue;
                 }
                 if send.position == SendPosition::PreFader
-                    && let Some(bus_buf) = bus_buffers.get_mut(&send.target)
+                    && let Some(bus_idx) = self.bus_ids.iter().position(|id| *id == send.target)
                 {
                     for frame in 0..frames {
                         for ch in 0..channels {
                             let sample = self.track_buffer.get(frame, ch) * send.level;
-                            let existing = bus_buf.get(frame, ch);
-                            bus_buf.set(frame, ch, existing + sample);
+                            let existing = self.bus_buffers[bus_idx].get(frame, ch);
+                            self.bus_buffers[bus_idx].set(frame, ch, existing + sample);
                         }
                     }
                 }
@@ -118,22 +143,27 @@ impl Timeline {
                     continue;
                 }
                 if send.position == SendPosition::PostFader
-                    && let Some(bus_buf) = bus_buffers.get_mut(&send.target)
+                    && let Some(bus_idx) = self.bus_ids.iter().position(|id| *id == send.target)
                 {
                     for frame in 0..frames {
                         for ch in 0..channels {
                             let sample = self.track_buffer.get(frame, ch) * send.level;
-                            let existing = bus_buf.get(frame, ch);
-                            bus_buf.set(frame, ch, existing + sample);
+                            let existing = self.bus_buffers[bus_idx].get(frame, ch);
+                            self.bus_buffers[bus_idx].set(frame, ch, existing + sample);
                         }
                     }
                 }
             }
 
-            // Save post-fader buffer for mixing into output
-            let mut buf = AudioBuffer::new(channels, frames);
-            buf.mix_from(&self.track_buffer);
-            source_buffers.push(buf);
+            // Save post-fader buffer into pre-allocated source buffer
+            if self.source_count < MAX_SOURCE_TRACKS {
+                if self.source_buffers[self.source_count].frames() != frames {
+                    self.source_buffers[self.source_count] = AudioBuffer::new(channels, frames);
+                }
+                self.source_buffers[self.source_count].clear();
+                self.source_buffers[self.source_count].mix_from(&self.track_buffer);
+                self.source_count += 1;
+            }
         }
 
         // Second pass: process bus tracks — apply bus gain/pan, then mix into output
@@ -148,23 +178,23 @@ impl Timeline {
                 continue;
             }
 
-            if let Some(bus_buf) = bus_buffers.get_mut(&track.id) {
+            if let Some(bus_idx) = self.bus_ids.iter().position(|id| *id == track.id) {
                 // Apply bus track gain
-                bus_buf.apply_gain(track.gain);
+                self.bus_buffers[bus_idx].apply_gain(track.gain);
 
                 // Apply bus panning
-                if bus_buf.channels() >= 2 {
+                if self.bus_buffers[bus_idx].channels() >= 2 {
                     let mut panner = StereoPanner::new(track.pan);
-                    panner.process(bus_buf);
+                    panner.process(&mut self.bus_buffers[bus_idx]);
                 }
 
-                output.mix_from(bus_buf);
+                output.mix_from(&self.bus_buffers[bus_idx]);
             }
         }
 
         // Third pass: mix source track buffers into output
-        for buf in &source_buffers {
-            output.mix_from(buf);
+        for i in 0..self.source_count {
+            output.mix_from(&self.source_buffers[i]);
         }
     }
 

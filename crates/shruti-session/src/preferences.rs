@@ -1,6 +1,66 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Recording configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingConfig {
+    /// Recording sample rate in Hz (e.g. 44100, 48000, 88200, 96000, 176400, 192000).
+    pub sample_rate: u32,
+    /// Number of recording channels (1 = mono, 2 = stereo, up to 8).
+    pub channels: u16,
+    /// Maximum recording duration in seconds (0 = unlimited up to memory cap).
+    pub max_duration_secs: u32,
+    /// Recording buffer size in frames (for the input stream callback).
+    pub buffer_size: u32,
+    /// Preferred input device name (None = system default).
+    pub input_device: Option<String>,
+}
+
+impl RecordingConfig {
+    /// Standard recording rates supported.
+    pub const SUPPORTED_RATES: &[u32] = &[44100, 48000, 88200, 96000, 176400, 192000];
+
+    /// Maximum allowed channels.
+    pub const MAX_CHANNELS: u16 = 8;
+
+    /// Calculate the maximum number of samples this config allows in the buffer.
+    /// Returns the cap in total interleaved samples (frames * channels).
+    pub fn max_buffer_samples(&self) -> usize {
+        let duration = if self.max_duration_secs == 0 {
+            1800 // Default 30 min if unlimited
+        } else {
+            self.max_duration_secs as usize
+        };
+        self.sample_rate as usize * self.channels as usize * duration
+    }
+
+    /// Validate the config, clamping values to safe ranges.
+    pub fn validated(mut self) -> Self {
+        if !Self::SUPPORTED_RATES.contains(&self.sample_rate) {
+            // Snap to nearest supported rate
+            self.sample_rate = *Self::SUPPORTED_RATES
+                .iter()
+                .min_by_key(|&&r| (r as i64 - self.sample_rate as i64).unsigned_abs())
+                .unwrap_or(&48000);
+        }
+        self.channels = self.channels.clamp(1, Self::MAX_CHANNELS);
+        self.buffer_size = self.buffer_size.clamp(64, 4096);
+        self
+    }
+}
+
+impl Default for RecordingConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: 48000,
+            channels: 2,
+            max_duration_secs: 1800, // 30 minutes
+            buffer_size: 256,
+            input_device: None,
+        }
+    }
+}
+
 /// Application preferences persisted between sessions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preferences {
@@ -22,6 +82,9 @@ pub struct Preferences {
     pub theme_path: Option<PathBuf>,
     /// Auto-save interval in seconds (0 = disabled).
     pub auto_save_interval: u32,
+    /// Recording configuration.
+    #[serde(default)]
+    pub recording: RecordingConfig,
 }
 
 impl Default for Preferences {
@@ -36,6 +99,7 @@ impl Default for Preferences {
             ui_scale: 1.0,
             theme_path: None,
             auto_save_interval: 60,
+            recording: RecordingConfig::default(),
         }
     }
 }
@@ -220,5 +284,151 @@ mod tests {
         // Should have default values (if no prefs file exists at default path)
         // At minimum, this should not panic
         assert!(prefs.sample_rate > 0);
+    }
+
+    // -- RecordingConfig tests ------------------------------------------------
+
+    #[test]
+    fn recording_config_defaults() {
+        let cfg = RecordingConfig::default();
+        assert_eq!(cfg.sample_rate, 48000);
+        assert_eq!(cfg.channels, 2);
+        assert_eq!(cfg.max_duration_secs, 1800);
+        assert_eq!(cfg.buffer_size, 256);
+        assert!(cfg.input_device.is_none());
+    }
+
+    #[test]
+    fn recording_config_max_buffer_samples() {
+        let cfg = RecordingConfig::default();
+        // 48000 * 2 * 1800 = 172_800_000
+        assert_eq!(cfg.max_buffer_samples(), 48000 * 2 * 1800);
+    }
+
+    #[test]
+    fn recording_config_max_buffer_unlimited_caps_at_30_min() {
+        let cfg = RecordingConfig {
+            max_duration_secs: 0,
+            ..Default::default()
+        };
+        // unlimited -> defaults to 1800s internally
+        assert_eq!(cfg.max_buffer_samples(), 48000 * 2 * 1800);
+    }
+
+    #[test]
+    fn recording_config_max_buffer_high_rate() {
+        let cfg = RecordingConfig {
+            sample_rate: 192000,
+            channels: 8,
+            max_duration_secs: 600,
+            ..Default::default()
+        };
+        assert_eq!(cfg.max_buffer_samples(), 192000 * 8 * 600);
+    }
+
+    #[test]
+    fn recording_config_validated_snaps_rate() {
+        let cfg = RecordingConfig {
+            sample_rate: 50000, // not a supported rate
+            ..Default::default()
+        }
+        .validated();
+        assert!(RecordingConfig::SUPPORTED_RATES.contains(&cfg.sample_rate));
+        // 50000 is closest to 48000
+        assert_eq!(cfg.sample_rate, 48000);
+    }
+
+    #[test]
+    fn recording_config_validated_clamps_channels() {
+        let too_many = RecordingConfig {
+            channels: 32,
+            ..Default::default()
+        }
+        .validated();
+        assert_eq!(too_many.channels, RecordingConfig::MAX_CHANNELS);
+
+        let zero = RecordingConfig {
+            channels: 0,
+            ..Default::default()
+        }
+        .validated();
+        assert_eq!(zero.channels, 1);
+    }
+
+    #[test]
+    fn recording_config_validated_clamps_buffer_size() {
+        let too_small = RecordingConfig {
+            buffer_size: 8,
+            ..Default::default()
+        }
+        .validated();
+        assert_eq!(too_small.buffer_size, 64);
+
+        let too_big = RecordingConfig {
+            buffer_size: 99999,
+            ..Default::default()
+        }
+        .validated();
+        assert_eq!(too_big.buffer_size, 4096);
+    }
+
+    #[test]
+    fn recording_config_validated_keeps_good_values() {
+        let cfg = RecordingConfig {
+            sample_rate: 96000,
+            channels: 4,
+            buffer_size: 512,
+            max_duration_secs: 300,
+            input_device: Some("My Mic".into()),
+        }
+        .validated();
+        assert_eq!(cfg.sample_rate, 96000);
+        assert_eq!(cfg.channels, 4);
+        assert_eq!(cfg.buffer_size, 512);
+        assert_eq!(cfg.max_duration_secs, 300);
+        assert_eq!(cfg.input_device, Some("My Mic".into()));
+    }
+
+    #[test]
+    fn recording_config_all_supported_rates_pass_validation() {
+        for &rate in RecordingConfig::SUPPORTED_RATES {
+            let cfg = RecordingConfig {
+                sample_rate: rate,
+                ..Default::default()
+            }
+            .validated();
+            assert_eq!(cfg.sample_rate, rate);
+        }
+    }
+
+    #[test]
+    fn preferences_includes_recording_config() {
+        let prefs = Preferences::default();
+        assert_eq!(prefs.recording.sample_rate, 48000);
+        assert_eq!(prefs.recording.channels, 2);
+    }
+
+    #[test]
+    fn preferences_recording_config_roundtrip() {
+        let mut prefs = Preferences::default();
+        prefs.recording = RecordingConfig {
+            sample_rate: 192000,
+            channels: 8,
+            max_duration_secs: 600,
+            buffer_size: 1024,
+            input_device: Some("USB Audio".into()),
+        };
+
+        let tmp = std::env::temp_dir().join("shruti_test_rec_prefs.json");
+        prefs.save(&tmp).unwrap();
+
+        let loaded = Preferences::load(&tmp).unwrap();
+        assert_eq!(loaded.recording.sample_rate, 192000);
+        assert_eq!(loaded.recording.channels, 8);
+        assert_eq!(loaded.recording.max_duration_secs, 600);
+        assert_eq!(loaded.recording.buffer_size, 1024);
+        assert_eq!(loaded.recording.input_device, Some("USB Audio".into()));
+
+        std::fs::remove_file(&tmp).ok();
     }
 }

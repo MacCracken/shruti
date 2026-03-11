@@ -169,11 +169,7 @@ impl Sampler {
             return Some(idx);
         }
         // If all voices active, steal the first one (oldest)
-        if self.max_voices > 0 {
-            Some(0)
-        } else {
-            None
-        }
+        if self.max_voices > 0 { Some(0) } else { None }
     }
 
     /// Read a sample from a zone with linear interpolation.
@@ -269,8 +265,7 @@ impl InstrumentNode for Sampler {
                     LoopMode::Forward => {
                         self.voices[i].play_pos += pitch_ratio;
                         let loop_start = zone.loop_start.unwrap_or(0) as f64;
-                        let loop_end =
-                            zone.loop_end.unwrap_or(zone.samples.len()) as f64;
+                        let loop_end = zone.loop_end.unwrap_or(zone.samples.len()) as f64;
                         if self.voices[i].play_pos >= loop_end {
                             self.voices[i].play_pos =
                                 loop_start + (self.voices[i].play_pos - loop_end);
@@ -280,8 +275,7 @@ impl InstrumentNode for Sampler {
                         let step = pitch_ratio * f64::from(self.voices[i].direction);
                         self.voices[i].play_pos += step;
                         let loop_start = zone.loop_start.unwrap_or(0) as f64;
-                        let loop_end =
-                            zone.loop_end.unwrap_or(zone.samples.len()) as f64;
+                        let loop_end = zone.loop_end.unwrap_or(zone.samples.len()) as f64;
                         if self.voices[i].play_pos >= loop_end {
                             self.voices[i].direction = -1;
                             self.voices[i].play_pos =
@@ -309,8 +303,8 @@ impl InstrumentNode for Sampler {
         };
 
         let zone = &self.zones[zone_index];
-        let pitch_ratio =
-            zone.pitch_ratio(note) * f64::from(zone.sample_rate) / f64::from(self.sample_rate as u32);
+        let pitch_ratio = zone.pitch_ratio(note) * f64::from(zone.sample_rate)
+            / f64::from(self.sample_rate.max(1.0));
 
         let adsr = self.current_adsr();
         let voice = &mut self.voices[voice_idx];
@@ -523,7 +517,11 @@ mod tests {
         let mut buf = AudioBuffer::new(2, 256);
         sampler.process(&[], &[], &mut buf);
 
-        assert_eq!(sampler.active_voices(), 1, "looping voice should stay active");
+        assert_eq!(
+            sampler.active_voices(),
+            1,
+            "looping voice should stay active"
+        );
 
         // The play position should have wrapped around and still be in [50, 150)
         let pos = sampler.voices[0].play_pos;
@@ -547,7 +545,11 @@ mod tests {
         let mut buf = AudioBuffer::new(2, 256);
         sampler.process(&[], &[], &mut buf);
 
-        assert_eq!(sampler.active_voices(), 1, "ping-pong voice should stay active");
+        assert_eq!(
+            sampler.active_voices(),
+            1,
+            "ping-pong voice should stay active"
+        );
         // After 256 frames at ratio ~1.0, direction should have changed at least once
         // The voice should have reversed direction
         let dir = sampler.voices[0].direction;
@@ -599,7 +601,11 @@ mod tests {
             sampler.process(&[], &[], &mut buf);
         }
 
-        assert_eq!(sampler.active_voices(), 0, "voice should finish after release");
+        assert_eq!(
+            sampler.active_voices(),
+            0,
+            "voice should finish after release"
+        );
     }
 
     #[test]

@@ -633,10 +633,7 @@ mod tests {
 
         let instruments = session.instrument_tracks();
         assert_eq!(instruments.len(), 2);
-        assert!(matches!(
-            instruments[0].kind,
-            TrackKind::Instrument { .. }
-        ));
+        assert!(matches!(instruments[0].kind, TrackKind::Instrument { .. }));
     }
 
     #[test]

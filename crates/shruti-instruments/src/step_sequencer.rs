@@ -102,11 +102,7 @@ impl StepSequencer {
                 if current_step < seq.steps.len() {
                     let step = &seq.steps[current_step];
                     if step.active && check_probability(&mut self.rng_state, step.probability) {
-                        let vel = if step.accent {
-                            127
-                        } else {
-                            step.velocity
-                        };
+                        let vel = if step.accent { 127 } else { step.velocity };
                         triggers.push((seq.pad_index, vel));
                     }
                 }
@@ -133,7 +129,6 @@ impl StepSequencer {
     pub fn current_step(&self) -> usize {
         self.current_step
     }
-
 }
 
 /// Simple xorshift-based probability check.
@@ -231,8 +226,14 @@ mod tests {
             }
         }
 
-        assert!(no_swing_frames.len() >= 2, "should have at least 2 triggers without swing");
-        assert!(swing_frames.len() >= 2, "should have at least 2 triggers with swing");
+        assert!(
+            no_swing_frames.len() >= 2,
+            "should have at least 2 triggers without swing"
+        );
+        assert!(
+            swing_frames.len() >= 2,
+            "should have at least 2 triggers with swing"
+        );
 
         // The second trigger (odd step) should be delayed with swing
         if swing_frames.len() >= 2 && no_swing_frames.len() >= 2 {

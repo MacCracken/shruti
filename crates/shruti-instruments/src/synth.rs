@@ -96,12 +96,12 @@ impl SubtractiveSynth {
             InstrumentParam::new("Lfo1Rate", 0.1, 20.0, 1.0, "Hz"),
             InstrumentParam::new("Lfo1Depth", 0.0, 1.0, 0.0, ""),
             InstrumentParam::new("Lfo1Target", 0.0, 3.0, 0.0, ""), // 0=None,1=Cutoff,2=Pitch,3=Volume
-            InstrumentParam::new("Lfo1Shape", 0.0, 5.0, 0.0, ""),  // 0=Sine,1=Tri,2=Square,3=SawUp,4=SawDown,5=S&H
+            InstrumentParam::new("Lfo1Shape", 0.0, 5.0, 0.0, ""), // 0=Sine,1=Tri,2=Square,3=SawUp,4=SawDown,5=S&H
             // LFO 2
             InstrumentParam::new("Lfo2Rate", 0.1, 20.0, 1.0, "Hz"),
             InstrumentParam::new("Lfo2Depth", 0.0, 1.0, 0.0, ""),
             InstrumentParam::new("Lfo2Target", 0.0, 3.0, 0.0, ""), // 0=None,1=Cutoff,2=Pitch,3=Volume
-            InstrumentParam::new("Lfo2Shape", 0.0, 5.0, 0.0, ""),  // 0=Sine,1=Tri,2=Square,3=SawUp,4=SawDown,5=S&H
+            InstrumentParam::new("Lfo2Shape", 0.0, 5.0, 0.0, ""), // 0=Sine,1=Tri,2=Square,3=SawUp,4=SawDown,5=S&H
         ];
 
         let oscillators = (0..MAX_VOICES)
@@ -195,9 +195,9 @@ impl SubtractiveSynth {
     fn apply_lfo(lfo_val: f32, target: u8) -> (f32, f32, f32) {
         match target {
             1 => (lfo_val, 0.0, 0.0), // cutoff
-            2 => (0.0, lfo_val, 0.0),  // pitch
-            3 => (0.0, 0.0, lfo_val),  // volume
-            _ => (0.0, 0.0, 0.0),      // none
+            2 => (0.0, lfo_val, 0.0), // pitch
+            3 => (0.0, 0.0, lfo_val), // volume
+            _ => (0.0, 0.0, 0.0),     // none
         }
     }
 }
@@ -269,12 +269,15 @@ impl InstrumentNode for SubtractiveSynth {
             self.note_on(event.note, event.velocity, event.channel);
         }
 
-        // Pre-compute per-frame LFO values
-        let mut lfo1_values = Vec::with_capacity(frames);
-        let mut lfo2_values = Vec::with_capacity(frames);
-        for _ in 0..frames {
-            lfo1_values.push(self.lfo1.tick());
-            lfo2_values.push(self.lfo2.tick());
+        // Pre-compute per-frame LFO values into stack-allocated buffer.
+        // Max buffer size for audio is typically 1024-4096 frames; 8192 is generous.
+        const MAX_LFO_FRAMES: usize = 8192;
+        let clamped_frames = frames.min(MAX_LFO_FRAMES);
+        let mut lfo1_values = [0.0f32; MAX_LFO_FRAMES];
+        let mut lfo2_values = [0.0f32; MAX_LFO_FRAMES];
+        for i in 0..clamped_frames {
+            lfo1_values[i] = self.lfo1.tick();
+            lfo2_values[i] = self.lfo2.tick();
         }
 
         // Render each active voice
@@ -292,7 +295,7 @@ impl InstrumentNode for SubtractiveSynth {
             let vel_gain = voice.velocity as f32 / 127.0;
             let mut phase = voice.phase;
 
-            for frame in 0..frames {
+            for frame in 0..clamped_frames {
                 let env_level = self.envelopes[i].tick();
                 let filter_env_level = self.filter_envelopes[i].tick();
 
@@ -566,7 +569,10 @@ mod tests {
                 break;
             }
         }
-        assert!(has_nonzero, "Synth with LFO pitch modulation should produce output");
+        assert!(
+            has_nonzero,
+            "Synth with LFO pitch modulation should produce output"
+        );
     }
 
     #[test]
@@ -589,7 +595,10 @@ mod tests {
                 break;
             }
         }
-        assert!(has_nonzero, "Synth with LFO2 volume modulation should produce output");
+        assert!(
+            has_nonzero,
+            "Synth with LFO2 volume modulation should produce output"
+        );
     }
 
     #[test]

@@ -131,7 +131,7 @@ impl AutomationLane {
             .points
             .binary_search_by_key(&end, |p| p.position)
             .unwrap_or_else(|i| i);
-        &self.points[start_idx..end_idx]
+        &self.points[start_idx..end_idx.max(start_idx)]
     }
 }
 

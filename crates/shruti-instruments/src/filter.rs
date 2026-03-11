@@ -21,45 +21,79 @@ pub struct Filter {
     // SVF state variables
     ic1eq: f32,
     ic2eq: f32,
+    // Cached coefficients (recomputed when cutoff/resonance change)
+    cached_cutoff: f32,
+    cached_resonance: f32,
+    cached_g: f32,
+    cached_k: f32,
+    cached_a1: f32,
+    cached_a2: f32,
+    cached_a3: f32,
 }
 
 impl Filter {
     pub fn new(mode: FilterMode, cutoff: f32, resonance: f32, sample_rate: f32) -> Self {
+        let cutoff = cutoff.clamp(20.0, 20000.0);
+        let resonance = resonance.clamp(0.0, 1.0);
+        let g = (std::f32::consts::PI * cutoff / sample_rate).tan();
+        let k = 2.0 - 2.0 * resonance;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
         Self {
             mode,
-            cutoff: cutoff.clamp(20.0, 20000.0),
-            resonance: resonance.clamp(0.0, 1.0),
+            cutoff,
+            resonance,
             sample_rate,
             ic1eq: 0.0,
             ic2eq: 0.0,
+            cached_cutoff: cutoff,
+            cached_resonance: resonance,
+            cached_g: g,
+            cached_k: k,
+            cached_a1: a1,
+            cached_a2: a2,
+            cached_a3: a3,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        self.update_coefficients();
+    }
+
+    /// Recompute coefficients when cutoff or resonance have changed.
+    #[inline]
+    fn update_coefficients(&mut self) {
+        self.cached_g = (std::f32::consts::PI * self.cutoff / self.sample_rate).tan();
+        self.cached_k = 2.0 - 2.0 * self.resonance;
+        self.cached_a1 = 1.0 / (1.0 + self.cached_g * (self.cached_g + self.cached_k));
+        self.cached_a2 = self.cached_g * self.cached_a1;
+        self.cached_a3 = self.cached_g * self.cached_a2;
+        self.cached_cutoff = self.cutoff;
+        self.cached_resonance = self.resonance;
     }
 
     /// Process a single sample through the SVF.
+    #[inline]
     pub fn process_sample(&mut self, input: f32) -> f32 {
-        let g = (std::f32::consts::PI * self.cutoff / self.sample_rate).tan();
-        let k = 2.0 - 2.0 * self.resonance;
-
-        let a1 = 1.0 / (1.0 + g * (g + k));
-        let a2 = g * a1;
-        let a3 = g * a2;
+        // Only recompute coefficients if cutoff or resonance changed
+        if self.cutoff != self.cached_cutoff || self.resonance != self.cached_resonance {
+            self.update_coefficients();
+        }
 
         let v3 = input - self.ic2eq;
-        let v1 = a1 * self.ic1eq + a2 * v3;
-        let v2 = self.ic2eq + a2 * self.ic1eq + a3 * v3;
+        let v1 = self.cached_a1 * self.ic1eq + self.cached_a2 * v3;
+        let v2 = self.ic2eq + self.cached_a2 * self.ic1eq + self.cached_a3 * v3;
 
         self.ic1eq = 2.0 * v1 - self.ic1eq;
         self.ic2eq = 2.0 * v2 - self.ic2eq;
 
         match self.mode {
             FilterMode::LowPass => v2,
-            FilterMode::HighPass => input - k * v1 - v2,
+            FilterMode::HighPass => input - self.cached_k * v1 - v2,
             FilterMode::BandPass => v1,
-            FilterMode::Notch => input - k * v1,
+            FilterMode::Notch => input - self.cached_k * v1,
         }
     }
 

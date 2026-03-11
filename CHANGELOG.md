@@ -160,6 +160,33 @@ Format: CalVer (YYYY.M.D-N).
   - `shruti_session`, `shruti_tracks`, `shruti_transport`, `shruti_export`, `shruti_mixer`
   - Full dispatch routing with JSON schema validation
 
+### Configurable Recording
+- `RecordingConfig` struct: sample rate (44.1–192 kHz), channels (1–8), max duration, buffer size, input device selection
+- Dynamic buffer sizing via `max_buffer_samples()` — adapts to configured rate/channels/duration
+- `validated()` clamps all fields to safe ranges (snaps to nearest supported rate, clamps channels 1–8, buffer 64–4096)
+- `Preferences.recording` field with `#[serde(default)]` for backward-compatible persistence
+- `AudioEngine` methods: `set_recording_config()`, `recording_config()`, `recording_sample_rate()`, `recording_channels()`
+- `start_recording()` uses config-driven format, device selection, and pre-allocated buffer (~10s headroom)
+- UI record handler reads channels from engine config instead of hardcoded stereo
+- 11 new RecordingConfig tests (defaults, validation, clamping, high-rate buffer calc, serialization roundtrip)
+
+### Code Audit Fixes (Rounds 1–3: Security, Performance, Memory)
+- **CRITICAL fix**: `Timeline::render()` — pre-allocated bus/source buffers (eliminated per-callback HashMap + Vec heap allocations in audio thread)
+- **CRITICAL fix**: `SubtractiveSynth::process()` — replaced heap-allocated LFO Vecs with stack-allocated fixed-size arrays (zero allocations in audio path)
+- **HIGH fix**: `Filter::process_sample()` — cached SVF coefficients (g, k, a1, a2, a3), tan() only recomputed when cutoff/resonance change
+- **HIGH fix**: `analyze_spectrum()` — replaced panic-on-invalid-input with `Option<SpectralAnalysis>` return; added MAX_FFT_SIZE (65536) limit to prevent DoS via unbounded allocation
+- **HIGH fix**: Agent API path traversal — `validate_path()` rejects `..` components in all file operations (open/save/export/add_region)
+- **HIGH fix**: Export u64→u32 overflow — guard against session lengths exceeding u32::MAX before buffer allocation
+- **HIGH fix**: Recording buffer — capped at 30 minutes (48kHz stereo) to prevent unbounded memory growth
+
+### Code Audit Fixes (Rounds 6a–6b: Correctness, Concurrency)
+- **HIGH fix**: Transport loop wrapping — `advance()` now uses modulo to handle multi-loop overshoot correctly
+- **HIGH fix**: Sampler pitch ratio — guard against division by zero with `sample_rate.max(1.0)`
+- **HIGH fix**: Atomics ordering — all `SharedTransport` operations upgraded from `Relaxed` to `Acquire`/`Release` pairs for correct cross-thread visibility
+- **HIGH fix**: `update_session()` — meter_levels resize now happens inside session_data lock to prevent track count / meter slot mismatch
+- **HIGH fix**: `points_in_range()` — boundary guard `end_idx.max(start_idx)` prevents panic when binary search returns inverted indices
+- 549 tests passing (103 ai, 67 dsp, 9 engine, 115 instruments, 3 plugin, 131 session, 121 ui)
+
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)
 - GitHub Actions: Release (Linux amd64/arm64, macOS x86/arm, Windows)

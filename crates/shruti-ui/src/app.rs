@@ -55,7 +55,7 @@ impl ShrutiApp {
                         && let Some(samples) = engine.stop_recording()
                     {
                         let position = self.state.session.transport.position;
-                        let channels = 2u16;
+                        let channels = engine.recording_channels();
                         let frames = samples.len() / channels as usize;
 
                         if frames > 0 {

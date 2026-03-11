@@ -104,10 +104,7 @@ mod tests {
         let mut lfo = Lfo::new(LfoShape::Sine, 1.0, 1.0, SR);
         for _ in 0..(SR as usize) {
             let v = lfo.tick();
-            assert!(
-                (-1.01..=1.01).contains(&v),
-                "Sine LFO out of range: {v}"
-            );
+            assert!((-1.01..=1.01).contains(&v), "Sine LFO out of range: {v}");
         }
     }
 
@@ -140,10 +137,7 @@ mod tests {
         let mut lfo = Lfo::new(LfoShape::SawUp, 1.0, 1.0, SR);
         for _ in 0..(SR as usize) {
             let v = lfo.tick();
-            assert!(
-                (-1.01..=1.01).contains(&v),
-                "SawUp LFO out of range: {v}"
-            );
+            assert!((-1.01..=1.01).contains(&v), "SawUp LFO out of range: {v}");
         }
     }
 
@@ -152,10 +146,7 @@ mod tests {
         let mut lfo = Lfo::new(LfoShape::SawDown, 1.0, 1.0, SR);
         for _ in 0..(SR as usize) {
             let v = lfo.tick();
-            assert!(
-                (-1.01..=1.01).contains(&v),
-                "SawDown LFO out of range: {v}"
-            );
+            assert!((-1.01..=1.01).contains(&v), "SawDown LFO out of range: {v}");
         }
     }
 
@@ -164,10 +155,7 @@ mod tests {
         let mut lfo = Lfo::new(LfoShape::SampleAndHold, 10.0, 1.0, SR);
         for _ in 0..(SR as usize) {
             let v = lfo.tick();
-            assert!(
-                (-1.01..=1.01).contains(&v),
-                "S&H LFO out of range: {v}"
-            );
+            assert!((-1.01..=1.01).contains(&v), "S&H LFO out of range: {v}");
         }
     }
 

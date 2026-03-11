@@ -21,16 +21,22 @@ pub struct SpectralAnalysis {
     pub spectral_rolloff: f32,
 }
 
+/// Maximum allowed FFT size to prevent excessive memory allocation.
+const MAX_FFT_SIZE: usize = 65536;
+
 /// Perform spectral analysis on an AudioBuffer.
 /// Analyzes the specified channel (default 0).
-/// fft_size must be a power of 2; the buffer is zero-padded or truncated as needed.
+/// fft_size must be a power of 2 and <= 65536; the buffer is zero-padded or truncated as needed.
+/// Returns None if fft_size is invalid (not power of 2 or exceeds maximum).
 pub fn analyze_spectrum(
     buffer: &AudioBuffer,
     channel: u16,
     sample_rate: u32,
     fft_size: usize,
-) -> SpectralAnalysis {
-    assert!(fft_size.is_power_of_two(), "FFT size must be a power of 2");
+) -> Option<SpectralAnalysis> {
+    if !fft_size.is_power_of_two() || fft_size == 0 || fft_size > MAX_FFT_SIZE {
+        return None;
+    }
 
     // Extract samples from the specified channel
     let frames = buffer.frames() as usize;
@@ -106,7 +112,7 @@ pub fn analyze_spectrum(
     }
     let spectral_rolloff = rolloff_bin as f32 * frequency_resolution;
 
-    SpectralAnalysis {
+    Some(SpectralAnalysis {
         magnitude_db,
         frequency_resolution,
         sample_rate,
@@ -115,7 +121,7 @@ pub fn analyze_spectrum(
         peak_magnitude_db,
         spectral_centroid,
         spectral_rolloff,
-    }
+    })
 }
 
 /// In-place radix-2 Cooley-Tukey FFT.
@@ -186,7 +192,7 @@ mod tests {
     #[test]
     fn silence_produces_low_magnitudes() {
         let buf = AudioBuffer::new(1, 1024);
-        let result = analyze_spectrum(&buf, 0, 48000, 1024);
+        let result = analyze_spectrum(&buf, 0, 48000, 1024).unwrap();
         assert_eq!(result.fft_size, 1024);
         assert_eq!(result.magnitude_db.len(), 513); // fft_size/2 + 1
         for &db in &result.magnitude_db {
@@ -205,7 +211,7 @@ mod tests {
                 (2.0 * std::f64::consts::PI * freq as f64 * i as f64 / sr as f64).sin() as f32;
             buf.set(i as u32, 0, sample);
         }
-        let result = analyze_spectrum(&buf, 0, sr, fft_size);
+        let result = analyze_spectrum(&buf, 0, sr, fft_size).unwrap();
         // Peak should be near 1000 Hz (within one bin)
         let bin_hz = result.frequency_resolution;
         assert!(
@@ -227,7 +233,7 @@ mod tests {
                 (2.0 * std::f64::consts::PI * freq as f64 * i as f64 / sr as f64).sin() as f32;
             buf.set(i as u32, 0, sample);
         }
-        let result = analyze_spectrum(&buf, 0, sr, fft_size);
+        let result = analyze_spectrum(&buf, 0, sr, fft_size).unwrap();
         // Centroid should be near the sine frequency
         assert!(
             (result.spectral_centroid - freq).abs() < 200.0,
@@ -254,8 +260,16 @@ mod tests {
     #[test]
     fn frequency_resolution_is_correct() {
         let buf = AudioBuffer::new(1, 1024);
-        let result = analyze_spectrum(&buf, 0, 44100, 1024);
+        let result = analyze_spectrum(&buf, 0, 44100, 1024).unwrap();
         let expected = 44100.0 / 1024.0;
         assert!((result.frequency_resolution - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn invalid_fft_size_returns_none() {
+        let buf = AudioBuffer::new(1, 1024);
+        assert!(analyze_spectrum(&buf, 0, 48000, 0).is_none());
+        assert!(analyze_spectrum(&buf, 0, 48000, 100).is_none()); // not power of 2
+        assert!(analyze_spectrum(&buf, 0, 48000, 131072).is_none()); // exceeds max
     }
 }

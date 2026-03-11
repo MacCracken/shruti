@@ -9,6 +9,7 @@ use shruti_dsp::{AudioBuffer, AudioFormat};
 type AudioCallback = Box<dyn FnMut(&mut [f32]) + Send + 'static>;
 use shruti_engine::AudioStream;
 use shruti_engine::backend::{AudioHost, CpalBackend};
+use shruti_session::RecordingConfig;
 use shruti_session::audio_pool::AudioPool;
 use shruti_session::track::Track;
 use shruti_session::{Session, Timeline, Transport};
@@ -66,6 +67,8 @@ pub struct AudioEngine {
     record_buffer: Arc<Mutex<Vec<f32>>>,
     /// Sample rate used by this engine instance.
     sample_rate: u32,
+    /// Recording configuration (sample rate, channels, max duration).
+    recording_config: RecordingConfig,
 }
 
 impl AudioEngine {
@@ -107,6 +110,7 @@ impl AudioEngine {
             meter_levels,
             record_buffer: Arc::new(Mutex::new(Vec::new())),
             sample_rate: session.sample_rate,
+            recording_config: RecordingConfig::default(),
         })
     }
 
@@ -121,14 +125,14 @@ impl AudioEngine {
         let mut render_buf: Option<AudioBuffer> = None;
 
         Box::new(move |output: &mut [f32]| {
-            let is_playing = transport.playing.load(Ordering::Relaxed);
+            let is_playing = transport.playing.load(Ordering::Acquire);
 
             if !is_playing {
                 output.fill(0.0);
                 return;
             }
 
-            let position = transport.position.load(Ordering::Relaxed);
+            let position = transport.position.load(Ordering::Acquire);
             let channels: u16 = 2;
             let frames = (output.len() / channels as usize) as u32;
 
@@ -180,7 +184,7 @@ impl AudioEngine {
 
             // Advance playback position.
             let new_pos = position + frames as u64;
-            transport.position.store(new_pos, Ordering::Relaxed);
+            transport.position.store(new_pos, Ordering::Release);
         })
     }
 
@@ -188,33 +192,33 @@ impl AudioEngine {
 
     /// Start playback from the current position.
     pub fn play(&self) {
-        self.transport.playing.store(true, Ordering::Relaxed);
+        self.transport.playing.store(true, Ordering::Release);
     }
 
     /// Stop playback and reset position to zero.
     pub fn stop(&self) {
-        self.transport.playing.store(false, Ordering::Relaxed);
-        self.transport.position.store(0, Ordering::Relaxed);
+        self.transport.position.store(0, Ordering::Release);
+        self.transport.playing.store(false, Ordering::Release);
     }
 
     /// Pause playback (keeps the current position).
     pub fn pause(&self) {
-        self.transport.playing.store(false, Ordering::Relaxed);
+        self.transport.playing.store(false, Ordering::Release);
     }
 
     /// Seek to a frame position.
     pub fn seek(&self, position: u64) {
-        self.transport.position.store(position, Ordering::Relaxed);
+        self.transport.position.store(position, Ordering::Release);
     }
 
     /// Current playback position in frames.
     pub fn position(&self) -> u64 {
-        self.transport.position.load(Ordering::Relaxed)
+        self.transport.position.load(Ordering::Acquire)
     }
 
     /// Whether playback is currently active.
     pub fn is_playing(&self) -> bool {
-        self.transport.playing.load(Ordering::Relaxed)
+        self.transport.playing.load(Ordering::Acquire)
     }
 
     // -- Session data updates -------------------------------------------------
@@ -223,13 +227,16 @@ impl AudioEngine {
     ///
     /// Call this after any change to tracks or the audio pool.
     pub fn update_session(&self, session: &Session, audio_pool: Arc<AudioPool>) {
+        let new_track_count = session.tracks.len();
         if let Ok(mut data) = self.session_data.lock() {
             data.tracks = session.tracks.clone();
             data.audio_pool = audio_pool;
             data.sample_rate = session.sample_rate;
-        }
-        if let Ok(mut levels) = self.meter_levels.lock() {
-            levels.resize(session.tracks.len() + 1, [0.0; 2]);
+            // Resize meter levels while still holding session_data lock so the
+            // audio thread never sees mismatched track count vs meter slots.
+            if let Ok(mut levels) = self.meter_levels.lock() {
+                levels.resize(new_track_count + 1, [0.0; 2]);
+            }
         }
     }
 
@@ -253,29 +260,65 @@ impl AudioEngine {
         self.sample_rate
     }
 
-    /// Start capturing audio from the default input device.
+    /// Set the recording configuration.
     ///
-    /// Clears the internal record buffer and opens an input stream whose
-    /// callback appends incoming samples.
-    pub fn start_recording(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.transport.recording.store(true, Ordering::Relaxed);
+    /// Must be called before `start_recording()`. Values are validated
+    /// (clamped to supported ranges) on assignment.
+    pub fn set_recording_config(&mut self, config: RecordingConfig) {
+        self.recording_config = config.validated();
+    }
 
-        // Clear the record buffer
+    /// Get the current recording configuration.
+    pub fn recording_config(&self) -> &RecordingConfig {
+        &self.recording_config
+    }
+
+    /// The recording sample rate (may differ from playback sample rate).
+    pub fn recording_sample_rate(&self) -> u32 {
+        self.recording_config.sample_rate
+    }
+
+    /// The number of recording channels.
+    pub fn recording_channels(&self) -> u16 {
+        self.recording_config.channels
+    }
+
+    /// Start capturing audio from the configured input device.
+    ///
+    /// Uses the recording config for sample rate, channel count, and buffer
+    /// limits. Clears the internal record buffer and opens an input stream
+    /// whose callback appends incoming samples.
+    pub fn start_recording(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.transport.recording.store(true, Ordering::Release);
+
+        let max_samples = self.recording_config.max_buffer_samples();
+        let rec_channels = self.recording_config.channels;
+        let rec_sample_rate = self.recording_config.sample_rate;
+        let rec_buffer_size = self.recording_config.buffer_size;
+
+        // Pre-allocate buffer for ~10 seconds to reduce early reallocations
+        let pre_alloc = (rec_sample_rate as usize * rec_channels as usize * 10).min(max_samples);
         if let Ok(mut buf) = self.record_buffer.lock() {
             buf.clear();
+            buf.reserve(pre_alloc);
         }
 
         let record_buf = Arc::clone(&self.record_buffer);
         let backend = CpalBackend::new();
-        let format = AudioFormat::new(self.sample_rate, 2, 256);
+        let format = AudioFormat::new(rec_sample_rate, rec_channels, rec_buffer_size);
+        let device_name = self.recording_config.input_device.clone();
 
         let callback: shruti_engine::backend::InputCallback = Box::new(move |data: &[f32]| {
             if let Ok(mut buf) = record_buf.try_lock() {
-                buf.extend_from_slice(data);
+                let remaining = max_samples.saturating_sub(buf.len());
+                let to_copy = data.len().min(remaining);
+                if to_copy > 0 {
+                    buf.extend_from_slice(&data[..to_copy]);
+                }
             }
         });
 
-        let stream = backend.open_input_stream(None, format, callback)?;
+        let stream = backend.open_input_stream(device_name.as_deref(), format, callback)?;
         stream.start()?;
         self._input_stream = Some(stream);
 
@@ -284,10 +327,12 @@ impl AudioEngine {
 
     /// Stop recording and return the captured audio samples.
     ///
-    /// Drops the input stream and drains the record buffer.  Returns `None`
-    /// if no samples were captured.
+    /// Drops the input stream and drains the record buffer. Returns `None`
+    /// if no samples were captured. The caller should use
+    /// `recording_channels()` and `recording_sample_rate()` to interpret
+    /// the returned interleaved sample data.
     pub fn stop_recording(&mut self) -> Option<Vec<f32>> {
-        self.transport.recording.store(false, Ordering::Relaxed);
+        self.transport.recording.store(false, Ordering::Release);
         self._input_stream = None; // Drop the stream, stopping capture
 
         if let Ok(mut buf) = self.record_buffer.lock() {

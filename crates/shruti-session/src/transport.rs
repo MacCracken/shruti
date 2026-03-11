@@ -71,7 +71,9 @@ impl Transport {
         if self.loop_enabled && self.loop_end > self.loop_start {
             let end = start + frames as u64;
             if end >= self.loop_end {
-                self.position = self.loop_start + (end - self.loop_end);
+                let loop_length = self.loop_end - self.loop_start;
+                let overshoot = end - self.loop_end;
+                self.position = self.loop_start + (overshoot % loop_length);
             } else {
                 self.position = end;
             }
@@ -143,5 +145,35 @@ mod tests {
         // At 120 BPM: 1 beat = 0.5 seconds = 24000 frames
         assert!((t.frames_to_beats(24000) - 1.0).abs() < 1e-10);
         assert_eq!(t.beats_to_frames(1.0), 24000);
+    }
+
+    #[test]
+    fn test_transport_loop_multi_overshoot() {
+        // Advance far past loop_end (multiple loop lengths)
+        let mut t = Transport::new(48000);
+        t.loop_enabled = true;
+        t.loop_start = 100;
+        t.loop_end = 200; // loop_length = 100
+        t.position = 190;
+        t.play();
+
+        // 190 + 256 = 446, overshoot = 446 - 200 = 246, 246 % 100 = 46
+        // position = 100 + 46 = 146
+        t.advance(256);
+        assert_eq!(t.position, 146);
+    }
+
+    #[test]
+    fn test_transport_loop_exact_boundary() {
+        let mut t = Transport::new(48000);
+        t.loop_enabled = true;
+        t.loop_start = 0;
+        t.loop_end = 256;
+        t.position = 0;
+        t.play();
+
+        // Advance exactly to loop_end
+        t.advance(256);
+        assert_eq!(t.position, 0);
     }
 }

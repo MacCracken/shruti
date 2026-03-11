@@ -49,7 +49,11 @@ impl WaveformPeaks {
     }
 
     /// Get the best mipmap level for the given samples-per-pixel ratio.
+    /// Returns empty slice if no peak data is available.
     pub fn peaks_for_zoom(&self, samples_per_pixel: f32) -> &[(f32, f32)] {
+        if self.levels.is_empty() {
+            return &[];
+        }
         let level = (samples_per_pixel.log2().max(0.0)) as usize;
         let idx = level.min(self.levels.len() - 1);
         &self.levels[idx]
