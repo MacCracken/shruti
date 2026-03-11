@@ -21,6 +21,12 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 libloading = "0.8"
 walkdir = "2"
+egui = "0.33"
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+rfd = "0.15"
+
+[patch.crates-io]
+winit = { path = "vendor/winit-0.30.13-patched" }
 
 [package]
 name = "shruti"
@@ -32,6 +38,8 @@ license = "GPL-3.0"
 [dependencies]
 shruti-engine = { path = "crates/shruti-engine" }
 shruti-dsp = { path = "crates/shruti-dsp" }
+shruti-session = { path = "crates/shruti-session" }
+shruti-ui = { path = "crates/shruti-ui" }
 clap = { workspace = true }
 rtrb = { workspace = true }
 
@@ -42,3 +50,4 @@ path = "src/main.rs"
 [[bin]]
 name = "shruti-play"
 path = "src/bin/play.rs"
+

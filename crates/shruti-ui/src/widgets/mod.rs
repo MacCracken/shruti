@@ -1,0 +1,9 @@
+pub mod automation_lane;
+pub mod fader;
+pub mod knob;
+pub mod meter;
+pub mod plugin_slot;
+pub mod region_clip;
+pub mod timeline_ruler;
+pub mod track_header;
+pub mod waveform;

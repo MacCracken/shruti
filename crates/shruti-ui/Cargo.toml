@@ -8,3 +8,12 @@ license = "GPL-3.0"
 [dependencies]
 shruti-engine = { path = "../shruti-engine" }
 shruti-session = { path = "../shruti-session" }
+shruti-dsp = { path = "../shruti-dsp" }
+shruti-plugin = { path = "../shruti-plugin" }
+egui = { workspace = true }
+eframe = { workspace = true }
+rfd = { workspace = true }
+rtrb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }

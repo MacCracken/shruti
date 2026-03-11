@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum TransportState {
     Stopped,
     Playing,
+    Paused,
     Recording,
 }
 

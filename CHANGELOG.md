@@ -31,6 +31,18 @@ Format: CalVer (YYYY.M.D-N).
 - Timeline panning: stereo balance applied per-track during render
 - Automation integration: track gain and pan automated from lanes during timeline render
 
+### Phase 5: UI
+- GPU-accelerated DAW interface using egui + eframe (wgpu + winit backends)
+- Arrangement view: timeline with tracks, region clips, waveform rendering, grid lines, playhead cursor
+- Mixer view: channel strips with fader, meter, pan knob, M/S buttons, dB readout
+- Transport bar: play/stop/record buttons, time display (hh:mm:ss + bar.beat.tick), BPM drag, loop toggle
+- Browser panel: toggleable bottom panel with Files tab (rfd import) and Plugins tab (search filter)
+- Custom widgets: `Fader`, `LevelMeter`, `Knob`, `WaveformPeaks`, `TrackHeader`, `TimelineRuler`, `RegionClip`, `AutomationLane`, `PluginSlot`
+- Theme system: JSON-serializable `ThemeColors` with 28 named colors, `apply_theme()` styling, `Theme::load()`/`save()`
+- Keyboard shortcuts: configurable `ShortcutRegistry` with 25+ default keybindings (Space=Play, Enter=Stop, R=Record, etc.)
+- View switcher: Arrangement/Mixer toggle with quick-add track button
+- Scroll zoom: Ctrl+scroll for horizontal zoom, shift/trackpad for horizontal scroll
+
 ### Phase 4: Plugin Hosting
 - `PluginInstance` trait — unified API for all plugin formats
 - CLAP host — load .clap plugins, verify `clap_entry` symbol

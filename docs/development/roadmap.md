@@ -1,7 +1,7 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
-> **Status**: Phases 1, 2, 3, 4, 7A, 7B complete — Phase 5 next
+> **Status**: Phases 1, 2, 3, 4, 5, 7A, 7B complete — Phase 6 next
 > **Tests**: 70 passing (29 dsp, 6 engine, 23 session, 3 plugin, 9 ai), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
@@ -72,17 +72,20 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Phase 5: UI
+## Phase 5: UI (Complete)
 
 **Goal:** GPU-accelerated interface for the full DAW workflow.
 
-- [ ] Rendering backend — wgpu-based 2D rendering
-- [ ] Arrangement view — Timeline with tracks, clips, and waveforms
-- [ ] Mixer view — Channel strips, faders, meters, plugin slots
-- [ ] Transport bar — Playback controls, tempo, time display
-- [ ] Browser — File browser and plugin browser panels
-- [ ] Keyboard shortcuts — Configurable key bindings
-- [ ] Theming — Dark theme with customization support
+- [x] Rendering backend — egui + eframe with wgpu + winit (GPU-accelerated immediate mode)
+- [x] Arrangement view — Timeline with tracks, region clips, waveform rendering, grid lines, playhead
+- [x] Mixer view — Channel strips with fader, meter, pan knob, M/S buttons, dB readout
+- [x] Transport bar — Play/stop/record buttons, time display, BPM drag, loop toggle
+- [x] Browser — Toggleable bottom panel with Files (rfd import) and Plugins (search filter) tabs
+- [x] Keyboard shortcuts — Configurable `ShortcutRegistry` with 25+ default keybindings
+- [x] Theming — JSON-serializable `ThemeColors` (28 colors), load/save, `apply_theme()` styling
+- [x] Custom widgets — Fader, LevelMeter, Knob, WaveformPeaks, TrackHeader, TimelineRuler, RegionClip, AutomationLane, PluginSlot
+- [x] Scroll & zoom — Ctrl+scroll zoom, shift/trackpad horizontal scroll
+- [ ] Plugin UI — Embed plugin GUIs (deferred to Phase 6)
 
 **Exit criteria:** Full DAW workflow achievable through the GUI without CLI fallback.
 
@@ -160,7 +163,7 @@ integration with daimon, hoosh, and agnoshi.
 | `shruti-dsp` | Audio buffers, format types, file I/O, effects, metering | Active |
 | `shruti-session` | Session, tracks, regions, timeline, transport, undo | Active |
 | `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust | Active |
-| `shruti-ui` | wgpu-based GPU UI | Stub |
+| `shruti-ui` | GPU-accelerated DAW UI (egui + eframe) | Active |
 | `shruti-ai` | Agent API + MCP tools for AGNOS | Active |
 
 ---
