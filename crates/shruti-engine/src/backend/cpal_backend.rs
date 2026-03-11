@@ -1,8 +1,8 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::StreamConfig;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use shruti_dsp::AudioFormat;
 
-use super::{AudioHost, AudioStream, DeviceInfo};
+use super::{AudioHost, AudioStream, DeviceInfo, InputCallback, OutputCallback};
 
 /// Audio backend powered by cpal.
 /// Supports ALSA/PipeWire (Linux), CoreAudio (macOS), WASAPI (Windows).
@@ -72,10 +72,7 @@ impl AudioHost for CpalBackend {
     }
 
     fn input_devices(&self) -> Vec<DeviceInfo> {
-        let default_name = self
-            .host
-            .default_input_device()
-            .and_then(|d| d.name().ok());
+        let default_name = self.host.default_input_device().and_then(|d| d.name().ok());
 
         self.host
             .input_devices()
@@ -99,7 +96,7 @@ impl AudioHost for CpalBackend {
         &self,
         device: Option<&str>,
         format: AudioFormat,
-        mut callback: Box<dyn FnMut(&mut [f32]) + Send + 'static>,
+        mut callback: OutputCallback,
     ) -> Result<Box<dyn AudioStream>, Box<dyn std::error::Error>> {
         let dev = self
             .find_output_device(device)
@@ -131,7 +128,7 @@ impl AudioHost for CpalBackend {
         &self,
         device: Option<&str>,
         format: AudioFormat,
-        mut callback: Box<dyn FnMut(&[f32]) + Send + 'static>,
+        mut callback: InputCallback,
     ) -> Result<Box<dyn AudioStream>, Box<dyn std::error::Error>> {
         let dev = self
             .find_input_device(device)

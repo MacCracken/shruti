@@ -1,36 +1,40 @@
 # Shruti Roadmap — Path to MVP v1
 
+> **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
+> **Status**: Phase 1-2 complete
+> **Tests**: 28 passing (6 dsp, 6 engine, 16 session), 0 clippy warnings, 0 audit vulnerabilities
+
 ## Vision
 
-Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exporting audio with plugin support. It should be usable for real music production, not just a tech demo.
+Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exporting audio with plugin support. It should be usable for real music production, not just a tech demo. Purpose-built as the primary audio workstation for the AGNOS ecosystem.
 
 ---
 
-## Phase 1: Foundation
+## Phase 1: Foundation (Complete)
 
 **Goal:** Audio plays through the system reliably.
 
-- [ ] Workspace setup — Cargo workspace with crate structure
-- [ ] Platform audio backends — ALSA, PipeWire, CoreAudio, WASAPI abstraction
-- [ ] Audio graph — Lock-free, real-time safe node graph
-- [ ] Basic buffer management — Sample-accurate playback and recording
-- [ ] Audio file I/O — WAV and FLAC read/write
-- [ ] CLI playback tool — `shruti-play` for testing the engine headless
+- [x] Workspace setup — Cargo workspace with 6 crates (engine, dsp, plugin, ui, session, ai)
+- [x] Platform audio backends — ALSA, PipeWire, JACK, CoreAudio, WASAPI via cpal abstraction
+- [x] Audio graph — Lock-free node graph with topological execution plan
+- [x] Basic buffer management — `AudioBuffer` with interleaved storage, per-channel access
+- [x] Audio file I/O — WAV/FLAC/ADPCM read (symphonia), WAV write (hound)
+- [x] CLI playback tool — `shruti-play` headless playback binary
 
 **Exit criteria:** Can play back and record a WAV file on all three platforms with <10ms latency.
 
 ---
 
-## Phase 2: Session & Tracks
+## Phase 2: Session & Tracks (Complete)
 
 **Goal:** Multi-track timeline with non-destructive editing.
 
-- [ ] Session/project model — Serializable project format (likely SQLite + sidecar audio)
-- [ ] Track types — Audio tracks, bus tracks, master bus
-- [ ] Timeline — Region-based, non-destructive clip arrangement
-- [ ] Basic editing — Cut, copy, paste, move, trim, fade in/out
-- [ ] Transport — Play, pause, stop, loop, seek, tempo/time signature
-- [ ] Undo/redo — Command-pattern undo with full history
+- [x] Session/project model — `Session` with SQLite persistence + sidecar audio pool
+- [x] Track types — Audio tracks, bus tracks, master bus (`TrackKind` enum)
+- [x] Timeline — Region-based, non-destructive clip arrangement with fade in/out
+- [x] Basic editing — Split, move, trim, fade via `EditCommand` enum + undo integration
+- [x] Transport — Play, pause, stop, loop, seek, tempo/time signature, BPM↔frame conversions
+- [x] Undo/redo — Command-pattern undo/redo with full history (`UndoManager`, 1000 deep)
 
 **Exit criteria:** Can arrange a multi-track session, edit regions, and play it back seamlessly.
 
@@ -40,7 +44,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 **Goal:** Professional signal routing and built-in effects.
 
-- [ ] Mixer — Per-track gain, pan, mute, solo
+- [ ] Mixer — Per-track gain, pan, mute, solo (gain/mute/solo done in timeline)
 - [ ] Sends & returns — Aux buses with pre/post-fader sends
 - [ ] Built-in DSP — EQ (parametric), compressor, reverb, delay, limiter
 - [ ] Metering — Peak, RMS, LUFS metering on all channels
@@ -95,19 +99,70 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Phase 7: AGNOS Integration (Post-MVP, pre-v1 tag)
+## Phase 7: AGNOS Integration
 
-**Goal:** First-class AI agent support on AGNOS.
+**Goal:** First-class AI agent support on AGNOS. Shruti becomes a native AGNOS
+application with agent-driven music production, MCP tool access, and deep
+integration with daimon, hoosh, and agnoshi.
 
-- [ ] Agent API — Structured command interface for session control
-- [ ] Agent mixing — AI-driven mix suggestions and automation
-- [ ] Voice control — Natural language session commands via AGNOS agents
-- [ ] Analysis — Real-time spectral and dynamics analysis exposed to agents
+### 7A — Agent API & MCP Tools
 
-**Exit criteria:** An AGNOS agent can open a session, arrange tracks, apply effects, mix, and export — with human oversight.
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Session control API | Medium | Open/create/save session, add/remove tracks, set transport |
+| 2 | Track & region manipulation API | Medium | Add/split/trim/move regions, set gain/pan/mute/solo |
+| 3 | Mixer control API | Small | Get/set channel parameters, send levels, master output |
+| 4 | Export API | Small | Trigger bounce to WAV/FLAC with format options |
+| 5 | MCP tools (5): `shruti_*` | Medium | `shruti_session`, `shruti_tracks`, `shruti_mixer`, `shruti_transport`, `shruti_export` |
+| 6 | Register in daimon MCP server | Small | Add to `build_tool_manifest()` + dispatch + handlers |
+
+### 7B — Agnoshi Integration
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Agnoshi intent patterns (5) | Small | `play track`, `add track`, `mix session`, `export wav`, `set tempo` |
+| 2 | Translate module (edge → MCP bridge) | Small | `translate/shruti.rs` calling MCP tools via curl |
+| 3 | Natural language session commands | Medium | "record vocals on track 2", "add reverb to guitar" |
+
+### 7C — AI-Assisted Production
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Auto-mix agent | Large | AI-driven gain staging, EQ, compression suggestions |
+| 2 | Spectral analysis API | Medium | Real-time FFT exposed to agents for frequency analysis |
+| 3 | Dynamics analysis API | Medium | RMS, peak, crest factor, loudness (LUFS) for agents |
+| 4 | Composition suggestions | Large | Agent proposes arrangement changes, chord progressions |
+| 5 | Voice control via vansh | Medium | "play from bar 16", "mute the drums", "louder on vocals" |
+
+### 7D — AGNOS Distribution
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Takumi recipe (`recipes/marketplace/shruti.toml`) | Small | Build from source, native binary |
+| 2 | Marketplace recipe with `github_release` | Small | Auto-version from release tags |
+| 3 | Sandbox profile | Small | Audio device access, PipeWire socket, session data dir |
+| 4 | Argonaut service integration | Small | Optional auto-start in Desktop mode |
+| 5 | Aethersafha Wayland integration | Medium | Embed in compositor, proper surface management |
+
+**Exit criteria:** An AGNOS agent can open a session, arrange tracks, apply effects, mix, and export — with human oversight. Shruti installable from mela marketplace.
+
+---
+
+## Crate Architecture
+
+| Crate | Purpose | Status |
+|-------|---------|--------|
+| `shruti-engine` | Real-time audio engine, cpal backend, lock-free graph | Active |
+| `shruti-dsp` | Audio buffers, format types, file I/O | Active |
+| `shruti-session` | Session, tracks, regions, timeline, transport, undo | Active |
+| `shruti-plugin` | VST3/CLAP hosting | Stub |
+| `shruti-ui` | wgpu-based GPU UI | Stub |
+| `shruti-ai` | AGNOS agent integration | Stub |
 
 ---
 
 ## MVP v1 Release
 
 Phases 1–6 complete. Phase 7 follows as the first post-MVP milestone to align with the AGNOS ecosystem.
+
+*Last Updated: 2026-03-11*

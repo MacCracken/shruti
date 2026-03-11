@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::Parser;
 use shruti_dsp::io::{read_audio_file, write_wav_file};
@@ -9,7 +9,10 @@ use shruti_engine::backend::{AudioHost, CpalBackend};
 use shruti_engine::graph::{FilePlayerNode, Graph, GraphProcessor, NodeId};
 
 #[derive(Parser)]
-#[command(name = "shruti-play", about = "Shruti audio playback and recording tool")]
+#[command(
+    name = "shruti-play",
+    about = "Shruti audio playback and recording tool"
+)]
 struct Cli {
     /// Audio file to play (WAV or FLAC)
     file: Option<PathBuf>,
@@ -58,18 +61,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(output_path) = cli.record {
-        return record(&backend, cli.device.as_ref(), cli.buffer_size, cli.sample_rate, &output_path);
+        return record(
+            &backend,
+            cli.device.as_ref(),
+            cli.buffer_size,
+            cli.sample_rate,
+            &output_path,
+        );
     }
 
-    let file = cli.file.ok_or("provide a file to play, or use --record <path>")?;
-    play(&backend, cli.device.as_ref(), cli.buffer_size, &file, cli.r#loop)
+    let file = cli
+        .file
+        .ok_or("provide a file to play, or use --record <path>")?;
+    play(
+        &backend,
+        cli.device.as_ref(),
+        cli.buffer_size,
+        &file,
+        cli.r#loop,
+    )
 }
 
 fn play(
     backend: &CpalBackend,
     device: Option<&String>,
     buffer_size: u32,
-    path: &PathBuf,
+    path: &Path,
     looping: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (buffer, file_format) = read_audio_file(path)?;
@@ -132,7 +149,7 @@ fn record(
     device: Option<&String>,
     buffer_size: u32,
     sample_rate: u32,
-    output_path: &PathBuf,
+    output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let channels = 2u16;
     let format = AudioFormat::new(sample_rate, channels, buffer_size);

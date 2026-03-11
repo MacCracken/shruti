@@ -1,7 +1,11 @@
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "shruti", version, about = "Shruti — A Rust-native Digital Audio Workstation")]
+#[command(
+    name = "shruti",
+    version,
+    about = "Shruti — A Rust-native Digital Audio Workstation"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

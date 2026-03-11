@@ -4,6 +4,11 @@ pub use cpal_backend::CpalBackend;
 
 use shruti_dsp::AudioFormat;
 
+/// Callback type for output streams (receives mutable buffer to fill).
+pub type OutputCallback = Box<dyn FnMut(&mut [f32]) + Send + 'static>;
+/// Callback type for input streams (receives recorded buffer).
+pub type InputCallback = Box<dyn FnMut(&[f32]) + Send + 'static>;
+
 /// Information about an audio device.
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
@@ -22,14 +27,14 @@ pub trait AudioHost {
         &self,
         device: Option<&str>,
         format: AudioFormat,
-        callback: Box<dyn FnMut(&mut [f32]) + Send + 'static>,
+        callback: OutputCallback,
     ) -> Result<Box<dyn AudioStream>, Box<dyn std::error::Error>>;
 
     fn open_input_stream(
         &self,
         device: Option<&str>,
         format: AudioFormat,
-        callback: Box<dyn FnMut(&[f32]) + Send + 'static>,
+        callback: InputCallback,
     ) -> Result<Box<dyn AudioStream>, Box<dyn std::error::Error>>;
 }
 

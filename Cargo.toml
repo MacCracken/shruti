@@ -15,6 +15,10 @@ rtrb = "0.3"
 symphonia = { version = "0.5", features = ["wav", "flac", "pcm", "adpcm"] }
 hound = "3.5"
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [package]
 name = "shruti"

@@ -12,7 +12,9 @@ use crate::buffer::AudioBuffer;
 use crate::format::AudioFormat;
 
 /// Read an audio file (WAV, FLAC) into an AudioBuffer.
-pub fn read_audio_file(path: &Path) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
+pub fn read_audio_file(
+    path: &Path,
+) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -29,10 +31,7 @@ pub fn read_audio_file(path: &Path) -> Result<(AudioBuffer, AudioFormat), Box<dy
     )?;
 
     let mut format = probed.format;
-    let track = format
-        .tracks()
-        .first()
-        .ok_or("no audio tracks found")?;
+    let track = format.tracks().first().ok_or("no audio tracks found")?;
 
     let channels = track
         .codec_params
@@ -41,8 +40,8 @@ pub fn read_audio_file(path: &Path) -> Result<(AudioBuffer, AudioFormat), Box<dy
         .unwrap_or(2);
     let sample_rate = track.codec_params.sample_rate.unwrap_or(48000);
 
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())?;
+    let mut decoder =
+        symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
 
     let track_id = track.id;
     let mut all_samples: Vec<f32> = Vec::new();

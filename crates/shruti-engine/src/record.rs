@@ -1,6 +1,6 @@
 use rtrb::{Consumer, Producer, RingBuffer};
-use shruti_dsp::{AudioBuffer, AudioFormat};
 use shruti_dsp::io::write_wav_file;
+use shruti_dsp::{AudioBuffer, AudioFormat};
 
 use std::path::Path;
 use std::thread;
@@ -20,9 +20,7 @@ impl RecordManager {
     pub fn new(capacity: usize) -> Self {
         let (producer, consumer) = RingBuffer::new(capacity);
 
-        let handle = thread::spawn(move || {
-            accumulate_samples(consumer)
-        });
+        let handle = thread::spawn(move || accumulate_samples(consumer));
 
         Self {
             producer,
@@ -39,7 +37,11 @@ impl RecordManager {
     }
 
     /// Stop recording and write the accumulated audio to a WAV file.
-    pub fn finish(mut self, path: &Path, format: &AudioFormat) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn finish(
+        mut self,
+        path: &Path,
+        format: &AudioFormat,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Drop the producer to signal the consumer thread to finish
         drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
 

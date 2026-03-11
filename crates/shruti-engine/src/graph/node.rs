@@ -121,7 +121,9 @@ impl AudioNode for GainNode {
 
     fn process(&mut self, inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if let Some(input) = inputs.first() {
-            output.as_interleaved_mut().copy_from_slice(input.as_interleaved());
+            output
+                .as_interleaved_mut()
+                .copy_from_slice(input.as_interleaved());
             output.apply_gain(self.gain);
         }
     }

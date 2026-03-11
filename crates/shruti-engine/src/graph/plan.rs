@@ -157,7 +157,10 @@ impl GraphProcessor {
         match guard.as_ref() {
             Some(plan) => {
                 if let Some(last_id) = plan.order.last() {
-                    plan.nodes.get(last_id).map(|n| n.is_finished()).unwrap_or(true)
+                    plan.nodes
+                        .get(last_id)
+                        .map(|n| n.is_finished())
+                        .unwrap_or(true)
                 } else {
                     true
                 }
@@ -262,10 +265,7 @@ mod tests {
         nodes.insert(a, Box::new(GainNode::new(1.0)));
         nodes.insert(b, Box::new(GainNode::new(1.0)));
 
-        let connections = vec![
-            Connection { from: a, to: b },
-            Connection { from: b, to: a },
-        ];
+        let connections = vec![Connection { from: a, to: b }, Connection { from: b, to: a }];
 
         assert!(topological_sort(&nodes, &connections).is_err());
     }

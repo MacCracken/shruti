@@ -35,10 +35,8 @@ mod tests {
 
     #[test]
     fn test_wav_roundtrip() {
-        let original = AudioBuffer::from_interleaved(
-            vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8],
-            2,
-        );
+        let original =
+            AudioBuffer::from_interleaved(vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8], 2);
         let format = AudioFormat::new(48000, 2, 0);
 
         let tmp = std::env::temp_dir().join("shruti_test_roundtrip.wav");
@@ -51,8 +49,13 @@ mod tests {
 
         for i in 0..original.sample_count() {
             let diff = (original.as_interleaved()[i] - loaded.as_interleaved()[i]).abs();
-            assert!(diff < 1e-6, "sample {} differs: {} vs {}", i,
-                original.as_interleaved()[i], loaded.as_interleaved()[i]);
+            assert!(
+                diff < 1e-6,
+                "sample {} differs: {} vs {}",
+                i,
+                original.as_interleaved()[i],
+                loaded.as_interleaved()[i]
+            );
         }
 
         std::fs::remove_file(&tmp).ok();
