@@ -257,8 +257,8 @@ mod tests {
         let frames = 4800;
         // Signal: silence then suddenly loud
         let mut data: Vec<f32> = vec![0.0; frames];
-        for i in 480..frames {
-            data[i] = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin();
+        for (idx, sample) in data.iter_mut().enumerate().skip(480) {
+            *sample = (2.0 * std::f32::consts::PI * 440.0 * idx as f32 / 48000.0).sin();
         }
 
         // Fast attack (1ms)

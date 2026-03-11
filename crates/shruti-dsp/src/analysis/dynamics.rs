@@ -154,7 +154,7 @@ mod tests {
         assert!((result.peak[0] - 1.0).abs() < 0.01);
         // RMS of sine = 1/sqrt(2) ~ 0.707
         assert!(
-            (result.rms[0] - 0.7071).abs() < 0.01,
+            (result.rms[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01,
             "RMS was {}, expected ~0.707",
             result.rms[0]
         );

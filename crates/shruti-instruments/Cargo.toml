@@ -1,0 +1,12 @@
+[package]
+name = "shruti-instruments"
+version = "2026.3.11"
+edition = "2024"
+description = "Built-in virtual instruments for Shruti"
+license = "GPL-3.0"
+
+[dependencies]
+shruti-dsp = { path = "../shruti-dsp" }
+shruti-session = { path = "../shruti-session" }
+serde = { workspace = true }
+serde_json = { workspace = true }

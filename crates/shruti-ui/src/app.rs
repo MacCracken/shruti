@@ -48,7 +48,47 @@ impl ShrutiApp {
                 self.state.session.transport.state = TransportState::Paused;
             }
             Action::Record => {
-                self.state.recording = !self.state.recording;
+                if self.state.recording {
+                    // Stop recording
+                    self.state.recording = false;
+                    if let Some(engine) = &mut self.engine
+                        && let Some(samples) = engine.stop_recording()
+                    {
+                        let position = self.state.session.transport.position;
+                        let channels = 2u16;
+                        let frames = samples.len() / channels as usize;
+
+                        if frames > 0 {
+                            let buf = shruti_dsp::AudioBuffer::from_interleaved(samples, channels);
+                            let recording_id = format!("recording_{}", uuid::Uuid::new_v4());
+                            self.state
+                                .session
+                                .audio_pool
+                                .insert(recording_id.clone(), buf);
+
+                            // Add region to the first armed track
+                            for track in &mut self.state.session.tracks {
+                                if track.armed {
+                                    let region = shruti_session::Region::new(
+                                        recording_id.clone(),
+                                        position,
+                                        0,
+                                        frames as u64,
+                                    );
+                                    track.add_region(region);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Start recording
+                    if let Some(engine) = &mut self.engine
+                        && engine.start_recording().is_ok()
+                    {
+                        self.state.recording = true;
+                    }
+                }
             }
             Action::ToggleLoop => {
                 self.state.session.transport.loop_enabled =

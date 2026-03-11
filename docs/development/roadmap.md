@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
-> **Status**: Phases 1–7C, 7A, 7B complete — MVP v1 reached
-> **Tests**: 409 passing (66 dsp, 9 engine, 103 session, 3 plugin, 103 ai, 125 ui), 51% line coverage, 0 clippy warnings, 0 audit vulnerabilities
+> **Status**: Phases 1–7C, 7A, 7B, 8A complete — MVP v1 + instruments in progress
+> **Tests**: 441 passing (66 dsp, 9 engine, 31 instruments, 108 session, 3 plugin, 103 ai, 121 ui), 51% line coverage, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -26,6 +26,8 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 7B — Agnoshi | Natural language | 7 intent patterns, translate module, curl bridge |
 | 7C — AI Production | Analysis & auto-mix | Spectral FFT, dynamics (peak/RMS/LUFS/crest), auto-mix suggestions, composition analysis, voice control (12 intents) |
 | — Editing & Routing | Interactive arrangement | Track reorder (drag), region move/trim (drag), bus send routing (3-pass render), submixes |
+| — Live Recording | Audio capture | Input stream wiring, start/stop recording, buffer→pool→region pipeline |
+| 8A — Instrument Engine | Built-in instruments | `shruti-instruments` crate, InstrumentNode trait, VoiceManager, Oscillator (PolyBLEP), ADSR Envelope, SubtractiveSynth |
 
 ---
 
@@ -63,17 +65,17 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Post-MVP: Built-in Instruments
+## Phase 8: Built-in Instruments
 
 **Goal:** Native virtual instruments — synths, drum machines, samplers — so Shruti is a complete production environment without requiring third-party plugins.
 
-### 8A — Instrument Engine
+### 8A — Instrument Engine (Complete)
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | `InstrumentNode` trait | Medium | Audio graph node: receives MIDI, produces audio; shared interface for all instruments (built-in + AI) |
+| 1 | `InstrumentNode` trait | Done | Audio graph node: receives MIDI, produces audio; shared interface for all instruments (built-in + AI) |
 | 2 | Instrument ↔ MIDI routing | Medium | MIDI track → InstrumentNode routing, channel filtering, velocity curves, note range splits |
-| 3 | Polyphony manager | Medium | Voice allocation (mono/poly/legato), voice stealing (oldest/quietest/lowest), configurable max voices |
+| 3 | Polyphony manager | Done | Voice allocation (mono/poly/legato), voice stealing (oldest/quietest/lowest), configurable max voices |
 | 4 | Instrument preset system | Medium | JSON preset format with parameter snapshots, save/load/share, factory preset packs, user presets |
 | 5 | Per-instrument undo | Small | Parameter changes are undoable via existing UndoManager |
 
@@ -81,7 +83,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Subtractive synth | Large | 2–3 oscillators (saw/square/tri/sine/noise), multi-mode filter (LP/HP/BP/notch), ADSR envelopes (amp + filter), LFOs |
+| 1 | Subtractive synth | Done (basic) | Single oscillator with PolyBLEP (saw/square/tri/sine/noise), ADSR envelope, 16-voice polyphony. TODO: multi-osc, filter, LFOs |
 | 2 | Wavetable synth | Large | Wavetable loading (.wav frames), wavetable morphing, position modulation, built-in factory tables |
 | 3 | FM synth | Large | 4–6 operator FM, algorithm selection (classic DX-style), ratio/detune/feedback per operator, FM matrix |
 | 4 | Modulation matrix | Medium | Assignable mod sources (LFO, envelope, velocity, aftertouch, mod wheel) → any parameter; per-voice and global |
@@ -211,7 +213,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust | Active |
 | `shruti-ui` | GPU-accelerated DAW UI (egui + eframe) | Active |
 | `shruti-ai` | Agent API + MCP tools for AGNOS | Active |
-| `shruti-instruments` | Built-in instruments: synths, drum machine, sampler, InstrumentNode trait | Planned |
+| `shruti-instruments` | Built-in instruments: synths, drum machine, sampler, InstrumentNode trait | Active |
 | `shruti-ml` | Music LLM runtime, tokenizer, AI player agents | Planned |
 
 ---
@@ -224,7 +226,7 @@ Phases 1–6 complete. Phase 7 and MIDI 2.0 follow as post-MVP milestones.
 
 ## Test Coverage Roadmap (40% → 80%)
 
-Current: 379 tests, 51% line coverage (1954/3824 lines).
+Current: 441 tests, 51% line coverage.
 
 | Milestone | Target | Focus Areas | Est. Tests |
 |-----------|--------|-------------|------------|
@@ -239,4 +241,4 @@ Current: 379 tests, 51% line coverage (1954/3824 lines).
 - Session code: full undo/redo cycle tests for every EditCommand variant
 - Plugin code: mock plugin instances, test scanner with fixture directories
 
-*Last Updated: 2026-03-11*
+*Last Updated: 2026-03-11 (8A complete, recording wired)*

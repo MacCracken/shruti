@@ -107,9 +107,11 @@ mod tests {
 
     #[test]
     fn test_preferences_roundtrip() {
-        let mut prefs = Preferences::default();
-        prefs.sample_rate = 44100;
-        prefs.audio_device = Some("My Interface".into());
+        let mut prefs = Preferences {
+            sample_rate: 44100,
+            audio_device: Some("My Interface".into()),
+            ..Default::default()
+        };
         prefs.add_recent(PathBuf::from("/projects/song1.shruti"));
         prefs.add_recent(PathBuf::from("/projects/song2.shruti"));
 
@@ -130,8 +132,10 @@ mod tests {
 
     #[test]
     fn test_recent_sessions() {
-        let mut prefs = Preferences::default();
-        prefs.max_recent = 3;
+        let mut prefs = Preferences {
+            max_recent: 3,
+            ..Default::default()
+        };
 
         prefs.add_recent(PathBuf::from("/a.shruti"));
         prefs.add_recent(PathBuf::from("/b.shruti"));

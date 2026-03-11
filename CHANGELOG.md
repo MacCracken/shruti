@@ -107,6 +107,23 @@ Format: CalVer (YYYY.M.D-N).
 - Voice control via vansh: `parse_voice_input()` — 12 intent categories (transport, seek, mute/solo, volume, pan, tempo, mix, analysis) with confidence scoring
 - MCP tool: `shruti_analysis` — 4 actions (spectrum, dynamics, auto_mix, composition) for agent-driven analysis
 
+### Live Recording
+- `AudioEngine::start_recording()` — opens cpal input stream, captures audio to lock-free ring buffer
+- `AudioEngine::stop_recording()` — stops input stream, returns captured samples
+- `SharedTransport::recording` atomic flag for UI state sync
+- Record action wired in UI: arm track → start capture → stop → create `AudioBuffer` → insert into pool → add Region to armed track
+
+### Phase 8A: Instrument Engine
+- New `shruti-instruments` crate with 5 modules: instrument, voice, oscillator, envelope, synth
+- `InstrumentNode` trait: receives MIDI events (`NoteEvent`, `ControlChange`), produces audio; shared interface for all instruments
+- `InstrumentParam`: named parameter with min/max/default, normalized get/set, unit label
+- `VoiceManager`: polyphony management with configurable max voices and steal modes (Oldest, Quietest, Lowest, None)
+- `Voice`: state machine (Idle/Active/Releasing), MIDI note→frequency conversion, phase accumulator, age tracking
+- `Oscillator`: PolyBLEP anti-aliased waveforms (Sine, Saw, Square, Triangle, Noise), detune in cents
+- `Envelope`: ADSR generator with per-stage sample counting, trigger/release, smooth release from any level
+- `SubtractiveSynth`: 16-voice polyphonic synth implementing `InstrumentNode` — 7 parameters (waveform, ADSR, volume, detune)
+- 31 new tests: voice management, oscillator waveforms, envelope stages, synth audio output
+
 ### Phase 7A: AGNOS Agent API
 - `AgentApi` — structured JSON API for AI agents to control sessions
   - Session: create, open, save, info

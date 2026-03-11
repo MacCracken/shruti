@@ -789,7 +789,7 @@ mod tests {
         let result = api.composition_suggest();
         assert!(result.success);
         let data = result.data.unwrap();
-        assert!(data["suggestions"].as_array().unwrap().len() > 0);
+        assert!(!data["suggestions"].as_array().unwrap().is_empty());
     }
 
     #[test]

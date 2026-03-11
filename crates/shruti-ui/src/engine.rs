@@ -58,9 +58,14 @@ pub struct AudioEngine {
     pub transport: Arc<SharedTransport>,
     session_data: Arc<Mutex<SharedSessionData>>,
     _output_stream: Option<Box<dyn AudioStream>>,
+    _input_stream: Option<Box<dyn AudioStream>>,
     /// Peak levels: Vec of (peak_left, peak_right) per track slot.
     /// The last slot is the master / mixed output.
     pub meter_levels: Arc<Mutex<Vec<[f32; 2]>>>,
+    /// Accumulates incoming audio from the input callback during recording.
+    record_buffer: Arc<Mutex<Vec<f32>>>,
+    /// Sample rate used by this engine instance.
+    sample_rate: u32,
 }
 
 impl AudioEngine {
@@ -98,7 +103,10 @@ impl AudioEngine {
             transport,
             session_data,
             _output_stream: Some(stream),
+            _input_stream: None,
             meter_levels,
+            record_buffer: Arc::new(Mutex::new(Vec::new())),
+            sample_rate: session.sample_rate,
         })
     }
 
@@ -236,5 +244,72 @@ impl AudioEngine {
             .lock()
             .map(|l| l.clone())
             .unwrap_or_default()
+    }
+
+    // -- Recording ------------------------------------------------------------
+
+    /// The sample rate this engine was initialised with.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Start capturing audio from the default input device.
+    ///
+    /// Clears the internal record buffer and opens an input stream whose
+    /// callback appends incoming samples.
+    pub fn start_recording(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.transport.recording.store(true, Ordering::Relaxed);
+
+        // Clear the record buffer
+        if let Ok(mut buf) = self.record_buffer.lock() {
+            buf.clear();
+        }
+
+        let record_buf = Arc::clone(&self.record_buffer);
+        let backend = CpalBackend::new();
+        let format = AudioFormat::new(self.sample_rate, 2, 256);
+
+        let callback: shruti_engine::backend::InputCallback = Box::new(move |data: &[f32]| {
+            if let Ok(mut buf) = record_buf.try_lock() {
+                buf.extend_from_slice(data);
+            }
+        });
+
+        let stream = backend.open_input_stream(None, format, callback)?;
+        stream.start()?;
+        self._input_stream = Some(stream);
+
+        Ok(())
+    }
+
+    /// Stop recording and return the captured audio samples.
+    ///
+    /// Drops the input stream and drains the record buffer.  Returns `None`
+    /// if no samples were captured.
+    pub fn stop_recording(&mut self) -> Option<Vec<f32>> {
+        self.transport.recording.store(false, Ordering::Relaxed);
+        self._input_stream = None; // Drop the stream, stopping capture
+
+        if let Ok(mut buf) = self.record_buffer.lock() {
+            if buf.is_empty() {
+                return None;
+            }
+            Some(std::mem::take(&mut *buf))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_transport_recording_flag() {
+        let transport = SharedTransport::new();
+        assert!(!transport.recording.load(Ordering::Relaxed));
+        transport.recording.store(true, Ordering::Relaxed);
+        assert!(transport.recording.load(Ordering::Relaxed));
     }
 }
