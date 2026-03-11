@@ -1,8 +1,10 @@
 use crate::audio_pool::AudioPool;
+use crate::automation::AutomationTarget;
 use crate::region::Region;
 use crate::track::{Track, TrackKind};
 use crate::transport::Transport;
 use shruti_dsp::AudioBuffer;
+use shruti_dsp::effects::StereoPanner;
 
 /// The timeline manages multi-track playback and rendering.
 pub struct Timeline {
@@ -46,9 +48,30 @@ impl Timeline {
             self.track_buffer.clear();
             self.render_track(track, position, frames, channels, audio_pool);
 
-            // Apply track gain and pan
-            self.track_buffer.apply_gain(track.gain);
-            // TODO: Apply panning in Phase 3
+            // Apply automation overrides for this buffer position
+            let mut gain = track.gain;
+            let mut pan = track.pan;
+            for lane in &track.automation {
+                if !lane.enabled {
+                    continue;
+                }
+                if let Some(value) = lane.value_at(position) {
+                    match &lane.target {
+                        AutomationTarget::TrackGain => gain = value,
+                        AutomationTarget::TrackPan => pan = value,
+                        _ => {}
+                    }
+                }
+            }
+
+            // Apply track gain
+            self.track_buffer.apply_gain(gain);
+
+            // Apply panning (stereo only)
+            if self.track_buffer.channels() >= 2 {
+                let mut panner = StereoPanner::new(pan);
+                panner.process(&mut self.track_buffer);
+            }
 
             output.mix_from(&self.track_buffer);
         }

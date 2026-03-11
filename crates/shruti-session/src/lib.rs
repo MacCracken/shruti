@@ -3,6 +3,7 @@
 #![deny(unsafe_code)]
 
 pub mod audio_pool;
+pub mod automation;
 pub mod edit;
 pub mod region;
 pub mod session;
@@ -12,10 +13,11 @@ pub mod track;
 pub mod transport;
 pub mod undo;
 
+pub use automation::{AutomationLane, AutomationPoint, AutomationTarget, CurveType};
 pub use edit::EditCommand;
 pub use region::{Region, RegionId};
 pub use session::Session;
 pub use timeline::Timeline;
-pub use track::{Track, TrackId, TrackKind};
+pub use track::{Send, SendPosition, Track, TrackId, TrackKind};
 pub use transport::{Transport, TransportState};
 pub use undo::UndoManager;

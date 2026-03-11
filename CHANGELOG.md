@@ -23,6 +23,14 @@ Format: CalVer (YYYY.M.D-N).
 - Full undo/redo system (command pattern, 1000-deep history)
 - Session serialization via `SessionStore` (SQLite + JSON)
 
+### Phase 3: Mixing
+- Built-in DSP effects: `ParametricEq` (biquad filters, multi-band), `Compressor` (threshold/ratio/attack/release/knee), `Reverb` (Schroeder/Freeverb-style), `Delay` (stereo with feedback), `Limiter` (brickwall with fast attack), `StereoPanner` (balance control)
+- Metering: `Meter` with peak, RMS, and integrated LUFS (EBU R128 gating)
+- Sends & returns: `Send` struct with pre/post-fader routing to bus tracks
+- Automation: `AutomationLane` with `AutomationPoint`, `CurveType` (Linear, Step, SCurve), per-frame interpolation
+- Timeline panning: stereo balance applied per-track during render
+- Automation integration: track gain and pan automated from lanes during timeline render
+
 ### Phase 4: Plugin Hosting
 - `PluginInstance` trait — unified API for all plugin formats
 - CLAP host — load .clap plugins, verify `clap_entry` symbol

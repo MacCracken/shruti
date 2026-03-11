@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::automation::AutomationLane;
 use crate::region::{Region, RegionId};
 
 /// Unique identifier for a track.
@@ -30,6 +31,26 @@ pub enum TrackKind {
     Master,
 }
 
+/// Pre/post fader send position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SendPosition {
+    PreFader,
+    PostFader,
+}
+
+/// A send from one track to a bus.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Send {
+    /// Target bus track.
+    pub target: TrackId,
+    /// Send level (linear gain, 0.0 to 1.0).
+    pub level: f32,
+    /// Pre or post fader.
+    pub position: SendPosition,
+    /// Whether this send is enabled.
+    pub enabled: bool,
+}
+
 /// A track in the session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
@@ -50,8 +71,10 @@ pub struct Track {
     pub armed: bool,
     /// Number of channels (typically 2 for stereo).
     pub channels: u16,
-    /// IDs of bus tracks this track sends to.
-    pub sends: Vec<TrackId>,
+    /// Aux sends to bus tracks.
+    pub sends: Vec<Send>,
+    /// Automation lanes for this track.
+    pub automation: Vec<AutomationLane>,
 }
 
 impl Track {
@@ -68,6 +91,7 @@ impl Track {
             armed: false,
             channels: 2,
             sends: Vec::new(),
+            automation: Vec::new(),
         }
     }
 
@@ -84,6 +108,7 @@ impl Track {
             armed: false,
             channels: 2,
             sends: Vec::new(),
+            automation: Vec::new(),
         }
     }
 
@@ -100,6 +125,7 @@ impl Track {
             armed: false,
             channels: 2,
             sends: Vec::new(),
+            automation: Vec::new(),
         }
     }
 

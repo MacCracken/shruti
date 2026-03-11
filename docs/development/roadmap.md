@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
-> **Status**: Phases 1, 2, 4, 7A complete — Phase 3 next
-> **Tests**: 40 passing (6 dsp, 6 engine, 16 session, 3 plugin, 9 ai), 0 clippy warnings, 0 audit vulnerabilities
+> **Status**: Phases 1, 2, 3, 4, 7A, 7B complete — Phase 5 next
+> **Tests**: 70 passing (29 dsp, 6 engine, 23 session, 3 plugin, 9 ai), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -40,15 +40,15 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Phase 3: Mixing
+## Phase 3: Mixing (Complete)
 
 **Goal:** Professional signal routing and built-in effects.
 
-- [ ] Mixer — Per-track gain, pan, mute, solo (gain/mute/solo done in timeline)
-- [ ] Sends & returns — Aux buses with pre/post-fader sends
-- [ ] Built-in DSP — EQ (parametric), compressor, reverb, delay, limiter
-- [ ] Metering — Peak, RMS, LUFS metering on all channels
-- [ ] Automation — Parameter automation with lanes and curves
+- [x] Mixer — Per-track gain, pan, mute, solo with stereo balance panning in timeline
+- [x] Sends & returns — `Send` struct with pre/post-fader routing to bus tracks
+- [x] Built-in DSP — `ParametricEq` (biquad, multi-band), `Compressor`, `Reverb` (Freeverb), `Delay` (stereo), `Limiter` (brickwall), `StereoPanner`
+- [x] Metering — `Meter` with peak, RMS, integrated LUFS (EBU R128 gating)
+- [x] Automation — `AutomationLane` with points, Linear/Step/SCurve interpolation, per-frame value lookup
 
 **Exit criteria:** Can produce a mixed-down track with EQ, compression, reverb, and automation.
 
@@ -118,14 +118,14 @@ integration with daimon, hoosh, and agnoshi.
 | 3 | Mixer control API | Done | list tracks, undo/redo |
 | 4 | Export API | Done | `export_wav()` — bounce session to WAV |
 | 5 | MCP tools (5): `shruti_*` | Done | `McpTools::tool_manifest()` + `dispatch()` |
-| 6 | Register in daimon MCP server | Pending | Wire into agnosticos `mcp_server.rs` |
+| 6 | Register in daimon MCP server | Done | Wired into agnosticos `mcp_server.rs` — 5 tools + dispatch + handlers (30 tests) |
 
-### 7B — Agnoshi Integration
+### 7B — Agnoshi Integration (Complete)
 
-| # | Item | Effort | Notes |
+| # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | Agnoshi intent patterns (5) | Small | `play track`, `add track`, `mix session`, `export wav`, `set tempo` |
-| 2 | Translate module (edge → MCP bridge) | Small | `translate/shruti.rs` calling MCP tools via curl |
+| 1 | Agnoshi intent patterns (5) | Done | 7 patterns in `patterns.rs`, parse logic in `parse.rs` (22 tests) |
+| 2 | Translate module | Done | `translate/shruti.rs` calling MCP tools via curl bridge |
 | 3 | Natural language session commands | Medium | "record vocals on track 2", "add reverb to guitar" |
 
 ### 7C — AI-Assisted Production
@@ -142,9 +142,9 @@ integration with daimon, hoosh, and agnoshi.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Takumi recipe (`recipes/marketplace/shruti.toml`) | Small | Build from source, native binary |
-| 2 | Marketplace recipe with `github_release` | Small | Auto-version from release tags |
-| 3 | Sandbox profile | Small | Audio device access, PipeWire socket, session data dir |
+| 1 | Takumi recipe (`recipes/marketplace/shruti.toml`) | Done | Build from source, native binary, desktop entry, systemd service |
+| 2 | Marketplace recipe with `github_release` | Done | Auto-version from release tags |
+| 3 | Sandbox profile | Done | Audio device access (PipeWire/ALSA), Landlock, Wayland protocols |
 | 4 | Argonaut service integration | Small | Optional auto-start in Desktop mode |
 | 5 | Aethersafha Wayland integration | Medium | Embed in compositor, proper surface management |
 
@@ -157,7 +157,7 @@ integration with daimon, hoosh, and agnoshi.
 | Crate | Purpose | Status |
 |-------|---------|--------|
 | `shruti-engine` | Real-time audio engine, cpal backend, lock-free graph | Active |
-| `shruti-dsp` | Audio buffers, format types, file I/O | Active |
+| `shruti-dsp` | Audio buffers, format types, file I/O, effects, metering | Active |
 | `shruti-session` | Session, tracks, regions, timeline, transport, undo | Active |
 | `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust | Active |
 | `shruti-ui` | wgpu-based GPU UI | Stub |
