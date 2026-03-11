@@ -8,4 +8,5 @@ license = "GPL-3.0"
 [dependencies]
 shruti-dsp = { path = "../shruti-dsp" }
 cpal = { workspace = true }
+midir = { workspace = true }
 rtrb = { workspace = true }

@@ -146,4 +146,75 @@ mod tests {
         assert_eq!(prefs.recent_sessions[0], PathBuf::from("/b.shruti"));
         assert_eq!(prefs.recent_sessions.len(), 3);
     }
+
+    #[test]
+    fn test_default_path_returns_a_path() {
+        let path = Preferences::default_path();
+        // Should end with the expected filename
+        assert!(path.ends_with("shruti/preferences.json"));
+        // Should be an absolute path or at least have components
+        assert!(path.components().count() > 1);
+    }
+
+    #[test]
+    fn test_add_recent_deduplication() {
+        let mut prefs = Preferences::default();
+        prefs.add_recent(PathBuf::from("/x.shruti"));
+        prefs.add_recent(PathBuf::from("/y.shruti"));
+        prefs.add_recent(PathBuf::from("/x.shruti")); // duplicate
+
+        // Should have only 2 entries, not 3
+        assert_eq!(prefs.recent_sessions.len(), 2);
+        // The duplicate should be moved to the front
+        assert_eq!(prefs.recent_sessions[0], PathBuf::from("/x.shruti"));
+        assert_eq!(prefs.recent_sessions[1], PathBuf::from("/y.shruti"));
+    }
+
+    #[test]
+    fn test_load_bad_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad_path = dir.path().join("bad.json");
+        std::fs::write(&bad_path, "this is not valid json{{{").unwrap();
+
+        let result = Preferences::load(&bad_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_nonexistent_file() {
+        let result = Preferences::load(Path::new("/tmp/nonexistent_shruti_prefs_xyz.json"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_to_nested_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested_path = dir
+            .path()
+            .join("deeply")
+            .join("nested")
+            .join("dir")
+            .join("prefs.json");
+
+        let prefs = Preferences::default();
+        // The parent directories don't exist yet; save should create them
+        let result = prefs.save(&nested_path);
+        assert!(result.is_ok());
+        assert!(nested_path.exists());
+
+        // Verify the file is valid JSON and roundtrips
+        let loaded = Preferences::load(&nested_path).unwrap();
+        assert_eq!(loaded.sample_rate, prefs.sample_rate);
+        assert_eq!(loaded.buffer_size, prefs.buffer_size);
+    }
+
+    #[test]
+    fn test_load_or_default_missing_file() {
+        // load_or_default should return defaults if the file doesn't exist
+        // We can't easily control default_path, but we know it falls back
+        let prefs = Preferences::load_or_default();
+        // Should have default values (if no prefs file exists at default path)
+        // At minimum, this should not panic
+        assert!(prefs.sample_rate > 0);
+    }
 }

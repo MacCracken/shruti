@@ -16,12 +16,27 @@ pub struct DeviceInfo {
     pub is_default: bool,
     pub is_input: bool,
     pub is_output: bool,
+    pub max_channels: u16,
+    pub supported_sample_rates: Vec<u32>,
 }
 
 /// Trait for platform audio host abstraction.
 pub trait AudioHost {
     fn output_devices(&self) -> Vec<DeviceInfo>;
     fn input_devices(&self) -> Vec<DeviceInfo>;
+
+    /// Return all devices, merging input and output entries that share a name.
+    fn all_devices(&self) -> Vec<DeviceInfo> {
+        let mut devices = self.output_devices();
+        for input in self.input_devices() {
+            if let Some(existing) = devices.iter_mut().find(|d| d.name == input.name) {
+                existing.is_input = true;
+            } else {
+                devices.push(input);
+            }
+        }
+        devices
+    }
 
     fn open_output_stream(
         &self,

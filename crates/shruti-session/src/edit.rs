@@ -96,6 +96,8 @@ pub enum EditCommand {
     ToggleTrackMute { track_id: TrackId },
     /// Toggle track solo.
     ToggleTrackSolo { track_id: TrackId },
+    /// Move a track from one index to another.
+    MoveTrack { from_index: usize, to_index: usize },
     /// Compound command (multiple edits as one undoable action).
     Compound { commands: Vec<EditCommand> },
 }

@@ -4,6 +4,7 @@
 //! immediate-mode UI with custom-painted DAW widgets.
 
 pub mod app;
+pub mod engine;
 pub mod input;
 pub mod state;
 pub mod theme;

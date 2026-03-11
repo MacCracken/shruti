@@ -38,3 +38,50 @@ impl Default for AudioFormat {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_format_construction() {
+        let fmt = AudioFormat::new(44100, 2, 512);
+        assert_eq!(fmt.sample_rate, 44100);
+        assert_eq!(fmt.channels, 2);
+        assert_eq!(fmt.buffer_size, 512);
+    }
+
+    #[test]
+    fn test_audio_format_default() {
+        let fmt = AudioFormat::default();
+        assert_eq!(fmt.sample_rate, 48000);
+        assert_eq!(fmt.channels, 2);
+        assert_eq!(fmt.buffer_size, 256);
+    }
+
+    #[test]
+    fn test_buffer_duration_secs() {
+        let fmt = AudioFormat::new(48000, 2, 480);
+        let dur = fmt.buffer_duration_secs();
+        assert!((dur - 0.01).abs() < 1e-9, "480/48000 = 0.01s, got {dur}");
+    }
+
+    #[test]
+    fn test_buffer_duration_ms() {
+        let fmt = AudioFormat::new(48000, 2, 480);
+        let dur_ms = fmt.buffer_duration_ms();
+        assert!(
+            (dur_ms - 10.0).abs() < 1e-6,
+            "480/48000 = 10ms, got {dur_ms}"
+        );
+    }
+
+    #[test]
+    fn test_audio_format_equality() {
+        let a = AudioFormat::new(48000, 2, 256);
+        let b = AudioFormat::new(48000, 2, 256);
+        let c = AudioFormat::new(44100, 2, 256);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+}

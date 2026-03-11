@@ -174,4 +174,129 @@ mod tests {
         let back = linear_to_db(linear);
         assert!((back - db).abs() < 0.001);
     }
+
+    #[test]
+    fn test_soft_knee_behavior() {
+        let comp = Compressor::new(48000.0);
+        // Default: threshold=-20, ratio=4, knee=6
+
+        // Below the knee entirely (below threshold - half_knee = -23)
+        let gain_below = comp.compute_gain_db(-26.0);
+        // In the knee region (between -23 and -17)
+        let gain_in_knee = comp.compute_gain_db(-18.0);
+        // Above the knee entirely (above threshold + half_knee = -17)
+        let gain_above = comp.compute_gain_db(-14.0);
+
+        // Below knee: no compression
+        assert!(
+            gain_below.abs() < 0.01,
+            "Below knee should have ~0 dB gain reduction: {gain_below}"
+        );
+
+        // Compare soft knee vs hard knee at the same point above threshold
+        let mut comp_hard = Compressor::new(48000.0);
+        comp_hard.knee_db = 0.0;
+        let gain_hard = comp_hard.compute_gain_db(-18.0);
+
+        // Soft knee should compress less than hard knee at the same input level
+        // in the transition region (soft knee gain should be closer to 0 / less negative)
+        assert!(
+            gain_in_knee > gain_hard,
+            "Soft knee should compress less than hard knee in transition: soft={gain_in_knee}, hard={gain_hard}"
+        );
+
+        // Above knee: significant compression (negative gain)
+        assert!(
+            gain_above < 0.0,
+            "Above knee should have compression: {gain_above}"
+        );
+    }
+
+    #[test]
+    fn test_makeup_gain() {
+        let frames = 4800;
+        let data: Vec<f32> = (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin() * 0.1)
+            .collect();
+
+        // Without makeup gain
+        let mut comp_no_makeup = Compressor::new(48000.0);
+        comp_no_makeup.threshold_db = -20.0;
+        comp_no_makeup.ratio = 4.0;
+        comp_no_makeup.makeup_db = 0.0;
+        comp_no_makeup.knee_db = 0.0;
+        let mut buf1 = AudioBuffer::from_interleaved(data.clone(), 1);
+        comp_no_makeup.process(&mut buf1);
+        let rms_no_makeup: f32 = (0..frames)
+            .map(|i| buf1.get(i as u32, 0).powi(2))
+            .sum::<f32>()
+            / frames as f32;
+
+        // With 12 dB makeup gain
+        let mut comp_makeup = Compressor::new(48000.0);
+        comp_makeup.threshold_db = -20.0;
+        comp_makeup.ratio = 4.0;
+        comp_makeup.makeup_db = 12.0;
+        comp_makeup.knee_db = 0.0;
+        let mut buf2 = AudioBuffer::from_interleaved(data, 1);
+        comp_makeup.process(&mut buf2);
+        let rms_makeup: f32 = (0..frames)
+            .map(|i| buf2.get(i as u32, 0).powi(2))
+            .sum::<f32>()
+            / frames as f32;
+
+        assert!(
+            rms_makeup > rms_no_makeup * 2.0,
+            "Makeup gain should increase output: with={rms_makeup}, without={rms_no_makeup}"
+        );
+    }
+
+    #[test]
+    fn test_attack_release_time_constants() {
+        // Fast attack should compress quickly, slow attack should let transients through
+        let frames = 4800;
+        // Signal: silence then suddenly loud
+        let mut data: Vec<f32> = vec![0.0; frames];
+        for i in 480..frames {
+            data[i] = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin();
+        }
+
+        // Fast attack (1ms)
+        let mut comp_fast = Compressor::new(48000.0);
+        comp_fast.threshold_db = -20.0;
+        comp_fast.ratio = 10.0;
+        comp_fast.attack = 0.001;
+        comp_fast.release = 0.1;
+        comp_fast.makeup_db = 0.0;
+        comp_fast.knee_db = 0.0;
+        let mut buf_fast = AudioBuffer::from_interleaved(data.clone(), 1);
+        comp_fast.process(&mut buf_fast);
+
+        // Slow attack (100ms)
+        let mut comp_slow = Compressor::new(48000.0);
+        comp_slow.threshold_db = -20.0;
+        comp_slow.ratio = 10.0;
+        comp_slow.attack = 0.1;
+        comp_slow.release = 0.1;
+        comp_slow.makeup_db = 0.0;
+        comp_slow.knee_db = 0.0;
+        let mut buf_slow = AudioBuffer::from_interleaved(data, 1);
+        comp_slow.process(&mut buf_slow);
+
+        // With slow attack, the initial transient (first ~50 samples after onset)
+        // should be louder than with fast attack
+        let transient_start = 480;
+        let transient_end = 530;
+        let peak_fast: f32 = (transient_start..transient_end)
+            .map(|i| buf_fast.get(i as u32, 0).abs())
+            .fold(0.0_f32, f32::max);
+        let peak_slow: f32 = (transient_start..transient_end)
+            .map(|i| buf_slow.get(i as u32, 0).abs())
+            .fold(0.0_f32, f32::max);
+
+        assert!(
+            peak_slow > peak_fast,
+            "Slow attack should let more transient through: slow={peak_slow}, fast={peak_fast}"
+        );
+    }
 }

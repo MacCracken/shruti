@@ -7,6 +7,8 @@
 
 pub mod agent_api;
 pub mod mcp;
+pub mod voice;
 
 pub use agent_api::AgentApi;
 pub use mcp::McpTools;
+pub use voice::{VoiceAction, VoiceIntent, parse_voice_input};

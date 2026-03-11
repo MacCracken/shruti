@@ -248,4 +248,172 @@ mod tests {
         assert_eq!(buf.get(0, 0), 0.5);
         assert_eq!(buf.get(0, 1), -0.5);
     }
+
+    fn generate_sine(freq: f32, sample_rate: f32, frames: usize, amplitude: f32) -> Vec<f32> {
+        (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin() * amplitude)
+            .collect()
+    }
+
+    fn rms_of_buffer(buf: &AudioBuffer, channel: u16, frames: usize) -> f32 {
+        let sum: f32 = (0..frames)
+            .map(|i| buf.get(i as u32, channel).powi(2))
+            .sum();
+        (sum / frames as f32).sqrt()
+    }
+
+    #[test]
+    fn test_low_shelf_boosts_low_frequencies() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::LowShelf, 500.0, 12.0, 0.707));
+
+        let frames = 4800;
+        // Low frequency tone (100 Hz) should be boosted
+        let data = generate_sine(100.0, 48000.0, frames, 0.3);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+        assert!(
+            rms_after > rms_before * 1.5,
+            "Low shelf should boost 100 Hz: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_high_shelf_boosts_high_frequencies() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::HighShelf, 2000.0, 12.0, 0.707));
+
+        let frames = 4800;
+        // High frequency tone (10 kHz) should be boosted
+        let data = generate_sine(10000.0, 48000.0, frames, 0.3);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+        assert!(
+            rms_after > rms_before * 1.5,
+            "High shelf should boost 10 kHz: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_lowpass_attenuates_high_frequencies() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::LowPass, 500.0, 0.0, 0.707));
+
+        let frames = 4800;
+        let data = generate_sine(5000.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+        assert!(
+            rms_after < rms_before * 0.3,
+            "LowPass at 500Hz should strongly attenuate 5kHz: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_highpass_attenuates_low_frequencies() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::HighPass, 5000.0, 0.0, 0.707));
+
+        let frames = 4800;
+        let data = generate_sine(100.0, 48000.0, frames, 0.5);
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        let rms_before = rms_of_buffer(&buf, 0, frames);
+        eq.process(&mut buf);
+        let rms_after = rms_of_buffer(&buf, 0, frames);
+        assert!(
+            rms_after < rms_before * 0.3,
+            "HighPass at 5kHz should strongly attenuate 100Hz: before={rms_before}, after={rms_after}"
+        );
+    }
+
+    #[test]
+    fn test_enabling_disabling_bands() {
+        let mut eq = ParametricEq::new(48000.0);
+        let mut band = EqBand::new(FilterType::Peak, 1000.0, 12.0, 1.0);
+        band.enabled = true;
+        eq.add_band(band);
+
+        let frames = 4800;
+        let data = generate_sine(1000.0, 48000.0, frames, 0.3);
+
+        // Process with band enabled
+        let mut buf1 = AudioBuffer::from_interleaved(data.clone(), 1);
+        eq.process(&mut buf1);
+        let rms_enabled = rms_of_buffer(&buf1, 0, frames);
+
+        // Disable and reset
+        eq.bands[0].enabled = false;
+        eq.reset();
+        let mut buf2 = AudioBuffer::from_interleaved(data.clone(), 1);
+        eq.process(&mut buf2);
+        let rms_disabled = rms_of_buffer(&buf2, 0, frames);
+
+        assert!(
+            rms_enabled > rms_disabled * 1.5,
+            "Enabled band should boost more than disabled: enabled={rms_enabled}, disabled={rms_disabled}"
+        );
+
+        // Re-verify disabled is close to original
+        let rms_orig = rms_of_buffer(&AudioBuffer::from_interleaved(data, 1), 0, frames);
+        assert!(
+            (rms_disabled - rms_orig).abs() < 0.01,
+            "Disabled band should pass through: disabled={rms_disabled}, orig={rms_orig}"
+        );
+    }
+
+    #[test]
+    fn test_set_sample_rate_updates_coefficients() {
+        let mut eq = ParametricEq::new(48000.0);
+        eq.add_band(EqBand::new(FilterType::LowPass, 1000.0, 0.0, 0.707));
+
+        // Store coefficients at 48kHz
+        let b0_48k = eq.bands[0].b0;
+
+        // Change to 96kHz — coefficients should change
+        eq.set_sample_rate(96000.0);
+        let b0_96k = eq.bands[0].b0;
+
+        assert!(
+            (b0_48k - b0_96k).abs() > 1e-6,
+            "Coefficients should change when sample rate changes: b0@48k={b0_48k}, b0@96k={b0_96k}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_bands_active() {
+        let mut eq = ParametricEq::new(48000.0);
+        // Low shelf boost + high shelf boost
+        eq.add_band(EqBand::new(FilterType::LowShelf, 300.0, 6.0, 0.707));
+        eq.add_band(EqBand::new(FilterType::HighShelf, 5000.0, 6.0, 0.707));
+
+        let frames = 4800;
+        // Test that both a low and high frequency get boosted
+        let data_low = generate_sine(100.0, 48000.0, frames, 0.3);
+        let mut buf_low = AudioBuffer::from_interleaved(data_low, 1);
+        let rms_before_low = rms_of_buffer(&buf_low, 0, frames);
+        eq.process(&mut buf_low);
+        let rms_after_low = rms_of_buffer(&buf_low, 0, frames);
+
+        eq.reset();
+        let data_high = generate_sine(10000.0, 48000.0, frames, 0.3);
+        let mut buf_high = AudioBuffer::from_interleaved(data_high, 1);
+        let rms_before_high = rms_of_buffer(&buf_high, 0, frames);
+        eq.process(&mut buf_high);
+        let rms_after_high = rms_of_buffer(&buf_high, 0, frames);
+
+        assert!(
+            rms_after_low > rms_before_low * 1.3,
+            "Low freq should be boosted by low shelf"
+        );
+        assert!(
+            rms_after_high > rms_before_high * 1.3,
+            "High freq should be boosted by high shelf"
+        );
+    }
 }

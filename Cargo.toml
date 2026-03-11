@@ -20,6 +20,7 @@ serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 libloading = "0.8"
+midir = "0.10"
 walkdir = "2"
 egui = "0.33"
 eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }

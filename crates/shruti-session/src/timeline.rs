@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::audio_pool::AudioPool;
 use crate::automation::AutomationTarget;
 use crate::region::Region;
-use crate::track::{Track, TrackKind};
+use crate::track::{SendPosition, Track, TrackId, TrackKind};
 use crate::transport::Transport;
 use shruti_dsp::AudioBuffer;
 use shruti_dsp::effects::StereoPanner;
@@ -20,7 +22,11 @@ impl Timeline {
     }
 
     /// Render one buffer of audio from all tracks at the current transport position.
-    /// Returns the mixed output in the provided buffer.
+    ///
+    /// Rendering happens in multiple passes:
+    /// 1. Render all non-bus, non-master tracks into per-track buffers and process sends.
+    /// 2. Mix bus track accumulated audio (from sends) into the output.
+    /// 3. Mix all non-bus, non-master track audio into the output.
     pub fn render(
         &mut self,
         tracks: &[Track],
@@ -37,11 +43,26 @@ impl Timeline {
         // Determine if any track is soloed
         let has_solo = tracks.iter().any(|t| t.solo);
 
+        // Accumulation buffers for bus tracks (keyed by TrackId)
+        let mut bus_buffers: HashMap<TrackId, AudioBuffer> = HashMap::new();
         for track in tracks {
+            if track.kind == TrackKind::Bus {
+                bus_buffers.insert(track.id, AudioBuffer::new(channels, frames));
+            }
+        }
+
+        // Collect post-fader buffers for non-bus, non-master tracks to mix into output
+        let mut source_buffers: Vec<AudioBuffer> = Vec::new();
+
+        // First pass: render source tracks (Audio, MIDI) and route sends
+        for track in tracks {
+            if track.kind == TrackKind::Bus || track.kind == TrackKind::Master {
+                continue;
+            }
             if track.muted {
                 continue;
             }
-            if has_solo && !track.solo && track.kind != TrackKind::Master {
+            if has_solo && !track.solo {
                 continue;
             }
 
@@ -64,6 +85,24 @@ impl Timeline {
                 }
             }
 
+            // Process pre-fader sends before applying gain/pan
+            for send in &track.sends {
+                if !send.enabled {
+                    continue;
+                }
+                if send.position == SendPosition::PreFader
+                    && let Some(bus_buf) = bus_buffers.get_mut(&send.target)
+                {
+                    for frame in 0..frames {
+                        for ch in 0..channels {
+                            let sample = self.track_buffer.get(frame, ch) * send.level;
+                            let existing = bus_buf.get(frame, ch);
+                            bus_buf.set(frame, ch, existing + sample);
+                        }
+                    }
+                }
+            }
+
             // Apply track gain
             self.track_buffer.apply_gain(gain);
 
@@ -73,7 +112,59 @@ impl Timeline {
                 panner.process(&mut self.track_buffer);
             }
 
-            output.mix_from(&self.track_buffer);
+            // Process post-fader sends after applying gain/pan
+            for send in &track.sends {
+                if !send.enabled {
+                    continue;
+                }
+                if send.position == SendPosition::PostFader
+                    && let Some(bus_buf) = bus_buffers.get_mut(&send.target)
+                {
+                    for frame in 0..frames {
+                        for ch in 0..channels {
+                            let sample = self.track_buffer.get(frame, ch) * send.level;
+                            let existing = bus_buf.get(frame, ch);
+                            bus_buf.set(frame, ch, existing + sample);
+                        }
+                    }
+                }
+            }
+
+            // Save post-fader buffer for mixing into output
+            let mut buf = AudioBuffer::new(channels, frames);
+            buf.mix_from(&self.track_buffer);
+            source_buffers.push(buf);
+        }
+
+        // Second pass: process bus tracks — apply bus gain/pan, then mix into output
+        for track in tracks {
+            if track.kind != TrackKind::Bus {
+                continue;
+            }
+            if track.muted {
+                continue;
+            }
+            if has_solo && !track.solo {
+                continue;
+            }
+
+            if let Some(bus_buf) = bus_buffers.get_mut(&track.id) {
+                // Apply bus track gain
+                bus_buf.apply_gain(track.gain);
+
+                // Apply bus panning
+                if bus_buf.channels() >= 2 {
+                    let mut panner = StereoPanner::new(track.pan);
+                    panner.process(bus_buf);
+                }
+
+                output.mix_from(bus_buf);
+            }
+        }
+
+        // Third pass: mix source track buffers into output
+        for buf in &source_buffers {
+            output.mix_from(buf);
         }
     }
 
@@ -129,6 +220,7 @@ impl Timeline {
 mod tests {
     use super::*;
     use crate::region::Region;
+    use crate::track::Send;
 
     #[test]
     fn test_timeline_render_single_track() {
@@ -172,5 +264,105 @@ mod tests {
         // Should read source frames 1 and 2 (values 0.5 and 0.25)
         assert!((output.get(0, 0) - 0.5).abs() < 1e-6);
         assert!((output.get(1, 0) - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_send_routes_audio_to_bus() {
+        // Create an audio track and a bus track
+        let mut pool = AudioPool::new();
+        let samples: Vec<f32> = (0..1024).map(|i| (i as f32 * 0.01).sin() * 0.8).collect();
+        let buf = AudioBuffer::from_interleaved(samples, 2);
+        pool.insert("drums_audio".to_string(), buf);
+
+        let mut audio_track = Track::new_audio("Drums");
+        let _audio_id = audio_track.id;
+        audio_track.add_region(Region::new("drums_audio".to_string(), 0, 0, 512));
+
+        let bus_track = Track::new_bus("Reverb Bus");
+        let bus_id = bus_track.id;
+
+        // Add a send from drums to reverb bus at 50% level
+        audio_track.sends.push(Send {
+            target: bus_id,
+            level: 0.5,
+            position: SendPosition::PostFader,
+            enabled: true,
+        });
+
+        let tracks = vec![audio_track, bus_track];
+
+        // Render
+        let mut tl = Timeline::new(2, 512);
+        let transport = Transport::new(48000);
+        let mut output = AudioBuffer::new(2, 512);
+        tl.render(&tracks, &transport, &pool, &mut output);
+
+        // Output should contain audio (both direct track audio and bus contribution)
+        let has_audio = output.as_interleaved().iter().any(|&s| s.abs() > 0.001);
+        assert!(has_audio, "expected audio output with send routing");
+
+        // The output should be louder than just the direct signal because the bus
+        // also contributes. With a 0.5 send, total gain at some samples should be ~1.5x
+        // (1.0 direct + 0.5 send through bus).
+        // Verify the bus actually contributed by checking the output is larger than
+        // the source signal alone.
+        let direct_only_max = (0..512)
+            .map(|i| ((i as f32 * 0.01).sin() * 0.8).abs())
+            .fold(0.0f32, f32::max);
+        let output_max = output
+            .as_interleaved()
+            .iter()
+            .copied()
+            .fold(0.0f32, |a, b| a.max(b.abs()));
+        assert!(
+            output_max > direct_only_max,
+            "bus send should add to the output: output_max={output_max}, direct_max={direct_only_max}"
+        );
+    }
+
+    #[test]
+    fn test_pre_fader_send_ignores_track_gain() {
+        let mut pool = AudioPool::new();
+        // Constant 0.5 on both channels for 4 frames
+        let samples: Vec<f32> = vec![0.5; 8];
+        let buf = AudioBuffer::from_interleaved(samples, 2);
+        pool.insert("src".to_string(), buf);
+
+        let mut audio_track = Track::new_audio("Src");
+        audio_track.gain = 0.0; // Mute the track gain
+        audio_track.add_region(Region::new("src".to_string(), 0, 0, 4));
+
+        let bus_track = Track::new_bus("Bus");
+        let bus_id = bus_track.id;
+
+        // Pre-fader send at full level
+        audio_track.sends.push(Send {
+            target: bus_id,
+            level: 1.0,
+            position: SendPosition::PreFader,
+            enabled: true,
+        });
+
+        let tracks = vec![audio_track, bus_track];
+
+        let mut tl = Timeline::new(2, 4);
+        let transport = Transport::new(48000);
+        let mut output = AudioBuffer::new(2, 4);
+        tl.render(&tracks, &transport, &pool, &mut output);
+
+        // Even though the track gain is 0, the pre-fader send should have routed
+        // the original audio to the bus, so we should hear the bus output.
+        let has_audio = output.as_interleaved().iter().any(|&s| s.abs() > 0.001);
+        assert!(
+            has_audio,
+            "pre-fader send should route audio even when track gain is zero"
+        );
+
+        // The output should be approximately 0.5 (from bus only, direct track is silent)
+        assert!(
+            (output.get(0, 0) - 0.5).abs() < 1e-4,
+            "bus should carry pre-fader signal: got {}",
+            output.get(0, 0)
+        );
     }
 }

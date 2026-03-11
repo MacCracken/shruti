@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use cpal::StreamConfig;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use shruti_dsp::AudioFormat;
@@ -59,11 +61,34 @@ impl AudioHost for CpalBackend {
                 devices
                     .filter_map(|d| {
                         let name = d.name().ok()?;
+                        let (max_channels, supported_sample_rates) =
+                            match d.supported_output_configs() {
+                                Ok(configs) => {
+                                    let mut max_ch: u16 = 0;
+                                    let mut rates = BTreeSet::new();
+                                    for cfg in configs {
+                                        let ch = cfg.channels();
+                                        if ch > max_ch {
+                                            max_ch = ch;
+                                        }
+                                        rates.insert(cfg.min_sample_rate().0);
+                                        rates.insert(cfg.max_sample_rate().0);
+                                    }
+                                    if max_ch == 0 {
+                                        (2, vec![44100, 48000, 96000])
+                                    } else {
+                                        (max_ch, rates.into_iter().collect())
+                                    }
+                                }
+                                Err(_) => (2, vec![44100, 48000, 96000]),
+                            };
                         Some(DeviceInfo {
                             is_default: default_name.as_deref() == Some(&name),
                             name,
                             is_input: false,
                             is_output: true,
+                            max_channels,
+                            supported_sample_rates,
                         })
                     })
                     .collect()
@@ -80,11 +105,34 @@ impl AudioHost for CpalBackend {
                 devices
                     .filter_map(|d| {
                         let name = d.name().ok()?;
+                        let (max_channels, supported_sample_rates) =
+                            match d.supported_input_configs() {
+                                Ok(configs) => {
+                                    let mut max_ch: u16 = 0;
+                                    let mut rates = BTreeSet::new();
+                                    for cfg in configs {
+                                        let ch = cfg.channels();
+                                        if ch > max_ch {
+                                            max_ch = ch;
+                                        }
+                                        rates.insert(cfg.min_sample_rate().0);
+                                        rates.insert(cfg.max_sample_rate().0);
+                                    }
+                                    if max_ch == 0 {
+                                        (2, vec![44100, 48000, 96000])
+                                    } else {
+                                        (max_ch, rates.into_iter().collect())
+                                    }
+                                }
+                                Err(_) => (2, vec![44100, 48000, 96000]),
+                            };
                         Some(DeviceInfo {
                             is_default: default_name.as_deref() == Some(&name),
                             name,
                             is_input: true,
                             is_output: false,
+                            max_channels,
+                            supported_sample_rates,
                         })
                     })
                     .collect()
@@ -173,5 +221,30 @@ impl AudioStream for CpalStream {
     fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.stream.pause()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::AudioHost;
+
+    #[test]
+    fn all_devices_merges_input_output() {
+        let backend = CpalBackend::new();
+        let all = backend.all_devices();
+        // In CI there may be no devices, just verify no panic
+        for device in &all {
+            assert!(!device.name.is_empty());
+        }
+    }
+
+    #[test]
+    fn output_devices_have_channels() {
+        let backend = CpalBackend::new();
+        for device in backend.output_devices() {
+            // max_channels should be at least 1 (or default 2)
+            assert!(device.max_channels >= 1);
+        }
     }
 }

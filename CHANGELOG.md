@@ -66,6 +66,46 @@ Format: CalVer (YYYY.M.D-N).
 - `PluginNode` — integrate any plugin into the audio graph
 - `PluginHost` — manage plugin instances with slot-based activation
 
+### Engine↔UI Integration
+- `AudioEngine` — cpal-backed audio output with lock-free transport (`SharedTransport` via atomics) and `SharedSessionData` (Arc<Mutex> with `try_lock` for non-blocking audio thread)
+- `Timeline` rendering in audio callback: real-time playback of multi-track sessions
+- All 17 keyboard actions wired: undo/redo, cut/copy/paste, delete, split, duplicate, new/open/save/export session, zoom-to-fit, fast-forward, new bus track, toggle arm
+- Waveform rendering inside region clips via `WaveformPeaks::from_samples()` + `draw_waveform()`
+- Automation lane rendering in arrangement view
+- MIDI clip rendering with colored rectangles, note bars, and clip names
+- Meter level sync from engine to UI mixer view
+- Drag-and-drop loads audio files into `AudioPool` (arrangement + browser)
+
+### Audio & MIDI Device Enumeration
+- Enhanced `DeviceInfo` with `max_channels` and `supported_sample_rates` fields
+- `CpalBackend` extracts channel counts and sample rates from `supported_output_configs()`/`supported_input_configs()`
+- `AudioHost::all_devices()` — merges input/output devices with unified I/O flags
+- MIDI port enumeration via `midir`: `enumerate_midi_ports()` returns `MidiPortInfo` (name, direction)
+- Settings view: lists audio interfaces (default indicator, I/O direction, channel count, sample rates) and MIDI devices (inputs/outputs)
+- `DeviceCache` with on-demand refresh to avoid scanning every frame
+- `ViewMode::Settings` — new view accessible from view switcher
+- `Session::audio_device_name` field for device preference persistence
+
+### Editing & Routing
+- Track reordering: `Session::move_track()`, `swap_tracks()` with master-track protection
+- `EditCommand::MoveTrack` with full undo/redo support
+- Bus send routing: 3-pass `Timeline::render()` — pre-fader sends, post-fader sends, bus accumulation into master
+- `Session::add_send()` / `remove_send()` with bus-track validation
+- Interactive arrangement view: region click-to-select with accent highlight border
+- Region drag-to-move with live preview and undo integration
+- Region trim handles: 5px resize zones at left/right edges, `ResizeHorizontal` cursor, live trim start/end
+- Track header drag-to-reorder with visual drop indicator line
+- `ArrangementDrag` enum (MoveRegion, TrimStart, TrimEnd, ReorderTrack) for drag state tracking
+- Pending action collection pattern to avoid borrow conflicts in egui immediate mode
+
+### Phase 7C: AI-Assisted Production
+- Spectral analysis API: radix-2 FFT, `analyze_spectrum()` returning peak frequency, spectral centroid, spectral rolloff, magnitude spectrum in dB
+- Dynamics analysis API: `analyze_dynamics()` returning peak, RMS, true peak (4x oversampled), crest factor, LUFS, dynamic range per channel
+- Auto-mix agent: `auto_mix_suggest()` — per-track gain staging (target -18 dBFS RMS), stereo pan spread, EQ suggestions based on spectral centroid
+- Composition suggestions: `composition_suggest()` — arrangement structure, instrumentation, tempo recommendations based on session analysis
+- Voice control via vansh: `parse_voice_input()` — 12 intent categories (transport, seek, mute/solo, volume, pan, tempo, mix, analysis) with confidence scoring
+- MCP tool: `shruti_analysis` — 4 actions (spectrum, dynamics, auto_mix, composition) for agent-driven analysis
+
 ### Phase 7A: AGNOS Agent API
 - `AgentApi` — structured JSON API for AI agents to control sessions
   - Session: create, open, save, info

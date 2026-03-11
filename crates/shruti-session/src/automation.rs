@@ -266,4 +266,153 @@ mod tests {
         assert!(lane.remove_point_near(105, 10).is_some());
         assert!(lane.points.is_empty());
     }
+
+    #[test]
+    fn test_step_interpolation_holds_value() {
+        let mut lane = AutomationLane::new(AutomationTarget::TrackPan);
+        lane.add_point(AutomationPoint {
+            position: 0,
+            value: 0.0,
+            curve: CurveType::Step,
+        });
+        lane.add_point(AutomationPoint {
+            position: 100,
+            value: 1.0,
+            curve: CurveType::Step,
+        });
+        lane.add_point(AutomationPoint {
+            position: 200,
+            value: 0.5,
+            curve: CurveType::Step,
+        });
+
+        // Between first and second, should hold first value
+        assert_eq!(lane.value_at(1).unwrap(), 0.0);
+        assert_eq!(lane.value_at(99).unwrap(), 0.0);
+        // Between second and third, should hold second value
+        assert_eq!(lane.value_at(150).unwrap(), 1.0);
+        assert_eq!(lane.value_at(199).unwrap(), 1.0);
+        // At third point exactly
+        assert_eq!(lane.value_at(200).unwrap(), 0.5);
+    }
+
+    #[test]
+    fn test_scurve_endpoints_and_symmetry() {
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        lane.add_point(AutomationPoint {
+            position: 0,
+            value: 0.0,
+            curve: CurveType::SCurve,
+        });
+        lane.add_point(AutomationPoint {
+            position: 1000,
+            value: 1.0,
+            curve: CurveType::SCurve,
+        });
+
+        // Endpoints
+        assert!((lane.value_at(0).unwrap() - 0.0).abs() < 0.001);
+        assert!((lane.value_at(1000).unwrap() - 1.0).abs() < 0.001);
+
+        // Midpoint should be exactly 0.5
+        assert!((lane.value_at(500).unwrap() - 0.5).abs() < 0.001);
+
+        // Symmetry: value at 250 + value at 750 should equal 1.0
+        let v250 = lane.value_at(250).unwrap();
+        let v750 = lane.value_at(750).unwrap();
+        assert!((v250 + v750 - 1.0).abs() < 0.01);
+
+        // S-curve should be slower than linear near edges
+        let v100 = lane.value_at(100).unwrap();
+        assert!(v100 < 0.1); // linear would be 0.1, s-curve should be less
+    }
+
+    #[test]
+    fn test_empty_lane_returns_none() {
+        let lane = AutomationLane::new(AutomationTarget::TrackGain);
+        assert!(lane.value_at(0).is_none());
+        assert!(lane.value_at(1000).is_none());
+    }
+
+    #[test]
+    fn test_single_point_lane() {
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        lane.add_point(AutomationPoint {
+            position: 500,
+            value: 0.75,
+            curve: CurveType::Linear,
+        });
+
+        // Before the point
+        assert_eq!(lane.value_at(0).unwrap(), 0.75);
+        // At the point
+        assert_eq!(lane.value_at(500).unwrap(), 0.75);
+        // After the point
+        assert_eq!(lane.value_at(1000).unwrap(), 0.75);
+    }
+
+    #[test]
+    fn test_points_sorted_after_add() {
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        // Add points in reverse order
+        lane.add_point(AutomationPoint {
+            position: 300,
+            value: 0.3,
+            curve: CurveType::Linear,
+        });
+        lane.add_point(AutomationPoint {
+            position: 100,
+            value: 0.1,
+            curve: CurveType::Linear,
+        });
+        lane.add_point(AutomationPoint {
+            position: 500,
+            value: 0.5,
+            curve: CurveType::Linear,
+        });
+        lane.add_point(AutomationPoint {
+            position: 200,
+            value: 0.2,
+            curve: CurveType::Linear,
+        });
+
+        // Verify sorted
+        for i in 1..lane.points.len() {
+            assert!(lane.points[i].position >= lane.points[i - 1].position);
+        }
+        assert_eq!(lane.points[0].position, 100);
+        assert_eq!(lane.points[1].position, 200);
+        assert_eq!(lane.points[2].position, 300);
+        assert_eq!(lane.points[3].position, 500);
+    }
+
+    #[test]
+    fn test_points_in_range() {
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        lane.add_point(AutomationPoint {
+            position: 100,
+            value: 0.1,
+            curve: CurveType::Linear,
+        });
+        lane.add_point(AutomationPoint {
+            position: 200,
+            value: 0.2,
+            curve: CurveType::Linear,
+        });
+        lane.add_point(AutomationPoint {
+            position: 300,
+            value: 0.3,
+            curve: CurveType::Linear,
+        });
+
+        let in_range = lane.points_in_range(150, 250);
+        assert_eq!(in_range.len(), 1);
+        assert_eq!(in_range[0].position, 200);
+
+        let all = lane.points_in_range(0, 400);
+        assert_eq!(all.len(), 3);
+
+        let none = lane.points_in_range(301, 400);
+        assert_eq!(none.len(), 0);
+    }
 }

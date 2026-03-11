@@ -121,4 +121,78 @@ mod tests {
         assert_eq!(buf.get(0, 0), 0.5);
         assert_eq!(buf.get(0, 1), -0.5);
     }
+
+    #[test]
+    fn test_feedback_produces_repeating_echoes() {
+        let mut delay = Delay::new(48000.0);
+        delay.time = 0.01; // 480 samples
+        delay.feedback = 0.5;
+        delay.mix = 1.0; // fully wet so we only see delayed signal
+
+        let frames = 2400; // enough for multiple echoes
+        let mut data = vec![0.0_f32; frames];
+        data[0] = 1.0; // impulse
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        delay.process(&mut buf);
+
+        // First echo at sample 480
+        let echo1 = buf.get(480, 0).abs();
+        // Second echo at sample 960 (feedback * first echo)
+        let echo2 = buf.get(960, 0).abs();
+        // Third echo at sample 1440
+        let echo3 = buf.get(1440, 0).abs();
+
+        assert!(echo1 > 0.5, "First echo should be strong: {echo1}");
+        assert!(
+            echo2 > 0.1,
+            "Second echo should exist with feedback: {echo2}"
+        );
+        assert!(echo3 > 0.01, "Third echo should exist: {echo3}");
+        // Each successive echo should be quieter
+        assert!(echo1 > echo2, "Echoes should decay: {echo1} > {echo2}");
+        assert!(echo2 > echo3, "Echoes should decay: {echo2} > {echo3}");
+    }
+
+    #[test]
+    fn test_delay_mix_parameter() {
+        let mut delay_dry = Delay::new(48000.0);
+        delay_dry.time = 0.01;
+        delay_dry.feedback = 0.0;
+        delay_dry.mix = 0.0;
+
+        let mut delay_wet = Delay::new(48000.0);
+        delay_wet.time = 0.01;
+        delay_wet.feedback = 0.0;
+        delay_wet.mix = 1.0;
+
+        let frames = 960;
+        let mut data_dry = vec![0.0_f32; frames];
+        data_dry[0] = 1.0;
+        let data_wet = data_dry.clone();
+
+        let mut buf_dry = AudioBuffer::from_interleaved(data_dry, 1);
+        let mut buf_wet = AudioBuffer::from_interleaved(data_wet, 1);
+
+        delay_dry.process(&mut buf_dry);
+        delay_wet.process(&mut buf_wet);
+
+        // mix=0: frame 0 should keep dry signal
+        assert!(
+            (buf_dry.get(0, 0) - 1.0).abs() < 0.01,
+            "mix=0 should pass dry: {}",
+            buf_dry.get(0, 0)
+        );
+        // mix=1: frame 0 should have no dry signal
+        assert!(
+            buf_wet.get(0, 0).abs() < 0.01,
+            "mix=1 should suppress dry at frame 0: {}",
+            buf_wet.get(0, 0)
+        );
+        // mix=1: echo should appear at delay time
+        assert!(
+            buf_wet.get(480, 0).abs() > 0.5,
+            "mix=1 should have echo at 480: {}",
+            buf_wet.get(480, 0)
+        );
+    }
 }

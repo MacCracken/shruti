@@ -1,6 +1,39 @@
-use shruti_session::{RegionId, Session};
+use shruti_session::undo::UndoManager;
+use shruti_session::{Region, RegionId, Session};
 
 use crate::views::browser::BrowserTab;
+
+/// Describes an active drag operation in the arrangement view.
+#[derive(Debug, Clone)]
+pub enum ArrangementDrag {
+    /// Dragging a region to a new timeline position (and possibly a different track).
+    MoveRegion {
+        region_id: RegionId,
+        track_index: usize,
+        start_frame: u64,
+        /// X offset from region left edge to mouse position at drag start.
+        grab_offset_px: f32,
+    },
+    /// Resizing a region from the left edge (trim start).
+    TrimStart {
+        region_id: RegionId,
+        track_index: usize,
+        original_pos: u64,
+        original_offset: u64,
+        original_duration: u64,
+    },
+    /// Resizing a region from the right edge (trim end).
+    TrimEnd {
+        region_id: RegionId,
+        track_index: usize,
+        original_duration: u64,
+    },
+    /// Dragging a track header to reorder.
+    ReorderTrack {
+        from_index: usize,
+        current_index: usize,
+    },
+}
 
 /// Represents a scanned plugin in the browser.
 #[derive(Debug, Clone)]
@@ -15,6 +48,7 @@ pub struct PluginEntry {
 pub enum ViewMode {
     Arrangement,
     Mixer,
+    Settings,
 }
 
 /// All mutable UI state bridging the session/engine to the views.
@@ -32,6 +66,8 @@ pub struct UiState {
     pub pixels_per_frame: f64,
     pub selected_track: Option<usize>,
     pub selected_region: Option<RegionId>,
+    /// Active drag operation in the arrangement view.
+    pub drag: Option<ArrangementDrag>,
 
     // Transport
     pub recording: bool,
@@ -46,6 +82,12 @@ pub struct UiState {
 
     /// Whether the theme has been applied.
     pub theme_applied: bool,
+
+    /// Undo/redo manager.
+    pub undo: UndoManager,
+
+    /// Clipboard for cut/copy/paste of regions.
+    pub clipboard_region: Option<Region>,
 }
 
 impl UiState {
@@ -60,12 +102,15 @@ impl UiState {
             pixels_per_frame: 0.01, // ~480 pixels per second at 48kHz
             selected_track: None,
             selected_region: None,
+            drag: None,
             recording: false,
             meter_levels: vec![([0.0; 2], [0.0; 2]); track_count],
             file_entries: Vec::new(),
             plugin_entries: Vec::new(),
             plugin_search: String::new(),
             theme_applied: false,
+            undo: UndoManager::default(),
+            clipboard_region: None,
         }
     }
 }

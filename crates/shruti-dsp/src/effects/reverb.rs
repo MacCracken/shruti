@@ -216,4 +216,117 @@ mod tests {
         assert_eq!(buf.get(0, 0), 0.5);
         assert_eq!(buf.get(0, 1), -0.5);
     }
+
+    #[test]
+    fn test_reverb_fully_wet() {
+        let mut reverb = Reverb::new(48000.0);
+        reverb.mix = 1.0;
+        reverb.update_parameters();
+
+        // Create an impulse
+        let frames = 4800;
+        let mut data = vec![0.0_f32; frames * 2];
+        data[0] = 1.0;
+        data[1] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 2);
+        reverb.process(&mut buf);
+
+        // At mix=1.0, frame 0 should be mostly wet (the dry component is 0)
+        // The wet signal at frame 0 should come from the comb/allpass filters
+        // which initially output 0 for the first frame (buffers are empty).
+        // But there should be significant energy in the tail.
+        let tail_energy: f32 = (480..frames).map(|i| buf.get(i as u32, 0).powi(2)).sum();
+        assert!(
+            tail_energy > 0.001,
+            "Fully wet reverb should have a tail, energy={}",
+            tail_energy
+        );
+    }
+
+    #[test]
+    fn test_room_size_changes_decay() {
+        // Larger room_size should produce more reverb energy (longer decay)
+        let frames = 9600;
+
+        // Small room
+        let mut reverb_small = Reverb::new(48000.0);
+        reverb_small.mix = 1.0;
+        reverb_small.room_size = 0.1;
+        reverb_small.update_parameters();
+
+        let mut data_small = vec![0.0_f32; frames];
+        data_small[0] = 1.0;
+        let mut buf_small = AudioBuffer::from_interleaved(data_small, 1);
+        reverb_small.process(&mut buf_small);
+
+        let energy_small: f32 = (2400..frames)
+            .map(|i| buf_small.get(i as u32, 0).powi(2))
+            .sum();
+
+        // Large room
+        let mut reverb_large = Reverb::new(48000.0);
+        reverb_large.mix = 1.0;
+        reverb_large.room_size = 1.0;
+        reverb_large.update_parameters();
+
+        let mut data_large = vec![0.0_f32; frames];
+        data_large[0] = 1.0;
+        let mut buf_large = AudioBuffer::from_interleaved(data_large, 1);
+        reverb_large.process(&mut buf_large);
+
+        let energy_large: f32 = (2400..frames)
+            .map(|i| buf_large.get(i as u32, 0).powi(2))
+            .sum();
+
+        assert!(
+            energy_large > energy_small,
+            "Larger room should have more late tail energy: large={energy_large}, small={energy_small}"
+        );
+    }
+
+    #[test]
+    fn test_damping_effect() {
+        // Higher damping should reduce high-frequency content in the reverb tail
+        let frames = 9600;
+
+        // Low damping
+        let mut reverb_low = Reverb::new(48000.0);
+        reverb_low.mix = 1.0;
+        reverb_low.room_size = 0.8;
+        reverb_low.damping = 0.0;
+        reverb_low.update_parameters();
+
+        let mut data_low = vec![0.0_f32; frames];
+        data_low[0] = 1.0;
+        let mut buf_low = AudioBuffer::from_interleaved(data_low, 1);
+        reverb_low.process(&mut buf_low);
+
+        // High damping
+        let mut reverb_high = Reverb::new(48000.0);
+        reverb_high.mix = 1.0;
+        reverb_high.room_size = 0.8;
+        reverb_high.damping = 1.0;
+        reverb_high.update_parameters();
+
+        let mut data_high = vec![0.0_f32; frames];
+        data_high[0] = 1.0;
+        let mut buf_high = AudioBuffer::from_interleaved(data_high, 1);
+        reverb_high.process(&mut buf_high);
+
+        // With high damping, successive samples should be smoother (lower variance).
+        // Compute a rough measure: sum of absolute differences between consecutive samples
+        // in the late tail.
+        let roughness = |buf: &AudioBuffer, start: usize, end: usize| -> f32 {
+            (start + 1..end)
+                .map(|i| (buf.get(i as u32, 0) - buf.get((i - 1) as u32, 0)).abs())
+                .sum::<f32>()
+        };
+        let rough_low = roughness(&buf_low, 2400, frames);
+        let rough_high = roughness(&buf_high, 2400, frames);
+
+        assert!(
+            rough_high < rough_low,
+            "High damping should produce smoother tail: rough_low={rough_low}, rough_high={rough_high}"
+        );
+    }
 }
