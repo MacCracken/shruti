@@ -1,0 +1,9 @@
+[package]
+name = "shruti-plugin"
+version = "2026.3.11"
+edition = "2024"
+description = "Plugin hosting (VST3, CLAP) for Shruti"
+license = "GPL-3.0"
+
+[dependencies]
+shruti-engine = { path = "../shruti-engine" }

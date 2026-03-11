@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shruti-engine",
+    "crates/shruti-dsp",
+    "crates/shruti-plugin",
+    "crates/shruti-ui",
+    "crates/shruti-session",
+    "crates/shruti-ai",
+]
+
+[package]
+name = "shruti"
+version = "2026.3.11"
+edition = "2024"
+description = "A Rust-native Digital Audio Workstation"
+license = "GPL-3.0"
+
+[dependencies]
+shruti-engine = { path = "crates/shruti-engine" }
+shruti-dsp = { path = "crates/shruti-dsp" }
+shruti-session = { path = "crates/shruti-session" }
+shruti-ui = { path = "crates/shruti-ui" }

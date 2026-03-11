@@ -1,0 +1,9 @@
+[package]
+name = "shruti-ai"
+version = "2026.3.11"
+edition = "2024"
+description = "AI agent integration for Shruti (AGNOS)"
+license = "GPL-3.0"
+
+[dependencies]
+shruti-session = { path = "../shruti-session" }

@@ -1,0 +1,10 @@
+[package]
+name = "shruti-ui"
+version = "2026.3.11"
+edition = "2024"
+description = "GPU-accelerated UI for Shruti"
+license = "GPL-3.0"
+
+[dependencies]
+shruti-engine = { path = "../shruti-engine" }
+shruti-session = { path = "../shruti-session" }
