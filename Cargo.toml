@@ -9,6 +9,13 @@ members = [
     "crates/shruti-ai",
 ]
 
+[workspace.dependencies]
+cpal = "0.15"
+rtrb = "0.3"
+symphonia = { version = "0.5", features = ["wav", "flac", "pcm", "adpcm"] }
+hound = "3.5"
+clap = { version = "4", features = ["derive"] }
+
 [package]
 name = "shruti"
 version = "2026.3.11"
@@ -19,5 +26,13 @@ license = "GPL-3.0"
 [dependencies]
 shruti-engine = { path = "crates/shruti-engine" }
 shruti-dsp = { path = "crates/shruti-dsp" }
-shruti-session = { path = "crates/shruti-session" }
-shruti-ui = { path = "crates/shruti-ui" }
+clap = { workspace = true }
+rtrb = { workspace = true }
+
+[[bin]]
+name = "shruti"
+path = "src/main.rs"
+
+[[bin]]
+name = "shruti-play"
+path = "src/bin/play.rs"
