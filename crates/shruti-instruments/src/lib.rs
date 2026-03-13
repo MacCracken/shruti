@@ -12,6 +12,8 @@ pub mod oscillator;
 pub mod preset;
 pub mod routing;
 pub mod sampler;
+pub mod sf2;
+pub mod sfz;
 pub mod step_sequencer;
 pub mod synth;
 pub mod voice;
@@ -32,6 +34,8 @@ pub use oscillator::{Oscillator, Waveform};
 pub use preset::{InstrumentPreset, PresetParam};
 pub use routing::{MidiRoute, VelocityCurve};
 pub use sampler::{LoopMode, SampleZone, Sampler, SlicePoint};
+pub use sf2::{Sf2Preset, parse_sf2};
+pub use sfz::{SfzRegion, parse_sfz};
 pub use step_sequencer::{
     PadSequence, Pattern, PatternBank, PatternChain, PatternId, Step, StepSequencer,
 };

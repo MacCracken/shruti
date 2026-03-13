@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.12 | **Last Updated**: 2026-03-12
 > **Status**: Phases 1–7D, 8A–8G complete — MVP v1 + instruments + full AGNOS integration + audit fixes
-> **Tests**: 993 passing (172 dsp, 55 engine, 295 instruments, 205 session, 19 plugin, 126 ai, 121 ui), 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1037 passing (172 dsp, 55 engine, 339 instruments, 205 session, 19 plugin, 126 ai, 121 ui), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -91,7 +91,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 3 | Wavetable synth | Large | Wavetable loading (.wav frames, single-cycle), wavetable morphing (smooth interpolation between frames), position modulation via LFO/envelope, built-in factory tables (analog, digital, vocal, organic) |
 | 4 | Physical modeling synth | Large | Karplus-Strong string model, waveguide resonators (plucked/bowed/struck), exciter types (noise burst, impulse, bow), body resonance modeling, material parameters (brightness, decay, stiffness) |
 | 5 | Granular synth | Large | Grain cloud engine (position, density, size, pitch, spread), real-time granulation of loaded samples, freeze/scatter/spray modes, per-grain envelope (Gaussian/trapezoid), stereo grain panning |
-| 6 | Multi-oscillator expansion | Medium | 2–3 oscillators per voice with independent waveform/detune/level, hard sync, ring modulation, oscillator FM (osc1→osc2 cross-mod) |
+| 6 | Multi-oscillator expansion | Done | 3 oscillators per voice with independent waveform/detune/level, hard sync, ring modulation, oscillator FM (osc1→osc2 cross-mod), 16 tests |
 | 7 | Unison & voice stacking | Medium | Per-oscillator unison voices (up to 8), spread (detune + stereo width), sub-oscillator (-1/-2 octave), supersaw-style detuned stacks |
 | 8 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
 
@@ -115,7 +115,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 3 | Time-stretching | Large | Granular or phase-vocoder based pitch-independent time stretch; real-time quality |
 | 4 | Slice mode | Done | Energy-based onset detection, auto-slice by transients, `slice_to_zones()` maps slices to MIDI keys (REX-style) |
 | 5 | Sample format support | Done | WAV, FLAC, AIFF, OGG/Vorbis via symphonia; SUPPORTED_EXTENSIONS, is_supported_extension() |
-| 6 | SFZ/SF2 import | Medium | Load SoundFont and SFZ instrument definitions for instant playability |
+| 6 | SFZ/SF2 import | Done | SFZ text parser (global/group/region, opcode inheritance, note names) + SF2 binary RIFF parser (preset→instrument→sample zones, PCM extraction), 28 tests |
 
 ### 8E — Instrument UI
 

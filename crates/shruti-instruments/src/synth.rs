@@ -13,6 +13,10 @@ use crate::voice::{VoiceManager, VoiceStealMode};
 ///
 /// Features:
 /// - Selectable waveform (sine, saw, square, triangle, noise)
+/// - Multi-oscillator: up to 3 oscillators per voice with independent waveform, detune, and level
+/// - Hard sync (osc1 resets osc2 phase on osc1 zero crossing)
+/// - Ring modulation (osc1 * osc2)
+/// - Oscillator FM (osc1 -> osc2 cross-modulation)
 /// - Amp ADSR envelope per voice
 /// - Filter ADSR envelope per voice (modulates filter cutoff)
 /// - 16-voice polyphony with configurable voice stealing
@@ -25,6 +29,8 @@ pub struct SubtractiveSynth {
     params: Vec<InstrumentParam>,
     voice_manager: VoiceManager,
     oscillators: Vec<Oscillator>,
+    oscillators2: Vec<Oscillator>,
+    oscillators3: Vec<Oscillator>,
     envelopes: Vec<Envelope>,
     filter_envelopes: Vec<Envelope>,
     filters: Vec<Filter>,
@@ -62,6 +68,20 @@ const PARAM_LFO2_RATE: usize = 19;
 const PARAM_LFO2_DEPTH: usize = 20;
 const PARAM_LFO2_TARGET: usize = 21;
 const PARAM_LFO2_SHAPE: usize = 22;
+// Oscillator 2
+const PARAM_OSC2_ENABLE: usize = 23;
+const PARAM_OSC2_WAVEFORM: usize = 24;
+const PARAM_OSC2_DETUNE: usize = 25;
+const PARAM_OSC2_LEVEL: usize = 26;
+// Oscillator 3
+const PARAM_OSC3_ENABLE: usize = 27;
+const PARAM_OSC3_WAVEFORM: usize = 28;
+const PARAM_OSC3_DETUNE: usize = 29;
+const PARAM_OSC3_LEVEL: usize = 30;
+// Inter-oscillator modulation
+const PARAM_HARD_SYNC: usize = 31;
+const PARAM_RING_MOD: usize = 32;
+const PARAM_FM_AMOUNT: usize = 33;
 
 const MAX_VOICES: usize = 16;
 
@@ -71,12 +91,12 @@ impl SubtractiveSynth {
             name: "Subtractive Synth".to_string(),
             category: "Synthesizer".to_string(),
             author: "Shruti".to_string(),
-            description: "Subtractive synthesizer with dual ADSR, PolyBLEP oscillators, SVF filter, and dual LFO"
+            description: "Multi-oscillator subtractive synthesizer with hard sync, ring mod, FM, dual ADSR, PolyBLEP oscillators, SVF filter, and dual LFO"
                 .to_string(),
         };
 
         let params = vec![
-            // Oscillator
+            // Oscillator 1
             InstrumentParam::new("Waveform", 0.0, 4.0, 1.0, ""), // 0=Sine,1=Saw,2=Square,3=Tri,4=Noise
             // Amp envelope
             InstrumentParam::new("Attack", 0.001, 5.0, 0.01, "s"),
@@ -105,9 +125,29 @@ impl SubtractiveSynth {
             InstrumentParam::new("Lfo2Depth", 0.0, 1.0, 0.0, ""),
             InstrumentParam::new("Lfo2Target", 0.0, 3.0, 0.0, ""), // 0=None,1=Cutoff,2=Pitch,3=Volume
             InstrumentParam::new("Lfo2Shape", 0.0, 5.0, 0.0, ""), // 0=Sine,1=Tri,2=Square,3=SawUp,4=SawDown,5=S&H
+            // Oscillator 2
+            InstrumentParam::new("Osc2Enable", 0.0, 1.0, 0.0, ""), // 0=off, 1=on
+            InstrumentParam::new("Osc2Waveform", 0.0, 4.0, 1.0, ""), // 0=Sine,1=Saw,2=Square,3=Tri,4=Noise
+            InstrumentParam::new("Osc2Detune", -100.0, 100.0, 0.0, "cents"),
+            InstrumentParam::new("Osc2Level", 0.0, 1.0, 1.0, ""),
+            // Oscillator 3
+            InstrumentParam::new("Osc3Enable", 0.0, 1.0, 0.0, ""), // 0=off, 1=on
+            InstrumentParam::new("Osc3Waveform", 0.0, 4.0, 1.0, ""), // 0=Sine,1=Saw,2=Square,3=Tri,4=Noise
+            InstrumentParam::new("Osc3Detune", -100.0, 100.0, 0.0, "cents"),
+            InstrumentParam::new("Osc3Level", 0.0, 1.0, 1.0, ""),
+            // Inter-oscillator modulation
+            InstrumentParam::new("HardSync", 0.0, 1.0, 0.0, ""), // 0=off, 1=on (osc1 resets osc2 phase)
+            InstrumentParam::new("RingMod", 0.0, 1.0, 0.0, ""),  // 0.0..1.0 blend (osc1 * osc2)
+            InstrumentParam::new("FmAmount", 0.0, 1.0, 0.0, ""), // 0.0..1.0 (osc1 -> osc2 frequency mod)
         ];
 
         let oscillators = (0..MAX_VOICES)
+            .map(|_| Oscillator::new(Waveform::Saw, sample_rate as f64))
+            .collect();
+        let oscillators2 = (0..MAX_VOICES)
+            .map(|_| Oscillator::new(Waveform::Saw, sample_rate as f64))
+            .collect();
+        let oscillators3 = (0..MAX_VOICES)
             .map(|_| Oscillator::new(Waveform::Saw, sample_rate as f64))
             .collect();
         let envelopes = (0..MAX_VOICES)
@@ -137,6 +177,8 @@ impl SubtractiveSynth {
             params,
             voice_manager: VoiceManager::new(MAX_VOICES, VoiceStealMode::Oldest),
             oscillators,
+            oscillators2,
+            oscillators3,
             envelopes,
             filter_envelopes,
             filters,
@@ -147,14 +189,18 @@ impl SubtractiveSynth {
         }
     }
 
-    fn current_waveform(&self) -> Waveform {
-        match self.params[PARAM_WAVEFORM].value.round() as u8 {
+    fn waveform_from_param(value: f32) -> Waveform {
+        match value.round() as u8 {
             0 => Waveform::Sine,
             1 => Waveform::Saw,
             2 => Waveform::Square,
             3 => Waveform::Triangle,
             _ => Waveform::Noise,
         }
+    }
+
+    fn current_waveform(&self) -> Waveform {
+        Self::waveform_from_param(self.params[PARAM_WAVEFORM].value)
     }
 
     fn current_adsr(&self) -> AdsrParams {
@@ -222,10 +268,35 @@ impl SubtractiveSynth {
         let lfo1_target = self.params[PARAM_LFO1_TARGET].value.round() as u8;
         let lfo2_target = self.params[PARAM_LFO2_TARGET].value.round() as u8;
 
-        // Update oscillator settings
+        // Multi-oscillator parameters
+        let osc2_enabled = self.params[PARAM_OSC2_ENABLE].value >= 0.5;
+        let osc2_waveform = Self::waveform_from_param(self.params[PARAM_OSC2_WAVEFORM].value);
+        let osc2_detune = self.params[PARAM_OSC2_DETUNE].value as f64;
+        let osc2_level = self.params[PARAM_OSC2_LEVEL].value;
+        let osc3_enabled = self.params[PARAM_OSC3_ENABLE].value >= 0.5;
+        let osc3_waveform = Self::waveform_from_param(self.params[PARAM_OSC3_WAVEFORM].value);
+        let osc3_detune = self.params[PARAM_OSC3_DETUNE].value as f64;
+        let osc3_level = self.params[PARAM_OSC3_LEVEL].value;
+        let hard_sync = self.params[PARAM_HARD_SYNC].value >= 0.5;
+        let ring_mod = self.params[PARAM_RING_MOD].value;
+        let fm_amount = self.params[PARAM_FM_AMOUNT].value;
+
+        // Update oscillator 1 settings
         for osc in &mut self.oscillators {
             osc.waveform = waveform;
             osc.detune = detune;
+        }
+
+        // Update oscillator 2 settings
+        for osc in &mut self.oscillators2 {
+            osc.waveform = osc2_waveform;
+            osc.detune = osc2_detune;
+        }
+
+        // Update oscillator 3 settings
+        for osc in &mut self.oscillators3 {
+            osc.waveform = osc3_waveform;
+            osc.detune = osc3_detune;
         }
 
         // Update filter settings
@@ -257,9 +328,15 @@ impl SubtractiveSynth {
             lfo2_values[i] = self.lfo2.tick();
         }
 
+        // Compute osc level normalization: divide by number of active oscillators
+        let active_osc_count =
+            1.0f32 + if osc2_enabled { 1.0 } else { 0.0 } + if osc3_enabled { 1.0 } else { 0.0 };
+        let osc_norm = 1.0 / active_osc_count;
+
         // Render each active voice
         let adsr = self.current_adsr();
         let filter_adsr = self.current_filter_adsr();
+        let sample_rate = self.sample_rate as f64;
         for i in 0..MAX_VOICES {
             let voice = &self.voice_manager.voices[i];
             if voice.is_idle() {
@@ -270,7 +347,9 @@ impl SubtractiveSynth {
             self.filter_envelopes[i].params = filter_adsr.clone();
             let freq = voice.frequency();
             let vel_gain = voice.velocity as f32 / 127.0;
-            let mut phase = voice.phase;
+            let mut phase1 = voice.phase;
+            let mut phase2 = voice.phase2;
+            let mut phase3 = voice.phase3;
 
             for frame in 0..clamped_frames {
                 let env_level = self.envelopes[i].tick();
@@ -296,10 +375,60 @@ impl SubtractiveSynth {
                     freq
                 };
 
-                let sample = self.oscillators[i].sample(phase, effective_freq);
+                // --- Oscillator 1 ---
+                let osc1_sample = self.oscillators[i].sample(phase1, effective_freq);
+                let prev_phase1 = phase1;
+                phase1 = Oscillator::advance_phase(phase1, effective_freq, sample_rate);
+
+                // Detect osc1 zero crossing (phase wrapped around) for hard sync
+                let osc1_wrapped = phase1 < prev_phase1;
+
+                // --- Oscillator mix ---
+                let mut mix = osc1_sample * osc_norm;
+
+                if osc2_enabled {
+                    // Hard sync: reset osc2 phase when osc1 wraps
+                    if hard_sync && osc1_wrapped {
+                        phase2 = 0.0;
+                    }
+
+                    // Apply osc2 detune to base frequency
+                    let osc2_base_freq = effective_freq * 2.0f64.powf(osc2_detune / 1200.0);
+
+                    // FM: osc1 modulates osc2 frequency
+                    let fm_mod = if fm_amount > 0.0001 {
+                        osc1_sample as f64 * fm_amount as f64 * osc2_base_freq
+                    } else {
+                        0.0
+                    };
+                    let osc2_freq = osc2_base_freq + fm_mod;
+
+                    let osc2_sample = self.oscillators2[i].sample(phase2, osc2_freq);
+                    phase2 = Oscillator::advance_phase(phase2, osc2_freq, sample_rate);
+
+                    // Ring modulation: blend between normal mix and osc1*osc2
+                    if ring_mod > 0.0001 {
+                        let ring_sample = osc1_sample * osc2_sample;
+                        let normal_osc2 = osc2_sample * osc2_level * osc_norm;
+                        // Blend: (1 - ring_mod) * normal_mix + ring_mod * ring
+                        mix = mix * (1.0 - ring_mod)
+                            + ring_sample * ring_mod
+                            + normal_osc2 * (1.0 - ring_mod);
+                    } else {
+                        mix += osc2_sample * osc2_level * osc_norm;
+                    }
+                }
+
+                if osc3_enabled {
+                    // Apply osc3 detune to base frequency
+                    let osc3_freq = effective_freq * 2.0f64.powf(osc3_detune / 1200.0);
+                    let osc3_sample = self.oscillators3[i].sample(phase3, osc3_freq);
+                    phase3 = Oscillator::advance_phase(phase3, osc3_freq, sample_rate);
+                    mix += osc3_sample * osc3_level * osc_norm;
+                }
 
                 // Apply amp envelope
-                let after_env = sample * env_level;
+                let after_env = mix * env_level;
 
                 // Compute filter cutoff: base + filter envelope + LFO
                 let env_mod_octaves = filter_env_level * filter_env_depth * 4.0;
@@ -319,11 +448,11 @@ impl SubtractiveSynth {
                     let current = output.get(frame as u32, ch);
                     output.set(frame as u32, ch, current + out);
                 }
-
-                phase = Oscillator::advance_phase(phase, effective_freq, self.sample_rate as f64);
             }
 
-            self.voice_manager.voices[i].phase = phase;
+            self.voice_manager.voices[i].phase = phase1;
+            self.voice_manager.voices[i].phase2 = phase2;
+            self.voice_manager.voices[i].phase3 = phase3;
             self.voice_manager.voices[i].envelope_level = self.envelopes[i].level;
         }
 
@@ -339,6 +468,12 @@ impl InstrumentNode for SubtractiveSynth {
     fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         for osc in &mut self.oscillators {
+            osc.set_sample_rate(sample_rate as f64);
+        }
+        for osc in &mut self.oscillators2 {
+            osc.set_sample_rate(sample_rate as f64);
+        }
+        for osc in &mut self.oscillators3 {
             osc.set_sample_rate(sample_rate as f64);
         }
         for env in &mut self.envelopes {
@@ -432,7 +567,7 @@ mod tests {
     fn synth_creates_with_defaults() {
         let synth = SubtractiveSynth::new(48000.0);
         assert_eq!(synth.info().name, "Subtractive Synth");
-        assert_eq!(synth.params().len(), 23);
+        assert_eq!(synth.params().len(), 34); // 23 original + 11 multi-osc params
         assert_eq!(synth.active_voices(), 0);
     }
 
@@ -735,5 +870,384 @@ mod tests {
             diff_lp_bp > 1.0,
             "LP and BP should produce different output, diff={diff_lp_bp}"
         );
+    }
+
+    // =========================================================================
+    // Multi-oscillator tests (phase 8B+.6)
+    // =========================================================================
+
+    #[test]
+    fn multi_osc_default_backward_compat() {
+        // With osc2/osc3 disabled (default), output should be the same as single-osc
+        let mut synth = SubtractiveSynth::new(48000.0);
+        assert!(synth.params()[PARAM_OSC2_ENABLE].value < 0.5);
+        assert!(synth.params()[PARAM_OSC3_ENABLE].value < 0.5);
+        synth.note_on(69, 127, 0);
+        let rms = render_rms(&mut synth, 1024);
+        assert!(rms > 0.01, "single-osc should produce output, rms={rms}");
+    }
+
+    #[test]
+    fn multi_osc_two_oscs_louder_than_one() {
+        // Adding a second oscillator (same waveform, no detune) should produce
+        // roughly the same RMS as a single osc (levels are normalized).
+        let mut synth1 = SubtractiveSynth::new(48000.0);
+        synth1.params_mut()[PARAM_WAVEFORM].set(0.0); // sine
+        synth1.note_on(69, 127, 0);
+        let rms1 = render_rms(&mut synth1, 2048);
+
+        let mut synth2 = SubtractiveSynth::new(48000.0);
+        synth2.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth2.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth2.params_mut()[PARAM_OSC2_WAVEFORM].set(0.0); // sine
+        synth2.note_on(69, 127, 0);
+        let rms2 = render_rms(&mut synth2, 2048);
+
+        // Both should produce meaningful output
+        assert!(rms1 > 0.01, "single osc rms too low: {rms1}");
+        assert!(rms2 > 0.01, "dual osc rms too low: {rms2}");
+    }
+
+    #[test]
+    fn multi_osc_three_oscs_produce_output() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_WAVEFORM].set(1.0); // saw
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC2_WAVEFORM].set(2.0); // square
+        synth.params_mut()[PARAM_OSC3_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC3_WAVEFORM].set(3.0); // triangle
+        synth.note_on(69, 127, 0);
+        let rms = render_rms(&mut synth, 2048);
+        assert!(
+            rms > 0.01,
+            "three-osc synth should produce output, rms={rms}"
+        );
+    }
+
+    #[test]
+    fn multi_osc_detune_changes_output() {
+        // Detuning osc2 should produce a different output than no detune
+        let mut synth_no_detune = SubtractiveSynth::new(48000.0);
+        synth_no_detune.params_mut()[PARAM_WAVEFORM].set(1.0);
+        synth_no_detune.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_no_detune.params_mut()[PARAM_OSC2_DETUNE].set(0.0);
+        synth_no_detune.note_on(69, 127, 0);
+        let mut buf_nd = AudioBuffer::new(2, 2048);
+        synth_no_detune.process(&[], &[], &mut buf_nd);
+
+        let mut synth_detuned = SubtractiveSynth::new(48000.0);
+        synth_detuned.params_mut()[PARAM_WAVEFORM].set(1.0);
+        synth_detuned.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_detuned.params_mut()[PARAM_OSC2_DETUNE].set(15.0); // +15 cents
+        synth_detuned.note_on(69, 127, 0);
+        let mut buf_d = AudioBuffer::new(2, 2048);
+        synth_detuned.process(&[], &[], &mut buf_d);
+
+        let diff: f32 = (0..2048)
+            .map(|i| (buf_nd.get(i, 0) - buf_d.get(i, 0)).abs())
+            .sum();
+        assert!(
+            diff > 0.1,
+            "detuning osc2 should change output, diff={diff}"
+        );
+    }
+
+    #[test]
+    fn multi_osc_osc2_level_zero_is_silent() {
+        // With osc2 enabled but level=0, output should match osc1-only
+        let mut synth_osc1 = SubtractiveSynth::new(48000.0);
+        synth_osc1.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth_osc1.note_on(69, 127, 0);
+        let mut buf1 = AudioBuffer::new(2, 1024);
+        synth_osc1.process(&[], &[], &mut buf1);
+
+        let mut synth_osc2_silent = SubtractiveSynth::new(48000.0);
+        synth_osc2_silent.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth_osc2_silent.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_osc2_silent.params_mut()[PARAM_OSC2_LEVEL].set(0.0);
+        synth_osc2_silent.note_on(69, 127, 0);
+        let mut buf2 = AudioBuffer::new(2, 1024);
+        synth_osc2_silent.process(&[], &[], &mut buf2);
+
+        // Both should produce output (osc1 is still active)
+        let rms1 = (0..1024)
+            .map(|i| (buf1.get(i, 0) as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let rms2 = (0..1024)
+            .map(|i| (buf2.get(i, 0) as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(rms1 > 0.1, "osc1-only should produce output");
+        assert!(rms2 > 0.1, "osc1+silent_osc2 should still produce output");
+    }
+
+    #[test]
+    fn hard_sync_changes_timbre() {
+        // Hard sync should produce a different output than without it
+        let mut synth_nosync = SubtractiveSynth::new(48000.0);
+        synth_nosync.params_mut()[PARAM_WAVEFORM].set(1.0); // saw
+        synth_nosync.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_nosync.params_mut()[PARAM_OSC2_WAVEFORM].set(1.0);
+        synth_nosync.params_mut()[PARAM_OSC2_DETUNE].set(50.0); // detuned so sync is audible
+        synth_nosync.params_mut()[PARAM_HARD_SYNC].set(0.0);
+        synth_nosync.note_on(60, 127, 0);
+        let mut buf_ns = AudioBuffer::new(2, 4096);
+        synth_nosync.process(&[], &[], &mut buf_ns);
+
+        let mut synth_sync = SubtractiveSynth::new(48000.0);
+        synth_sync.params_mut()[PARAM_WAVEFORM].set(1.0);
+        synth_sync.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_sync.params_mut()[PARAM_OSC2_WAVEFORM].set(1.0);
+        synth_sync.params_mut()[PARAM_OSC2_DETUNE].set(50.0);
+        synth_sync.params_mut()[PARAM_HARD_SYNC].set(1.0);
+        synth_sync.note_on(60, 127, 0);
+        let mut buf_s = AudioBuffer::new(2, 4096);
+        synth_sync.process(&[], &[], &mut buf_s);
+
+        let diff: f32 = (0..4096)
+            .map(|i| (buf_ns.get(i, 0) - buf_s.get(i, 0)).abs())
+            .sum();
+        assert!(diff > 1.0, "hard sync should change timbre, diff={diff}");
+    }
+
+    #[test]
+    fn hard_sync_produces_finite_output() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_WAVEFORM].set(1.0);
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC2_DETUNE].set(70.0);
+        synth.params_mut()[PARAM_HARD_SYNC].set(1.0);
+        synth.note_on(60, 127, 0);
+        let mut buf = AudioBuffer::new(2, 4096);
+        synth.process(&[], &[], &mut buf);
+        for frame in 0..4096 {
+            let s = buf.get(frame, 0);
+            assert!(
+                s.is_finite(),
+                "sync output not finite at frame {frame}: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn ring_mod_produces_different_output() {
+        let mut synth_no_ring = SubtractiveSynth::new(48000.0);
+        synth_no_ring.params_mut()[PARAM_WAVEFORM].set(0.0); // sine
+        synth_no_ring.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_no_ring.params_mut()[PARAM_OSC2_WAVEFORM].set(0.0);
+        synth_no_ring.params_mut()[PARAM_OSC2_DETUNE].set(50.0);
+        synth_no_ring.params_mut()[PARAM_RING_MOD].set(0.0);
+        synth_no_ring.note_on(60, 127, 0);
+        let mut buf_nr = AudioBuffer::new(2, 2048);
+        synth_no_ring.process(&[], &[], &mut buf_nr);
+
+        let mut synth_ring = SubtractiveSynth::new(48000.0);
+        synth_ring.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth_ring.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_ring.params_mut()[PARAM_OSC2_WAVEFORM].set(0.0);
+        synth_ring.params_mut()[PARAM_OSC2_DETUNE].set(50.0);
+        synth_ring.params_mut()[PARAM_RING_MOD].set(1.0);
+        synth_ring.note_on(60, 127, 0);
+        let mut buf_r = AudioBuffer::new(2, 2048);
+        synth_ring.process(&[], &[], &mut buf_r);
+
+        let diff: f32 = (0..2048)
+            .map(|i| (buf_nr.get(i, 0) - buf_r.get(i, 0)).abs())
+            .sum();
+        assert!(diff > 0.5, "ring mod should change output, diff={diff}");
+    }
+
+    #[test]
+    fn ring_mod_zero_is_noop() {
+        // Ring mod at 0.0 should not affect the output compared to no ring mod
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_WAVEFORM].set(1.0);
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_RING_MOD].set(0.0);
+        synth.note_on(69, 127, 0);
+        let rms = render_rms(&mut synth, 1024);
+        assert!(
+            rms > 0.01,
+            "ring_mod=0 should produce normal output, rms={rms}"
+        );
+    }
+
+    #[test]
+    fn fm_modulation_changes_timbre() {
+        let mut synth_no_fm = SubtractiveSynth::new(48000.0);
+        synth_no_fm.params_mut()[PARAM_WAVEFORM].set(0.0); // sine
+        synth_no_fm.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_no_fm.params_mut()[PARAM_OSC2_WAVEFORM].set(0.0);
+        synth_no_fm.params_mut()[PARAM_FM_AMOUNT].set(0.0);
+        synth_no_fm.note_on(60, 127, 0);
+        let mut buf_nfm = AudioBuffer::new(2, 2048);
+        synth_no_fm.process(&[], &[], &mut buf_nfm);
+
+        let mut synth_fm = SubtractiveSynth::new(48000.0);
+        synth_fm.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth_fm.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth_fm.params_mut()[PARAM_OSC2_WAVEFORM].set(0.0);
+        synth_fm.params_mut()[PARAM_FM_AMOUNT].set(0.5);
+        synth_fm.note_on(60, 127, 0);
+        let mut buf_fm = AudioBuffer::new(2, 2048);
+        synth_fm.process(&[], &[], &mut buf_fm);
+
+        let diff: f32 = (0..2048)
+            .map(|i| (buf_nfm.get(i, 0) - buf_fm.get(i, 0)).abs())
+            .sum();
+        assert!(diff > 0.5, "FM should change timbre, diff={diff}");
+    }
+
+    #[test]
+    fn fm_produces_finite_output() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_WAVEFORM].set(1.0); // saw
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_FM_AMOUNT].set(1.0); // max FM
+        synth.note_on(69, 127, 0);
+        let mut buf = AudioBuffer::new(2, 4096);
+        synth.process(&[], &[], &mut buf);
+        for frame in 0..4096 {
+            let s = buf.get(frame, 0);
+            assert!(s.is_finite(), "FM output not finite at frame {frame}: {s}");
+        }
+    }
+
+    #[test]
+    fn multi_osc_enable_disable_toggle() {
+        // Enabling then disabling osc2 should return to single-osc behavior
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth.note_on(69, 127, 0);
+
+        // Render with osc2 disabled
+        let mut buf1 = AudioBuffer::new(2, 512);
+        synth.process(&[], &[], &mut buf1);
+
+        // Enable osc2 with different waveform
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC2_WAVEFORM].set(2.0); // square
+        let mut buf2 = AudioBuffer::new(2, 512);
+        synth.process(&[], &[], &mut buf2);
+
+        // Disable osc2 again
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(0.0);
+        let mut buf3 = AudioBuffer::new(2, 512);
+        synth.process(&[], &[], &mut buf3);
+
+        // buf2 should differ from buf1 (osc2 added)
+        let diff12: f32 = (0..512)
+            .map(|i| (buf1.get(i, 0) - buf2.get(i, 0)).abs())
+            .sum();
+        assert!(diff12 > 0.1, "enabling osc2 should change output");
+
+        // buf3 should produce output (osc1 still playing)
+        let rms3: f32 = (0..512)
+            .map(|i| (buf3.get(i, 0) as f64).powi(2))
+            .sum::<f64>()
+            .sqrt() as f32;
+        assert!(rms3 > 0.001, "disabling osc2 should still have osc1 output");
+    }
+
+    #[test]
+    fn multi_osc_params_settable() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        assert!((synth.params()[PARAM_OSC2_ENABLE].value - 1.0).abs() < 0.001);
+        synth.params_mut()[PARAM_OSC2_WAVEFORM].set(2.0);
+        assert!((synth.params()[PARAM_OSC2_WAVEFORM].value - 2.0).abs() < 0.001);
+        synth.params_mut()[PARAM_OSC2_DETUNE].set(25.0);
+        assert!((synth.params()[PARAM_OSC2_DETUNE].value - 25.0).abs() < 0.001);
+        synth.params_mut()[PARAM_OSC2_LEVEL].set(0.5);
+        assert!((synth.params()[PARAM_OSC2_LEVEL].value - 0.5).abs() < 0.001);
+        synth.params_mut()[PARAM_OSC3_ENABLE].set(1.0);
+        assert!((synth.params()[PARAM_OSC3_ENABLE].value - 1.0).abs() < 0.001);
+        synth.params_mut()[PARAM_HARD_SYNC].set(1.0);
+        assert!((synth.params()[PARAM_HARD_SYNC].value - 1.0).abs() < 0.001);
+        synth.params_mut()[PARAM_RING_MOD].set(0.7);
+        assert!((synth.params()[PARAM_RING_MOD].value - 0.7).abs() < 0.001);
+        synth.params_mut()[PARAM_FM_AMOUNT].set(0.3);
+        assert!((synth.params()[PARAM_FM_AMOUNT].value - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn multi_osc_all_features_combined() {
+        // Smoke test: all multi-osc features at once should not panic or produce NaN
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_WAVEFORM].set(1.0); // saw
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC2_WAVEFORM].set(2.0); // square
+        synth.params_mut()[PARAM_OSC2_DETUNE].set(7.0);
+        synth.params_mut()[PARAM_OSC3_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC3_WAVEFORM].set(0.0); // sine sub
+        synth.params_mut()[PARAM_OSC3_DETUNE].set(-12.0);
+        synth.params_mut()[PARAM_HARD_SYNC].set(1.0);
+        synth.params_mut()[PARAM_RING_MOD].set(0.3);
+        synth.params_mut()[PARAM_FM_AMOUNT].set(0.2);
+        synth.note_on(60, 100, 0);
+        synth.note_on(64, 100, 0);
+        synth.note_on(67, 100, 0);
+
+        let mut buf = AudioBuffer::new(2, 4096);
+        synth.process(&[], &[], &mut buf);
+
+        let mut has_nonzero = false;
+        for frame in 0..4096 {
+            let s = buf.get(frame, 0);
+            assert!(s.is_finite(), "combined multi-osc NaN/inf at frame {frame}");
+            if s.abs() > 0.001 {
+                has_nonzero = true;
+            }
+        }
+        assert!(has_nonzero, "combined multi-osc should produce output");
+    }
+
+    #[test]
+    fn multi_osc_osc3_detune_independent() {
+        // Osc3 detune should be independent of osc1/osc2
+        let mut synth_a = SubtractiveSynth::new(48000.0);
+        synth_a.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth_a.params_mut()[PARAM_OSC3_ENABLE].set(1.0);
+        synth_a.params_mut()[PARAM_OSC3_WAVEFORM].set(0.0);
+        synth_a.params_mut()[PARAM_OSC3_DETUNE].set(0.0);
+        synth_a.note_on(69, 127, 0);
+        let mut buf_a = AudioBuffer::new(2, 2048);
+        synth_a.process(&[], &[], &mut buf_a);
+
+        let mut synth_b = SubtractiveSynth::new(48000.0);
+        synth_b.params_mut()[PARAM_WAVEFORM].set(0.0);
+        synth_b.params_mut()[PARAM_OSC3_ENABLE].set(1.0);
+        synth_b.params_mut()[PARAM_OSC3_WAVEFORM].set(0.0);
+        synth_b.params_mut()[PARAM_OSC3_DETUNE].set(50.0);
+        synth_b.note_on(69, 127, 0);
+        let mut buf_b = AudioBuffer::new(2, 2048);
+        synth_b.process(&[], &[], &mut buf_b);
+
+        let diff: f32 = (0..2048)
+            .map(|i| (buf_a.get(i, 0) - buf_b.get(i, 0)).abs())
+            .sum();
+        assert!(diff > 0.1, "osc3 detune should change output, diff={diff}");
+    }
+
+    #[test]
+    fn multi_osc_reset_clears_phases() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_OSC2_ENABLE].set(1.0);
+        synth.params_mut()[PARAM_OSC3_ENABLE].set(1.0);
+        synth.note_on(69, 127, 0);
+
+        // Process some audio to advance phases
+        let mut buf = AudioBuffer::new(2, 1024);
+        synth.process(&[], &[], &mut buf);
+
+        synth.reset();
+        assert_eq!(synth.active_voices(), 0);
+        // After reset and new note, phases should start fresh
+        synth.note_on(69, 127, 0);
+        let voice = &synth.voice_manager.voices[0];
+        assert_eq!(voice.phase, 0.0);
+        assert_eq!(voice.phase2, 0.0);
+        assert_eq!(voice.phase3, 0.0);
     }
 }

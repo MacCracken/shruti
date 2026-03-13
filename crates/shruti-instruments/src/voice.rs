@@ -31,8 +31,12 @@ pub struct Voice {
     pub note: u8,
     pub velocity: u8,
     pub channel: u8,
-    /// Phase accumulator (for oscillators).
+    /// Phase accumulator for oscillator 1.
     pub phase: f64,
+    /// Phase accumulator for oscillator 2.
+    pub phase2: f64,
+    /// Phase accumulator for oscillator 3.
+    pub phase3: f64,
     /// Per-voice amplitude envelope level.
     pub envelope_level: f32,
     /// Age counter — increments each process block while active.
@@ -47,6 +51,8 @@ impl Voice {
             velocity: 0,
             channel: 0,
             phase: 0.0,
+            phase2: 0.0,
+            phase3: 0.0,
             envelope_level: 0.0,
             age: 0,
         }
@@ -177,6 +183,8 @@ impl VoiceManager {
         voice.velocity = velocity;
         voice.channel = channel;
         voice.phase = 0.0;
+        voice.phase2 = 0.0;
+        voice.phase3 = 0.0;
         voice.envelope_level = 1.0;
         voice.age = 0;
     }

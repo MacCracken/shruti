@@ -286,6 +286,26 @@ Format: CalVer (YYYY.M.D-N).
 - `EditCommand::SetTrackOutput` and `SetSidechainInput` with full undo/redo
 - Routing tests: basic routing, loop detection, sidechain assignment, chain walking
 
+### Multi-Oscillator Expansion (8B+.6)
+- 3 oscillators per voice with independent waveform, detune (cents), and level
+- Osc2/Osc3 enable toggles with backward-compatible defaults (disabled)
+- Hard sync: osc1 resets osc2 phase on zero crossing for classic sync timbres
+- Ring modulation: blendable osc1 × osc2 product (0–1 mix)
+- FM synthesis: osc1→osc2 frequency modulation with configurable depth
+- Level normalization: divides by active oscillator count to prevent clipping
+- 11 new parameters (PARAM_OSC2_ENABLE through PARAM_FM_AMOUNT)
+- 16 multi-oscillator tests
+
+### SFZ/SF2 Import (8D.6)
+- SFZ text format parser: `<global>`, `<group>`, `<region>` blocks with opcode inheritance
+- SFZ opcodes: sample, lokey/hikey/key, lovel/hivel, pitch_keycenter, loop_mode/start/end, tune, volume, pan
+- Note name parsing (e.g., `c4`, `f#3`), comment stripping, multi-header lines
+- SF2 binary RIFF parser: full sfbk format (phdr, pbag, pgen, inst, ibag, igen, shdr chunks)
+- Preset→instrument→sample zone resolution with key/velocity range merging
+- 16-bit PCM extraction from sdta/smpl chunk, loop mode support, ROM sample skipping
+- No external dependencies — both parsers implemented from scratch
+- 28 tests (16 SFZ + 12 SF2)
+
 ### Pattern System (8C.3)
 - `PatternBank` enum (A/B/C/D), `Pattern` struct with 64 total patterns (4 banks × 16)
 - `PatternChain` for song mode pattern sequencing
@@ -321,7 +341,7 @@ Format: CalVer (YYYY.M.D-N).
 - Step sequencer tests: timing accuracy, swing calculation, probability distribution, BPM sync
 - Sample playback tests: pitch mapping, loop points, velocity layers, one-shot vs gated, drum machine playback
 - MIDI integration tests: end-to-end MIDI clip → instrument → audio for synth, drum machine, sampler
-- 993 total tests across workspace
+- 1037 total tests across workspace
 
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)
