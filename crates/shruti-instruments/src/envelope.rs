@@ -101,6 +101,7 @@ impl Envelope {
                 if self.stage_pos >= decay_samples {
                     self.level = self.params.sustain;
                     self.state = EnvelopeState::Sustain;
+                    self.stage_pos = 0;
                 }
             }
             EnvelopeState::Sustain => {
@@ -114,6 +115,7 @@ impl Envelope {
                 if self.stage_pos >= release_samples {
                     self.level = 0.0;
                     self.state = EnvelopeState::Idle;
+                    self.stage_pos = 0;
                 }
             }
         }
@@ -428,6 +430,86 @@ mod tests {
         assert!(
             (ms1 - ms2).abs() < 1.0,
             "timing should match across sample rates: {ms1}ms vs {ms2}ms"
+        );
+    }
+
+    #[test]
+    fn stage_pos_reset_on_decay_to_sustain() {
+        // After transitioning from Decay to Sustain, stage_pos should be 0
+        // so that a subsequent retrigger or release doesn't use stale position.
+        let params = AdsrParams {
+            attack: 0.001,
+            decay: 0.001,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, 48000.0);
+        env.trigger();
+        // Run through attack + decay to reach sustain
+        for _ in 0..500 {
+            env.tick();
+        }
+        assert_eq!(env.state, EnvelopeState::Sustain);
+        assert_eq!(
+            env.stage_pos, 0,
+            "stage_pos should be 0 after Decay->Sustain transition"
+        );
+    }
+
+    #[test]
+    fn stage_pos_reset_on_release_to_idle() {
+        // After transitioning from Release to Idle, stage_pos should be 0
+        // so that retriggering starts cleanly.
+        let params = AdsrParams {
+            attack: 0.001,
+            decay: 0.001,
+            sustain: 0.5,
+            release: 0.001,
+        };
+        let mut env = Envelope::new(params, 48000.0);
+        env.trigger();
+        for _ in 0..500 {
+            env.tick();
+        }
+        env.release();
+        for _ in 0..500 {
+            env.tick();
+        }
+        assert_eq!(env.state, EnvelopeState::Idle);
+        assert_eq!(
+            env.stage_pos, 0,
+            "stage_pos should be 0 after Release->Idle transition"
+        );
+    }
+
+    #[test]
+    fn retrigger_after_full_cycle_works_correctly() {
+        // Ensure retrigger from Idle (after full ADSR cycle) produces
+        // a correct attack ramp without stale stage_pos.
+        let params = AdsrParams {
+            attack: 0.01,
+            decay: 0.01,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, 1000.0);
+        env.trigger();
+        // Full cycle: attack -> decay -> sustain -> release -> idle
+        for _ in 0..100 {
+            env.tick();
+        }
+        env.release();
+        for _ in 0..100 {
+            env.tick();
+        }
+        assert_eq!(env.state, EnvelopeState::Idle);
+
+        // Retrigger
+        env.trigger();
+        let first_level = env.tick();
+        assert!(
+            first_level < 0.2,
+            "first sample after retrigger should be near start of attack, got {first_level}"
         );
     }
 }

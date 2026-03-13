@@ -54,25 +54,35 @@ impl MidiClip {
         }
     }
 
-    /// Add a note event.
+    /// Add a note event, maintaining sorted order by position (frame).
     pub fn add_note(&mut self, position: u64, duration: u64, note: u8, velocity: u8, channel: u8) {
-        self.notes.push(NoteEvent {
+        let event = NoteEvent {
             position,
             duration,
             note,
             velocity,
             channel,
-        });
+        };
+        let idx = self
+            .notes
+            .binary_search_by_key(&position, |n| n.position)
+            .unwrap_or_else(|i| i);
+        self.notes.insert(idx, event);
     }
 
-    /// Add a control change event.
+    /// Add a control change event, maintaining sorted order by position (frame).
     pub fn add_cc(&mut self, position: u64, controller: u8, value: u8, channel: u8) {
-        self.control_changes.push(ControlChange {
+        let event = ControlChange {
             position,
             controller,
             value,
             channel,
-        });
+        };
+        let idx = self
+            .control_changes
+            .binary_search_by_key(&position, |cc| cc.position)
+            .unwrap_or_else(|i| i);
+        self.control_changes.insert(idx, event);
     }
 
     /// Get the end position on the timeline.
@@ -186,5 +196,29 @@ mod tests {
         let offs = clip.note_offs_at(600);
         assert_eq!(offs.len(), 1);
         assert_eq!(offs[0].note, 67);
+    }
+
+    #[test]
+    fn test_add_note_maintains_sorted_order() {
+        let mut clip = MidiClip::new("Test", 0, 48000);
+        // Add notes out of order
+        clip.add_note(500, 100, 67, 90, 0);
+        clip.add_note(100, 400, 60, 100, 0);
+        clip.add_note(300, 200, 64, 80, 0);
+
+        let positions: Vec<u64> = clip.notes.iter().map(|n| n.position).collect();
+        assert_eq!(positions, vec![100, 300, 500]);
+    }
+
+    #[test]
+    fn test_add_cc_maintains_sorted_order() {
+        let mut clip = MidiClip::new("Test", 0, 48000);
+        // Add CCs out of order
+        clip.add_cc(400, 7, 100, 0);
+        clip.add_cc(100, 1, 64, 0);
+        clip.add_cc(200, 11, 80, 0);
+
+        let positions: Vec<u64> = clip.control_changes.iter().map(|cc| cc.position).collect();
+        assert_eq!(positions, vec![100, 200, 400]);
     }
 }

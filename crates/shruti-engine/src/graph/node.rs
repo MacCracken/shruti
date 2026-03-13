@@ -66,13 +66,14 @@ impl AudioNode for FilePlayerNode {
 
     fn process(&mut self, _inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         let out_frames = output.frames() as usize;
+        let out_channels = output.channels() as usize;
         let src_frames = self.buffer.frames() as usize;
-        let channels = output.channels().min(self.buffer.channels()) as usize;
+        let src_channels = self.buffer.channels() as usize;
 
         if src_frames == 0 {
             // Empty buffer — fill with silence regardless of looping mode.
             for frame in 0..out_frames {
-                for ch in 0..channels {
+                for ch in 0..out_channels {
                     output.set(frame as u32, ch as u16, 0.0);
                 }
             }
@@ -85,15 +86,18 @@ impl AudioNode for FilePlayerNode {
                     self.position = 0;
                 } else {
                     // Fill remaining with silence
-                    for ch in 0..channels {
+                    for ch in 0..out_channels {
                         output.set(frame as u32, ch as u16, 0.0);
                     }
                     continue;
                 }
             }
 
-            for ch in 0..channels {
-                let sample = self.buffer.get(self.position as u32, ch as u16);
+            for ch in 0..out_channels {
+                // Mono→stereo upmix: when source has fewer channels than
+                // output, duplicate the last available source channel.
+                let src_ch = ch.min(src_channels - 1);
+                let sample = self.buffer.get(self.position as u32, src_ch as u16);
                 output.set(frame as u32, ch as u16, sample);
             }
             self.position += 1;
@@ -362,5 +366,59 @@ mod tests {
         assert_ne!(id1, id2);
         assert_ne!(id2, id3);
         assert_ne!(id1, id3);
+    }
+
+    // --- Mono→stereo upmix tests ---
+
+    #[test]
+    fn test_file_player_mono_to_stereo_upmix() {
+        // Mono source (1 channel), stereo output (2 channels).
+        // The mono sample should be duplicated to both L and R.
+        let src = AudioBuffer::from_interleaved(vec![0.5, 0.75, 1.0], 1);
+        let mut player = FilePlayerNode::new(src, false);
+        let mut out = AudioBuffer::new(2, 3);
+
+        player.process(&[], &mut out);
+
+        // Frame 0: mono 0.5 → L=0.5, R=0.5
+        assert_eq!(out.get(0, 0), 0.5);
+        assert_eq!(out.get(0, 1), 0.5);
+        // Frame 1: mono 0.75 → L=0.75, R=0.75
+        assert_eq!(out.get(1, 0), 0.75);
+        assert_eq!(out.get(1, 1), 0.75);
+        // Frame 2: mono 1.0 → L=1.0, R=1.0
+        assert_eq!(out.get(2, 0), 1.0);
+        assert_eq!(out.get(2, 1), 1.0);
+        assert!(player.is_finished());
+    }
+
+    #[test]
+    fn test_file_player_mono_to_stereo_looping() {
+        // Single mono sample, stereo output, looping.
+        let src = AudioBuffer::from_interleaved(vec![0.9], 1);
+        let mut player = FilePlayerNode::new(src, true);
+        let mut out = AudioBuffer::new(2, 4);
+
+        player.process(&[], &mut out);
+
+        for frame in 0..4 {
+            assert_eq!(out.get(frame, 0), 0.9);
+            assert_eq!(out.get(frame, 1), 0.9);
+        }
+        assert!(!player.is_finished());
+    }
+
+    #[test]
+    fn test_file_player_stereo_to_mono_downmix() {
+        // Stereo source, mono output — should pick channel 0 only.
+        let src = AudioBuffer::from_interleaved(vec![0.3, 0.7, 0.4, 0.8], 2);
+        let mut player = FilePlayerNode::new(src, false);
+        let mut out = AudioBuffer::new(1, 2);
+
+        player.process(&[], &mut out);
+
+        // Only channel 0 of the source is used (min of src_channels-1=1 vs ch=0).
+        assert_eq!(out.get(0, 0), 0.3);
+        assert_eq!(out.get(1, 0), 0.4);
     }
 }

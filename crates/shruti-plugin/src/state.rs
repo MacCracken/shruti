@@ -16,6 +16,9 @@ pub struct PluginState {
     pub chunk: Vec<u8>,
 }
 
+/// Maximum size in bytes for an opaque plugin state blob (10 MB).
+pub const MAX_STATE_BLOB_SIZE: usize = 10 * 1024 * 1024;
+
 impl PluginState {
     pub fn new(plugin_id: String) -> Self {
         Self {
@@ -23,6 +26,30 @@ impl PluginState {
             params: HashMap::new(),
             chunk: Vec::new(),
         }
+    }
+
+    /// Validate the state blob. Returns an error message if invalid.
+    ///
+    /// Checks:
+    /// - The chunk size does not exceed `MAX_STATE_BLOB_SIZE` (10 MB).
+    /// - If the chunk is non-empty, it must be at least 4 bytes (minimum
+    ///   meaningful header for any binary format).
+    pub fn validate(&self) -> Result<(), String> {
+        if self.chunk.len() > MAX_STATE_BLOB_SIZE {
+            return Err(format!(
+                "state blob too large: {} bytes (max {})",
+                self.chunk.len(),
+                MAX_STATE_BLOB_SIZE
+            ));
+        }
+        // Non-empty chunks should have at least a minimal header
+        if !self.chunk.is_empty() && self.chunk.len() < 4 {
+            return Err(format!(
+                "state blob too small to be valid: {} bytes (minimum 4)",
+                self.chunk.len()
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -48,6 +75,42 @@ mod base64_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_empty_chunk() {
+        let state = PluginState::new("test".into());
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_valid_chunk() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0xDE, 0xAD, 0xBE, 0xEF]; // 4 bytes, valid minimum
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_too_small_chunk() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0x01, 0x02]; // Only 2 bytes, below minimum of 4
+        let err = state.validate().unwrap_err();
+        assert!(err.contains("too small"));
+    }
+
+    #[test]
+    fn test_validate_too_large_chunk() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0u8; MAX_STATE_BLOB_SIZE + 1];
+        let err = state.validate().unwrap_err();
+        assert!(err.contains("too large"));
+    }
+
+    #[test]
+    fn test_validate_at_max_size() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0u8; MAX_STATE_BLOB_SIZE];
+        assert!(state.validate().is_ok());
+    }
 
     #[test]
     fn test_state_serialization() {

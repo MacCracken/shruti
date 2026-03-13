@@ -537,6 +537,73 @@ impl Session {
         self.tracks.len()
     }
 
+    /// Validate the session after loading, checking for required fields,
+    /// valid track kinds, and reasonable value ranges.
+    ///
+    /// Returns a list of validation issues found (empty if valid).
+    pub fn validate(&self) -> Vec<String> {
+        let mut issues = Vec::new();
+
+        // Session name must not be empty
+        if self.name.trim().is_empty() {
+            issues.push("session name is empty".to_string());
+        }
+
+        // Sample rate must be reasonable (1000 Hz to 384 kHz)
+        if self.sample_rate < 1000 || self.sample_rate > 384_000 {
+            issues.push(format!(
+                "sample_rate {} is outside reasonable range [1000, 384000]",
+                self.sample_rate
+            ));
+        }
+
+        // Buffer size must be a power of two between 16 and 8192
+        if self.buffer_size < 16 || self.buffer_size > 8192 || !self.buffer_size.is_power_of_two() {
+            issues.push(format!(
+                "buffer_size {} should be a power of two in [16, 8192]",
+                self.buffer_size
+            ));
+        }
+
+        // Must have at least a master track
+        let master_count = self
+            .tracks
+            .iter()
+            .filter(|t| t.kind == TrackKind::Master)
+            .count();
+        if master_count == 0 {
+            issues.push("no master track found".to_string());
+        } else if master_count > 1 {
+            issues.push(format!("found {master_count} master tracks, expected 1"));
+        }
+
+        // Validate each track
+        for track in &self.tracks {
+            // Track name should not be empty
+            if track.name.trim().is_empty() {
+                issues.push(format!("track {:?} has empty name", track.id));
+            }
+
+            // Gain must be non-negative
+            if track.gain < 0.0 {
+                issues.push(format!(
+                    "track '{}' has negative gain {}",
+                    track.name, track.gain
+                ));
+            }
+
+            // Pan must be in [-1, 1]
+            if track.pan < -1.0 || track.pan > 1.0 {
+                issues.push(format!(
+                    "track '{}' has pan {} outside [-1.0, 1.0]",
+                    track.name, track.pan
+                ));
+            }
+        }
+
+        issues
+    }
+
     /// Find the end position of the last region or MIDI clip across all tracks.
     pub fn session_length(&self) -> u64 {
         let audio_end = self
@@ -1515,5 +1582,74 @@ mod tests {
         // Master is still last
         assert_eq!(session.tracks.last().unwrap().kind, TrackKind::Master);
         assert!(session.dirty);
+    }
+
+    // ---------------------------------------------------------------
+    // Schema validation
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_validate_valid_session() {
+        let mut session = Session::new("My Project", 48000, 256);
+        session.add_audio_track("Guitar");
+        session.add_bus_track("Reverb");
+        let issues = session.validate();
+        assert!(issues.is_empty(), "expected no issues: {issues:?}");
+    }
+
+    #[test]
+    fn test_validate_catches_bad_sample_rate() {
+        let session = Session::new("Test", 500, 256); // too low
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("sample_rate")),
+            "expected sample_rate issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_bad_buffer_size() {
+        let session = Session::new("Test", 48000, 300); // not power of two
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("buffer_size")),
+            "expected buffer_size issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_no_master() {
+        let mut session = Session::new("Test", 48000, 256);
+        // Remove the master track
+        session.tracks.retain(|t| t.kind != TrackKind::Master);
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("no master")),
+            "expected missing master issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_negative_gain() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_audio_track("Bad");
+        session.track_mut(id).unwrap().gain = -1.0;
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("negative gain")),
+            "expected negative gain issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_pan_out_of_range() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_audio_track("Bad");
+        session.track_mut(id).unwrap().pan = 2.0;
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("pan")),
+            "expected pan issue: {issues:?}"
+        );
     }
 }

@@ -13,6 +13,26 @@ pub enum FilterMode {
 ///
 /// Supports low-pass, high-pass, band-pass, and notch modes with
 /// adjustable cutoff frequency and resonance.
+///
+/// # Cutoff modulation
+///
+/// When used inside [`SubtractiveSynth`](crate::synth::SubtractiveSynth),
+/// the cutoff frequency is modulated in **octaves** by both the filter
+/// envelope and LFO:
+///
+/// ```text
+/// modulated_cutoff = base_cutoff * 2^(env_mod + lfo_mod)
+/// ```
+///
+/// - **Filter envelope depth** (`FilterEnvDepth`, -1.0 to +1.0) scales
+///   the envelope output by up to **4 octaves** in either direction.
+///   A depth of +1.0 means the envelope sweeps the cutoff up by 4
+///   octaves (16x frequency) at its peak; -1.0 sweeps down by 4 octaves.
+///
+/// - **LFO cutoff modulation** similarly contributes up to **4 octaves**
+///   of bipolar modulation based on the LFO's current output and depth.
+///
+/// The final modulated cutoff is clamped to the 20 Hz – 20 kHz range.
 pub struct Filter {
     pub mode: FilterMode,
     pub cutoff: f32,
@@ -432,6 +452,33 @@ mod tests {
         assert!(
             total_atten_db < -12.0,
             "Sweeping cutoff from 8kHz to 1kHz should attenuate 5kHz by >12dB, got {total_atten_db:.1} dB"
+        );
+    }
+
+    #[test]
+    fn cutoff_modulation_octave_math_sanity() {
+        // Verify that doubling the cutoff (1 octave up) audibly changes
+        // filter behavior — this validates the octave-based modulation
+        // documented on the Filter struct.
+        let rms_1k = sine_rms_through_filter(FilterMode::LowPass, 1000.0, 0.0, 3000.0, SR);
+        let rms_2k = sine_rms_through_filter(FilterMode::LowPass, 2000.0, 0.0, 3000.0, SR);
+        // 2kHz cutoff should pass more of a 3kHz signal than 1kHz cutoff
+        assert!(
+            rms_2k > rms_1k,
+            "doubling cutoff (1 octave) should pass more signal: 1k={rms_1k}, 2k={rms_2k}"
+        );
+    }
+
+    #[test]
+    fn filter_cutoff_four_octave_range() {
+        // 4 octaves above 500 Hz = 500 * 2^4 = 8000 Hz.
+        // A 5kHz signal should be much more audible through an 8kHz LP
+        // than through a 500 Hz LP.
+        let rms_base = sine_rms_through_filter(FilterMode::LowPass, 500.0, 0.0, 5000.0, SR);
+        let rms_4oct_up = sine_rms_through_filter(FilterMode::LowPass, 8000.0, 0.0, 5000.0, SR);
+        assert!(
+            rms_4oct_up > rms_base * 2.0,
+            "4 octaves of cutoff mod should dramatically change filtering: base={rms_base}, +4oct={rms_4oct_up}"
         );
     }
 }

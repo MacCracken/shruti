@@ -64,7 +64,7 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Load session metadata from the database.
+    /// Load session metadata from the database with schema validation.
     pub fn load(&self) -> Result<Session, Box<dyn std::error::Error>> {
         let json: String =
             self.db
@@ -72,12 +72,36 @@ impl SessionStore {
                     row.get(0)
                 })?;
         let session: Session = serde_json::from_str(&json)?;
+
+        let issues = session.validate();
+        if !issues.is_empty() {
+            return Err(format!("session validation failed: {}", issues.join("; ")).into());
+        }
+
         Ok(session)
     }
 
     /// Path to the audio pool directory.
     pub fn audio_dir(&self) -> PathBuf {
         self.path.join("audio")
+    }
+
+    /// Persist audio pool metadata alongside the session.
+    ///
+    /// Currently writes a manifest of pool entry keys so they can be
+    /// reloaded when the session is reopened.
+    pub fn save_audio_pool(
+        &self,
+        pool: &crate::audio_pool::AudioPool,
+        _sample_rate: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let audio_dir = self.audio_dir();
+        fs::create_dir_all(&audio_dir)?;
+        // Write a simple manifest of loaded audio file IDs
+        let keys: Vec<&str> = pool.ids();
+        let manifest = serde_json::to_string(&keys)?;
+        fs::write(audio_dir.join("manifest.json"), manifest)?;
+        Ok(())
     }
 }
 

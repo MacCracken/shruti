@@ -1,9 +1,15 @@
+use std::collections::VecDeque;
+
 use crate::edit::EditCommand;
 use crate::session::Session;
 
 /// Manages undo/redo history using the command pattern.
+///
+/// TODO(perf): Each `EditCommand` stores full copies of regions/groups. For
+/// large sessions, consider using delta-based or copy-on-write representations
+/// (e.g. `Arc<Region>`) to reduce memory pressure when undo history is deep.
 pub struct UndoManager {
-    undo_stack: Vec<EditCommand>,
+    undo_stack: VecDeque<EditCommand>,
     redo_stack: Vec<EditCommand>,
     max_history: usize,
 }
@@ -11,7 +17,7 @@ pub struct UndoManager {
 impl UndoManager {
     pub fn new(max_history: usize) -> Self {
         Self {
-            undo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
             max_history,
         }
@@ -20,17 +26,17 @@ impl UndoManager {
     /// Execute a command, pushing it onto the undo stack.
     pub fn execute(&mut self, mut cmd: EditCommand, session: &mut Session) {
         apply_command(&mut cmd, session);
-        self.undo_stack.push(cmd);
+        self.undo_stack.push_back(cmd);
         self.redo_stack.clear();
 
         if self.undo_stack.len() > self.max_history {
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front(); // O(1) eviction instead of Vec::remove(0)
         }
     }
 
     /// Undo the last command.
     pub fn undo(&mut self, session: &mut Session) -> bool {
-        if let Some(cmd) = self.undo_stack.pop() {
+        if let Some(cmd) = self.undo_stack.pop_back() {
             reverse_command(&cmd, session);
             self.redo_stack.push(cmd);
             true
@@ -43,7 +49,7 @@ impl UndoManager {
     pub fn redo(&mut self, session: &mut Session) -> bool {
         if let Some(mut cmd) = self.redo_stack.pop() {
             apply_command(&mut cmd, session);
-            self.undo_stack.push(cmd);
+            self.undo_stack.push_back(cmd);
             true
         } else {
             false
@@ -1766,5 +1772,75 @@ mod tests {
                 .sidechain_input
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_vecdeque_eviction_oldest_first() {
+        let (mut session, track_id) = make_session_with_track();
+        let mut um = UndoManager::new(3); // max 3 entries
+
+        // Execute 5 commands — first 2 should be evicted
+        for i in 0..5 {
+            um.execute(
+                EditCommand::SetTrackGain {
+                    track_id,
+                    old_gain: i as f32,
+                    new_gain: (i + 1) as f32,
+                },
+                &mut session,
+            );
+        }
+
+        assert_eq!(um.undo_count(), 3);
+        // We should be able to undo exactly 3 times
+        assert!(um.undo(&mut session));
+        assert!(um.undo(&mut session));
+        assert!(um.undo(&mut session));
+        assert!(!um.undo(&mut session)); // no more
+    }
+
+    #[test]
+    fn test_vecdeque_eviction_preserves_order() {
+        let (mut session, track_id) = make_session_with_track();
+        let mut um = UndoManager::new(2);
+
+        um.execute(
+            EditCommand::SetTrackGain {
+                track_id,
+                old_gain: 1.0,
+                new_gain: 2.0,
+            },
+            &mut session,
+        );
+        um.execute(
+            EditCommand::SetTrackGain {
+                track_id,
+                old_gain: 2.0,
+                new_gain: 3.0,
+            },
+            &mut session,
+        );
+        um.execute(
+            EditCommand::SetTrackGain {
+                track_id,
+                old_gain: 3.0,
+                new_gain: 4.0,
+            },
+            &mut session,
+        );
+
+        // First command evicted; current gain is 4.0
+        assert_eq!(session.track(track_id).unwrap().gain, 4.0);
+
+        // Undo last: 4.0 -> 3.0
+        um.undo(&mut session);
+        assert_eq!(session.track(track_id).unwrap().gain, 3.0);
+
+        // Undo second-to-last: 3.0 -> 2.0
+        um.undo(&mut session);
+        assert_eq!(session.track(track_id).unwrap().gain, 2.0);
+
+        // Cannot undo further (first command was evicted)
+        assert!(!um.can_undo());
     }
 }

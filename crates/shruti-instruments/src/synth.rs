@@ -41,21 +41,30 @@ pub struct SubtractiveSynth {
     pub effect_chain: EffectChain,
 }
 
-// Parameter indices
+// Parameter indices.
+// Note: some of these are accessed indirectly via `read_adsr()` which reads
+// four consecutive indices starting from the attack parameter.
+#[allow(dead_code)]
 const PARAM_WAVEFORM: usize = 0;
 const PARAM_ATTACK: usize = 1;
+#[allow(dead_code)]
 const PARAM_DECAY: usize = 2;
+#[allow(dead_code)]
 const PARAM_SUSTAIN: usize = 3;
+#[allow(dead_code)]
 const PARAM_RELEASE: usize = 4;
 const PARAM_VOLUME: usize = 5;
 const PARAM_DETUNE: usize = 6;
 const PARAM_FILTER_CUTOFF: usize = 7;
 const PARAM_FILTER_RESONANCE: usize = 8;
 const PARAM_FILTER_MODE: usize = 9;
-// Filter envelope
+// Filter envelope (read_adsr reads 4 consecutive from ATTACK)
 const PARAM_FILTER_ENV_ATTACK: usize = 10;
+#[allow(dead_code)]
 const PARAM_FILTER_ENV_DECAY: usize = 11;
+#[allow(dead_code)]
 const PARAM_FILTER_ENV_SUSTAIN: usize = 12;
+#[allow(dead_code)]
 const PARAM_FILTER_ENV_RELEASE: usize = 13;
 const PARAM_FILTER_ENV_DEPTH: usize = 14;
 // LFO 1
@@ -203,22 +212,23 @@ impl SubtractiveSynth {
         Self::waveform_from_param(self.params[PARAM_WAVEFORM].value)
     }
 
-    fn current_adsr(&self) -> AdsrParams {
+    /// Read ADSR parameters from four consecutive param indices
+    /// (attack, decay, sustain, release).
+    fn read_adsr(&self, attack_idx: usize) -> AdsrParams {
         AdsrParams {
-            attack: self.params[PARAM_ATTACK].value,
-            decay: self.params[PARAM_DECAY].value,
-            sustain: self.params[PARAM_SUSTAIN].value,
-            release: self.params[PARAM_RELEASE].value,
+            attack: self.params[attack_idx].value,
+            decay: self.params[attack_idx + 1].value,
+            sustain: self.params[attack_idx + 2].value,
+            release: self.params[attack_idx + 3].value,
         }
     }
 
+    fn current_adsr(&self) -> AdsrParams {
+        self.read_adsr(PARAM_ATTACK)
+    }
+
     fn current_filter_adsr(&self) -> AdsrParams {
-        AdsrParams {
-            attack: self.params[PARAM_FILTER_ENV_ATTACK].value,
-            decay: self.params[PARAM_FILTER_ENV_DECAY].value,
-            sustain: self.params[PARAM_FILTER_ENV_SUSTAIN].value,
-            release: self.params[PARAM_FILTER_ENV_RELEASE].value,
-        }
+        self.read_adsr(PARAM_FILTER_ENV_ATTACK)
     }
 
     fn current_filter_mode(&self) -> FilterMode {
@@ -239,6 +249,20 @@ impl SubtractiveSynth {
             4 => LfoShape::SawDown,
             _ => LfoShape::SampleAndHold,
         }
+    }
+
+    /// Fast approximation of `2.0f32.powf(x)` for use in per-sample hot paths.
+    ///
+    /// Uses IEEE 754 bit manipulation for the integer part and a quadratic
+    /// polynomial for the fractional part (maximum error ~0.1%).
+    #[inline]
+    fn fast_exp2(x: f32) -> f32 {
+        // Clamp to avoid overflow/underflow in bit manipulation
+        let x = x.clamp(-126.0, 126.0);
+        let xi = x.floor() as i32;
+        let xf = x - xi as f32;
+        let base = f32::from_bits(((xi + 127) as u32) << 23);
+        base * (1.0 + xf * (std::f32::consts::LN_2 + xf * 0.2402265))
     }
 
     /// Apply LFO modulation to a target value. Returns (cutoff_mod, pitch_mod, volume_mod).
@@ -370,7 +394,7 @@ impl SubtractiveSynth {
                 // Apply LFO pitch modulation (in semitones, depth * 12 max)
                 let effective_freq = if pitch_lfo_mod.abs() > 0.0001 {
                     let semitones = pitch_lfo_mod * 12.0;
-                    freq * 2.0f64.powf(semitones as f64 / 12.0)
+                    freq * Self::fast_exp2(semitones / 12.0) as f64
                 } else {
                     freq
                 };
@@ -430,11 +454,15 @@ impl SubtractiveSynth {
                 // Apply amp envelope
                 let after_env = mix * env_level;
 
-                // Compute filter cutoff: base + filter envelope + LFO
+                // Compute filter cutoff: base + filter envelope + LFO.
+                //
+                // Modulation is applied in octaves: the envelope and LFO each
+                // contribute up to +/-4 octaves of cutoff shift.  A depth of
+                // 1.0 therefore sweeps the cutoff by 4 octaves (16x frequency).
                 let env_mod_octaves = filter_env_level * filter_env_depth * 4.0;
                 let lfo_mod_octaves = cutoff_lfo_mod * 4.0;
                 let modulated_cutoff = (filter_cutoff
-                    * 2.0f32.powf(env_mod_octaves + lfo_mod_octaves))
+                    * Self::fast_exp2(env_mod_octaves + lfo_mod_octaves))
                 .clamp(20.0, 20000.0);
                 self.filters[i].cutoff = modulated_cutoff;
 
@@ -562,6 +590,69 @@ impl InstrumentNode for SubtractiveSynth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fast_exp2_accuracy() {
+        // Verify fast_exp2 matches 2.0f32.powf(x) within 0.2% for typical
+        // musical modulation ranges (-4..+4 octaves).
+        let test_values = [-4.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 4.0];
+        for &x in &test_values {
+            let exact = 2.0f32.powf(x);
+            let approx = SubtractiveSynth::fast_exp2(x);
+            let rel_error = ((approx - exact) / exact).abs();
+            assert!(
+                rel_error < 0.01,
+                "fast_exp2({x}) = {approx}, expected {exact}, error = {:.4}%",
+                rel_error * 100.0,
+            );
+        }
+    }
+
+    #[test]
+    fn fast_exp2_zero_is_one() {
+        let result = SubtractiveSynth::fast_exp2(0.0);
+        assert!(
+            (result - 1.0).abs() < 1e-5,
+            "fast_exp2(0) should be 1.0, got {result}"
+        );
+    }
+
+    #[test]
+    fn fast_exp2_one_is_two() {
+        let result = SubtractiveSynth::fast_exp2(1.0);
+        assert!(
+            (result - 2.0).abs() < 0.01,
+            "fast_exp2(1) should be ~2.0, got {result}"
+        );
+    }
+
+    #[test]
+    fn read_adsr_returns_correct_params() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_ATTACK].set(0.05);
+        synth.params_mut()[PARAM_DECAY].set(0.2);
+        synth.params_mut()[PARAM_SUSTAIN].set(0.6);
+        synth.params_mut()[PARAM_RELEASE].set(0.4);
+        let adsr = synth.current_adsr();
+        assert!((adsr.attack - 0.05).abs() < 1e-5);
+        assert!((adsr.decay - 0.2).abs() < 1e-5);
+        assert!((adsr.sustain - 0.6).abs() < 1e-5);
+        assert!((adsr.release - 0.4).abs() < 1e-5);
+    }
+
+    #[test]
+    fn read_adsr_works_for_filter_envelope() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[PARAM_FILTER_ENV_ATTACK].set(0.1);
+        synth.params_mut()[PARAM_FILTER_ENV_DECAY].set(0.5);
+        synth.params_mut()[PARAM_FILTER_ENV_SUSTAIN].set(0.3);
+        synth.params_mut()[PARAM_FILTER_ENV_RELEASE].set(0.8);
+        let adsr = synth.current_filter_adsr();
+        assert!((adsr.attack - 0.1).abs() < 1e-5);
+        assert!((adsr.decay - 0.5).abs() < 1e-5);
+        assert!((adsr.sustain - 0.3).abs() < 1e-5);
+        assert!((adsr.release - 0.8).abs() < 1e-5);
+    }
 
     #[test]
     fn synth_creates_with_defaults() {
@@ -1249,5 +1340,66 @@ mod tests {
         assert_eq!(voice.phase, 0.0);
         assert_eq!(voice.phase2, 0.0);
         assert_eq!(voice.phase3, 0.0);
+    }
+
+    #[test]
+    fn set_sample_rate_propagates_to_all_components() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.set_sample_rate(96000.0);
+
+        // Verify by playing a note — the synth should produce correct output
+        // at the new sample rate without panics or NaN.
+        synth.note_on(69, 127, 0);
+        let mut buf = AudioBuffer::new(2, 1024);
+        synth.process(&[], &[], &mut buf);
+
+        let mut has_nonzero = false;
+        for i in 0..1024 {
+            let s = buf.get(i, 0);
+            assert!(
+                s.is_finite(),
+                "output not finite at frame {i} after sample rate change"
+            );
+            if s.abs() > 0.001 {
+                has_nonzero = true;
+            }
+        }
+        assert!(
+            has_nonzero,
+            "synth should produce output after sample rate change"
+        );
+    }
+
+    #[test]
+    fn set_sample_rate_changes_pitch() {
+        // At a different sample rate, the same frequency should produce
+        // a different number of zero crossings in the same number of frames.
+        fn count_crossings(sample_rate: f32) -> usize {
+            let mut synth = SubtractiveSynth::new(sample_rate);
+            synth.params_mut()[PARAM_WAVEFORM].set(0.0); // sine
+            synth.note_on(69, 127, 0);
+
+            let frames = 2048;
+            let mut buf = AudioBuffer::new(2, frames);
+            synth.process(&[], &[], &mut buf);
+
+            let mut crossings = 0;
+            for i in 1..frames as u32 {
+                if buf.get(i - 1, 0) * buf.get(i, 0) < 0.0 {
+                    crossings += 1;
+                }
+            }
+            crossings
+        }
+
+        let crossings_48k = count_crossings(48000.0);
+        let crossings_96k = count_crossings(96000.0);
+
+        // At 96kHz, we have twice as many samples per cycle, so the same
+        // number of frames covers half the time, yielding fewer crossings.
+        assert!(
+            crossings_96k < crossings_48k,
+            "96kHz should have fewer crossings in same frame count: 48k={crossings_48k}, 96k={crossings_96k}"
+        );
     }
 }

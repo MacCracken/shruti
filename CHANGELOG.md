@@ -358,7 +358,17 @@ Format: CalVer (YYYY.M.D-N).
 - Step sequencer tests: timing accuracy, swing calculation, probability distribution, BPM sync
 - Sample playback tests: pitch mapping, loop points, velocity layers, one-shot vs gated, drum machine playback
 - MIDI integration tests: end-to-end MIDI clip → instrument → audio for synth, drum machine, sampler
-- 1136 total tests across workspace
+- 1292 total tests across workspace
+
+### Engineering Backlog
+- **Engine**: Lock-free meter levels (`AtomicStereoLevel`), mono→stereo upmix, poisoned mutex recovery with logging, render failure logging, diff-based device cache refresh
+- **DSP**: EBU R128 compliant LUFS (per-channel mean-square), standard compressor soft knee, `catch_unwind` for audio parsing, reverb/allpass min buffer size, delay clamp
+- **Instruments**: Envelope stage_pos reset on all transitions, LFO S&H double-sample fix, `fast_exp2()` for pitch modulation, ADSR helper deduplication (`read_adsr()`), sample rate observer, filter docs
+- **Session**: Audio pool LRU eviction, sorted regions with binary search, `VecDeque` for undo stack, schema validation on load, sorted MIDI events, automation dead code cleanup
+- **UI Critical**: Auto-save with `.shruti_backup` (60s interval), background file I/O via `mpsc`, save prompt on New/Open, toast notifications, comprehensive undo in mixer (mute/solo/gain/pan), engine init error dialog
+- **UI Medium**: Waveform peaks caching, snap-to-grid, recording animation, grid level-of-detail, zoom boundary clamping (`clamp_zoom`/`zoom_to_fit`), keyboard shortcuts, audio pool persistence, theme caching
+- **Security**: MCP request size limit, agent API rate limiting, plugin scanner symlink depth, preferences file permissions (0600), plugin state blob validation, scanner disk cache
+- 1292 total tests across workspace
 
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)

@@ -9,6 +9,7 @@ use shruti_dsp::{AudioBuffer, AudioFormat};
 type AudioCallback = Box<dyn FnMut(&mut [f32]) + Send + 'static>;
 use shruti_engine::AudioStream;
 use shruti_engine::backend::{AudioHost, CpalBackend};
+use shruti_engine::meter::{SharedMeterLevels, shared_meter_levels};
 use shruti_session::RecordingConfig;
 use shruti_session::audio_pool::AudioPool;
 use shruti_session::track::Track;
@@ -60,9 +61,9 @@ pub struct AudioEngine {
     session_data: Arc<Mutex<SharedSessionData>>,
     _output_stream: Option<Box<dyn AudioStream>>,
     _input_stream: Option<Box<dyn AudioStream>>,
-    /// Peak levels: Vec of (peak_left, peak_right) per track slot.
+    /// Lock-free peak levels: one stereo pair per track slot.
     /// The last slot is the master / mixed output.
-    pub meter_levels: Arc<Mutex<Vec<[f32; 2]>>>,
+    pub meter_levels: SharedMeterLevels,
     /// Accumulates incoming audio from the input callback during recording.
     record_buffer: Arc<Mutex<Vec<f32>>>,
     /// Sample rate used by this engine instance.
@@ -81,8 +82,9 @@ impl AudioEngine {
         audio_pool: Arc<AudioPool>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let transport = Arc::new(SharedTransport::new());
-        let meter_levels: Arc<Mutex<Vec<[f32; 2]>>> =
-            Arc::new(Mutex::new(vec![[0.0; 2]; session.tracks.len() + 1]));
+        // Pre-allocate enough meter slots for tracks + master.
+        // Use a generous capacity so resizes are rare.
+        let meter_levels = shared_meter_levels((session.tracks.len() + 1).max(64));
 
         let session_data = Arc::new(Mutex::new(SharedSessionData {
             tracks: session.tracks.clone(),
@@ -95,7 +97,7 @@ impl AudioEngine {
 
         let transport_cb = Arc::clone(&transport);
         let session_data_cb = Arc::clone(&session_data);
-        let meter_levels_cb = Arc::clone(&meter_levels);
+        let meter_levels_cb: SharedMeterLevels = Arc::clone(&meter_levels);
 
         let callback = Self::build_callback(transport_cb, session_data_cb, meter_levels_cb);
 
@@ -118,7 +120,7 @@ impl AudioEngine {
     fn build_callback(
         transport: Arc<SharedTransport>,
         session_data: Arc<Mutex<SharedSessionData>>,
-        meter_levels: Arc<Mutex<Vec<[f32; 2]>>>,
+        meter_levels: SharedMeterLevels,
     ) -> AudioCallback {
         // Per-callback scratch state — lives inside the closure, no locking needed.
         let mut timeline: Option<Timeline> = None;
@@ -167,8 +169,8 @@ impl AudioEngine {
                 output[copy_len..].fill(0.0);
             }
 
-            // Compute master peak levels from the mixed output.
-            if let Ok(mut levels) = meter_levels.try_lock() {
+            // Compute master peak levels from the mixed output (lock-free).
+            {
                 let mut peak_l: f32 = 0.0;
                 let mut peak_r: f32 = 0.0;
                 for i in (0..copy_len).step_by(channels as usize) {
@@ -177,8 +179,10 @@ impl AudioEngine {
                         peak_r = peak_r.max(output[i + 1].abs());
                     }
                 }
-                if let Some(last) = levels.last_mut() {
-                    *last = [peak_l, peak_r];
+                // Write to last active slot (master).
+                let active = meter_levels.len();
+                if active > 0 {
+                    meter_levels.store(active - 1, peak_l, peak_r);
                 }
             }
 
@@ -228,29 +232,34 @@ impl AudioEngine {
     /// Call this after any change to tracks or the audio pool.
     pub fn update_session(&self, session: &Session, audio_pool: Arc<AudioPool>) {
         let new_track_count = session.tracks.len();
-        if let Ok(mut data) = self.session_data.lock() {
-            data.tracks = session.tracks.clone();
-            data.audio_pool = audio_pool;
-            data.sample_rate = session.sample_rate;
-            // Resize meter levels while still holding session_data lock so the
-            // audio thread never sees mismatched track count vs meter slots.
-            if let Ok(mut levels) = self.meter_levels.lock() {
-                levels.resize(new_track_count + 1, [0.0; 2]);
+        match self.session_data.lock() {
+            Ok(mut data) => {
+                data.tracks = session.tracks.clone();
+                data.audio_pool = audio_pool;
+                data.sample_rate = session.sample_rate;
+            }
+            Err(e) => {
+                eprintln!(
+                    "shruti-engine: session data mutex poisoned in update_session, recovering: {e}"
+                );
+                let mut data = e.into_inner();
+                data.tracks = session.tracks.clone();
+                data.audio_pool = audio_pool;
+                data.sample_rate = session.sample_rate;
             }
         }
+        // Update active meter slot count (lock-free).
+        self.meter_levels.set_active(new_track_count + 1);
     }
 
     // -- Metering -------------------------------------------------------------
 
-    /// Read current peak meter levels.
+    /// Read current peak meter levels (lock-free).
     ///
     /// Returns a `Vec` with one `[left, right]` pair per track; the last
     /// entry is the master output.
     pub fn read_meters(&self) -> Vec<[f32; 2]> {
-        self.meter_levels
-            .lock()
-            .map(|l| l.clone())
-            .unwrap_or_default()
+        self.meter_levels.read_all()
     }
 
     // -- Recording ------------------------------------------------------------
@@ -298,9 +307,17 @@ impl AudioEngine {
 
         // Pre-allocate buffer for ~10 seconds to reduce early reallocations
         let pre_alloc = (rec_sample_rate as usize * rec_channels as usize * 10).min(max_samples);
-        if let Ok(mut buf) = self.record_buffer.lock() {
-            buf.clear();
-            buf.reserve(pre_alloc);
+        match self.record_buffer.lock() {
+            Ok(mut buf) => {
+                buf.clear();
+                buf.reserve(pre_alloc);
+            }
+            Err(e) => {
+                eprintln!("shruti-engine: record buffer mutex poisoned, recovering: {e}");
+                let mut buf = e.into_inner();
+                buf.clear();
+                buf.reserve(pre_alloc);
+            }
         }
 
         let record_buf = Arc::clone(&self.record_buffer);
@@ -335,14 +352,19 @@ impl AudioEngine {
         self.transport.recording.store(false, Ordering::Release);
         self._input_stream = None; // Drop the stream, stopping capture
 
-        if let Ok(mut buf) = self.record_buffer.lock() {
-            if buf.is_empty() {
-                return None;
+        let mut buf = match self.record_buffer.lock() {
+            Ok(buf) => buf,
+            Err(e) => {
+                eprintln!(
+                    "shruti-engine: record buffer mutex poisoned in stop_recording, recovering: {e}"
+                );
+                e.into_inner()
             }
-            Some(std::mem::take(&mut *buf))
-        } else {
-            None
+        };
+        if buf.is_empty() {
+            return None;
         }
+        Some(std::mem::take(&mut *buf))
     }
 }
 

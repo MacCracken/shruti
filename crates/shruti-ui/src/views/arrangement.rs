@@ -1,4 +1,4 @@
-use egui::{Rect, ScrollArea, Stroke, Ui, pos2, vec2};
+use egui::{Color32, Rect, ScrollArea, Stroke, Ui, pos2, vec2};
 
 use shruti_session::RegionId;
 use shruti_session::edit::EditCommand;
@@ -283,25 +283,38 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                                     colors,
                                 );
 
-                                // Render waveform inside region if audio data is available
-                                if let Some(source) =
-                                    state.session.audio_pool.get(&region.audio_file_id)
+                                // Render waveform inside region if audio data is available.
+                                // Use cached peaks when available; recompute only on miss.
+                                if state
+                                    .session
+                                    .audio_pool
+                                    .get(&region.audio_file_id)
+                                    .is_some()
                                 {
-                                    let peaks = waveform::WaveformPeaks::from_samples(
-                                        source.as_interleaved(),
-                                        0, // left channel
-                                        source.channels() as usize,
-                                    );
-                                    let samples_per_pixel = (1.0 / pixels_per_frame) as f32;
-                                    let start_sample = region.source_offset as usize;
-                                    waveform::draw_waveform(
-                                        ui,
-                                        region_rect.shrink2(vec2(1.0, 4.0)),
-                                        &peaks,
-                                        start_sample,
-                                        samples_per_pixel,
-                                        colors,
-                                    );
+                                    if !state.waveform_cache.contains_key(&region.id) {
+                                        if let Some(source) =
+                                            state.session.audio_pool.get(&region.audio_file_id)
+                                        {
+                                            let peaks = waveform::WaveformPeaks::from_samples(
+                                                source.as_interleaved(),
+                                                0,
+                                                source.channels() as usize,
+                                            );
+                                            state.waveform_cache.insert(region.id, peaks);
+                                        }
+                                    }
+                                    if let Some(peaks) = state.waveform_cache.get(&region.id) {
+                                        let samples_per_pixel = (1.0 / pixels_per_frame) as f32;
+                                        let start_sample = region.source_offset as usize;
+                                        waveform::draw_waveform(
+                                            ui,
+                                            region_rect.shrink2(vec2(1.0, 4.0)),
+                                            peaks,
+                                            start_sample,
+                                            samples_per_pixel,
+                                            colors,
+                                        );
+                                    }
                                 }
 
                                 // Selection highlight border
@@ -719,6 +732,38 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
         }
     }
 
+    // Draw ghost overlay for dragged region
+    if let Some(ArrangementDrag::MoveRegion {
+        region_id,
+        track_index,
+        ..
+    }) = &state.drag
+    {
+        if *track_index < state.session.tracks.len()
+            && let Some(region) = state.session.tracks[*track_index].region(*region_id)
+        {
+            let lane_left = available.left() + TRACK_HEADER_WIDTH;
+            let ghost_x =
+                lane_left + (region.timeline_pos as f64 * pixels_per_frame - scroll_x) as f32;
+            let ghost_w = (region.duration as f64 * pixels_per_frame) as f32;
+            let ghost_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
+            let ghost_rect =
+                Rect::from_min_size(pos2(ghost_x, ghost_y), vec2(ghost_w, TRACK_HEIGHT - 4.0));
+            let painter = ui.painter();
+            painter.rect_filled(
+                ghost_rect,
+                egui::CornerRadius::same(3),
+                Color32::from_rgba_premultiplied(100, 160, 255, 50),
+            );
+            painter.rect_stroke(
+                ghost_rect,
+                egui::CornerRadius::same(3),
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(100, 160, 255, 120)),
+                egui::StrokeKind::Outside,
+            );
+        }
+    }
+
     // Show drop zone overlay when dragging files
     let is_hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
     if is_hovering {
@@ -758,6 +803,93 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
     }
 }
 
+/// Quantize a frame position to the nearest bar/beat grid boundary.
+///
+/// Returns the nearest grid-aligned frame position based on BPM and sample rate.
+/// Grid resolution is one beat (quarter note).
+pub fn snap_to_grid(position: u64, bpm: f64, sample_rate: u32) -> u64 {
+    if bpm <= 0.0 || sample_rate == 0 {
+        return position;
+    }
+    let frames_per_beat = (sample_rate as f64 * 60.0) / bpm;
+    if frames_per_beat <= 0.0 {
+        return position;
+    }
+    let beat_index = (position as f64 / frames_per_beat).round();
+    (beat_index * frames_per_beat) as u64
+}
+
+/// Compute the minimum grid spacing in pixels for the current zoom level.
+///
+/// Returns the appropriate grid subdivision: bar lines, beat lines, or neither.
+/// `min_spacing_px` is the minimum pixel distance between grid lines (typically 5.0).
+pub fn grid_level_of_detail(
+    pixels_per_frame: f64,
+    sample_rate: u32,
+    bpm: f64,
+    min_spacing_px: f32,
+) -> GridLod {
+    if bpm <= 0.0 || sample_rate == 0 {
+        return GridLod::None;
+    }
+    let frames_per_beat = (sample_rate as f64 * 60.0) / bpm;
+    let frames_per_bar = frames_per_beat * 4.0;
+    let pixels_per_bar = frames_per_bar * pixels_per_frame;
+    let pixels_per_beat = frames_per_beat * pixels_per_frame;
+
+    if pixels_per_bar < min_spacing_px as f64 {
+        GridLod::None
+    } else if pixels_per_beat < min_spacing_px as f64 {
+        GridLod::BarsOnly
+    } else {
+        GridLod::BarsAndBeats
+    }
+}
+
+/// Level of detail for grid rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridLod {
+    /// No grid lines visible at this zoom level.
+    None,
+    /// Only bar lines visible.
+    BarsOnly,
+    /// Both bar and beat subdivision lines visible.
+    BarsAndBeats,
+}
+
+/// Clamp zoom level so the session doesn't become invisible.
+///
+/// Returns clamped `pixels_per_frame` within sensible bounds.
+/// `session_length` is the total session length in frames; `view_width_px` is the
+/// available view width in pixels.
+pub fn clamp_zoom(pixels_per_frame: f64, session_length: u64, view_width_px: f32) -> f64 {
+    const MIN_PPF: f64 = 0.00001;
+    const MAX_PPF: f64 = 1.0;
+
+    if session_length == 0 || view_width_px <= 0.0 {
+        return pixels_per_frame.clamp(MIN_PPF, MAX_PPF);
+    }
+
+    // At minimum zoom, the whole session should fit in ~10x the view width
+    // (don't let it get so small the session vanishes).
+    let min_ppf = (view_width_px as f64) / (session_length as f64 * 10.0);
+    let min_ppf = min_ppf.max(MIN_PPF);
+
+    pixels_per_frame.clamp(min_ppf, MAX_PPF)
+}
+
+/// Compute the zoom-to-fit `pixels_per_frame` for a given session length and view width.
+///
+/// Returns `None` if the session is empty.
+pub fn zoom_to_fit(session_length: u64, view_width_px: f32) -> Option<f64> {
+    if session_length == 0 || view_width_px <= 0.0 {
+        return None;
+    }
+    // Leave 5% margin on each side
+    let usable_width = view_width_px as f64 * 0.9;
+    Some(usable_width / session_length as f64)
+}
+
 fn draw_grid(
     ui: &mut Ui,
     rect: Rect,
@@ -767,15 +899,15 @@ fn draw_grid(
     bpm: f64,
     colors: &ThemeColors,
 ) {
+    let lod = grid_level_of_detail(pixels_per_frame, sample_rate, bpm, 5.0);
+    if lod == GridLod::None {
+        return;
+    }
+
     let painter = ui.painter_at(rect);
 
     let frames_per_beat = (sample_rate as f64 * 60.0) / bpm;
     let frames_per_bar = frames_per_beat * 4.0;
-    let pixels_per_bar = frames_per_bar * pixels_per_frame;
-
-    if pixels_per_bar < 4.0 {
-        return;
-    }
 
     let start_frame = (scroll_offset / pixels_per_frame) as i64;
     let end_frame = start_frame + (rect.width() as f64 / pixels_per_frame) as i64;
@@ -793,8 +925,8 @@ fn draw_grid(
             );
         }
 
-        // Beat subdivision lines if zoomed in enough
-        if pixels_per_bar > 80.0 {
+        // Beat subdivision lines only when LOD permits
+        if lod == GridLod::BarsAndBeats {
             for beat in 1..4 {
                 let beat_frame = frame + (beat as f64 * frames_per_beat) as i64;
                 let bx =
@@ -807,5 +939,170 @@ fn draw_grid(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- snap_to_grid tests ----
+
+    #[test]
+    fn snap_to_grid_on_beat_boundary() {
+        // 120 BPM, 48kHz => 24000 frames/beat
+        let snapped = snap_to_grid(24000, 120.0, 48000);
+        assert_eq!(snapped, 24000); // already on boundary
+    }
+
+    #[test]
+    fn snap_to_grid_rounds_to_nearest_beat() {
+        // 120 BPM, 48kHz => 24000 frames/beat
+        // Position 25000 is closer to beat 1 (24000) than beat 2 (48000)
+        let snapped = snap_to_grid(25000, 120.0, 48000);
+        assert_eq!(snapped, 24000);
+    }
+
+    #[test]
+    fn snap_to_grid_rounds_up_past_halfway() {
+        // 120 BPM, 48kHz => 24000 frames/beat
+        // Position 36001 is closer to beat 2 (48000) than beat 1 (24000)
+        let snapped = snap_to_grid(36001, 120.0, 48000);
+        assert_eq!(snapped, 48000);
+    }
+
+    #[test]
+    fn snap_to_grid_position_zero() {
+        let snapped = snap_to_grid(0, 120.0, 48000);
+        assert_eq!(snapped, 0);
+    }
+
+    #[test]
+    fn snap_to_grid_invalid_bpm_returns_position() {
+        let snapped = snap_to_grid(1000, 0.0, 48000);
+        assert_eq!(snapped, 1000);
+    }
+
+    #[test]
+    fn snap_to_grid_invalid_sample_rate_returns_position() {
+        let snapped = snap_to_grid(1000, 120.0, 0);
+        assert_eq!(snapped, 1000);
+    }
+
+    #[test]
+    fn snap_to_grid_different_tempos() {
+        // 60 BPM, 48kHz => 48000 frames/beat
+        let snapped = snap_to_grid(30000, 60.0, 48000);
+        assert_eq!(snapped, 48000); // rounds to nearest beat
+
+        // 240 BPM, 48kHz => 12000 frames/beat
+        let snapped = snap_to_grid(7000, 240.0, 48000);
+        assert_eq!(snapped, 12000); // rounds up to beat 1
+    }
+
+    // ---- grid_level_of_detail tests ----
+
+    #[test]
+    fn grid_lod_bars_and_beats_at_high_zoom() {
+        // Very zoomed in: pixels_per_frame = 0.1, 48kHz, 120 BPM
+        // frames_per_beat = 24000, pixels_per_beat = 2400 >> 5px
+        let lod = grid_level_of_detail(0.1, 48000, 120.0, 5.0);
+        assert_eq!(lod, GridLod::BarsAndBeats);
+    }
+
+    #[test]
+    fn grid_lod_bars_only_at_medium_zoom() {
+        // Need pixels_per_beat < 5 but pixels_per_bar >= 5
+        // frames_per_beat = 24000 (120bpm, 48k)
+        // pixels_per_beat = 24000 * ppf < 5 => ppf < 0.000208
+        // pixels_per_bar = 96000 * ppf >= 5 => ppf >= 0.0000521
+        let ppf = 0.0001;
+        let lod = grid_level_of_detail(ppf, 48000, 120.0, 5.0);
+        assert_eq!(lod, GridLod::BarsOnly);
+    }
+
+    #[test]
+    fn grid_lod_none_at_very_low_zoom() {
+        // pixels_per_bar < 5 => ppf < 5 / 96000 = 0.0000521
+        let ppf = 0.00001;
+        let lod = grid_level_of_detail(ppf, 48000, 120.0, 5.0);
+        assert_eq!(lod, GridLod::None);
+    }
+
+    #[test]
+    fn grid_lod_invalid_bpm() {
+        let lod = grid_level_of_detail(0.01, 48000, 0.0, 5.0);
+        assert_eq!(lod, GridLod::None);
+    }
+
+    #[test]
+    fn grid_lod_invalid_sample_rate() {
+        let lod = grid_level_of_detail(0.01, 0, 120.0, 5.0);
+        assert_eq!(lod, GridLod::None);
+    }
+
+    // ---- clamp_zoom tests ----
+
+    #[test]
+    fn clamp_zoom_within_bounds() {
+        let ppf = clamp_zoom(0.01, 480000, 1000.0);
+        assert!((ppf - 0.01).abs() < 1e-10);
+    }
+
+    #[test]
+    fn clamp_zoom_prevents_too_small() {
+        // With session_length=480000, view_width=1000
+        // min_ppf = 1000 / (480000 * 10) = 0.000208
+        let ppf = clamp_zoom(0.00001, 480000, 1000.0);
+        assert!(ppf >= 0.000208);
+    }
+
+    #[test]
+    fn clamp_zoom_prevents_too_large() {
+        let ppf = clamp_zoom(10.0, 480000, 1000.0);
+        assert!(ppf <= 1.0);
+    }
+
+    #[test]
+    fn clamp_zoom_empty_session() {
+        let ppf = clamp_zoom(0.01, 0, 1000.0);
+        assert!(ppf >= 0.00001);
+        assert!(ppf <= 1.0);
+    }
+
+    #[test]
+    fn clamp_zoom_zero_view_width() {
+        let ppf = clamp_zoom(0.01, 480000, 0.0);
+        assert!(ppf >= 0.00001);
+        assert!(ppf <= 1.0);
+    }
+
+    // ---- zoom_to_fit tests ----
+
+    #[test]
+    fn zoom_to_fit_normal_session() {
+        let result = zoom_to_fit(480000, 1000.0);
+        assert!(result.is_some());
+        let ppf = result.unwrap();
+        // 900 / 480000 = 0.001875
+        assert!((ppf - 0.001875).abs() < 1e-10);
+    }
+
+    #[test]
+    fn zoom_to_fit_empty_session() {
+        let result = zoom_to_fit(0, 1000.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn zoom_to_fit_zero_width() {
+        let result = zoom_to_fit(480000, 0.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn zoom_to_fit_negative_width() {
+        let result = zoom_to_fit(480000, -100.0);
+        assert!(result.is_none());
     }
 }

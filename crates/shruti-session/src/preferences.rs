@@ -113,12 +113,24 @@ impl Preferences {
     }
 
     /// Save preferences to a JSON file.
+    ///
+    /// On Unix, the file permissions are set to 0600 (owner read/write only)
+    /// to protect sensitive settings like device names and paths.
     pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, data)?;
+        std::fs::write(path, &data)?;
+
+        // Set restrictive permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(path, perms)?;
+        }
+
         Ok(())
     }
 
@@ -406,6 +418,50 @@ mod tests {
         let prefs = Preferences::default();
         assert_eq!(prefs.recording.sample_rate, 48000);
         assert_eq!(prefs.recording.channels, 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_save_sets_restrictive_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secure_prefs.json");
+        let prefs = Preferences::default();
+        prefs.save(&path).unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "preferences file should have mode 0600, got {mode:o}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_save_permissions_after_overwrite() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("overwrite_prefs.json");
+
+        // First save
+        let prefs = Preferences::default();
+        prefs.save(&path).unwrap();
+
+        // Second save (overwrite)
+        let mut prefs2 = Preferences::default();
+        prefs2.sample_rate = 96000;
+        prefs2.save(&path).unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        // Verify content was updated
+        let loaded = Preferences::load(&path).unwrap();
+        assert_eq!(loaded.sample_rate, 96000);
     }
 
     #[test]

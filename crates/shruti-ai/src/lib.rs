@@ -8,6 +8,8 @@
 pub mod agent_api;
 pub mod mcp;
 pub mod serve;
+
+pub use serve::{MAX_BODY_SIZE, RATE_LIMIT_RPS, RateLimiter};
 pub mod voice;
 
 pub use agent_api::AgentApi;

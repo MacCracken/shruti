@@ -126,12 +126,12 @@ impl Reverb {
 
         self.comb_filters = COMB_LENGTHS
             .iter()
-            .map(|&len| CombFilter::new(((len as f32) * scale) as usize))
+            .map(|&len| CombFilter::new((((len as f32) * scale) as usize).max(1)))
             .collect();
 
         self.allpass_filters = ALLPASS_LENGTHS
             .iter()
-            .map(|&len| AllpassFilter::new(((len as f32) * scale) as usize))
+            .map(|&len| AllpassFilter::new((((len as f32) * scale) as usize).max(1)))
             .collect();
 
         self.update_parameters();
@@ -451,5 +451,39 @@ mod tests {
             new_comb_len > old_comb_len,
             "Doubling sample rate should increase comb buffer size"
         );
+    }
+
+    #[test]
+    fn test_set_sample_rate_very_low_clamps_to_1() {
+        // When set_sample_rate is called with a very low rate, buffer sizes must be >= 1
+        let mut reverb = Reverb::new(48000.0);
+        reverb.set_sample_rate(1.0); // extremely low sample rate
+        for (i, comb) in reverb.comb_filters.iter().enumerate() {
+            assert!(
+                comb.buffer.len() >= 1,
+                "Comb filter {i} buffer should be at least 1 after set_sample_rate(1.0), got {}",
+                comb.buffer.len()
+            );
+        }
+        for (i, ap) in reverb.allpass_filters.iter().enumerate() {
+            assert!(
+                ap.buffer.len() >= 1,
+                "Allpass filter {i} buffer should be at least 1 after set_sample_rate(1.0), got {}",
+                ap.buffer.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_sample_rate_very_low_can_process() {
+        // After setting a very low sample rate, processing should not panic
+        let mut reverb = Reverb::new(48000.0);
+        reverb.set_sample_rate(10.0);
+        reverb.mix = 0.5;
+
+        let mut data = vec![0.0f32; 100];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+        reverb.process(&mut buf); // should not panic
     }
 }

@@ -11,5 +11,5 @@ pub use format::PluginFormat;
 pub use host::PluginHost;
 pub use instance::{ParamId, ParamInfo, PluginInfo, PluginInstance};
 pub use node::PluginNode;
-pub use scanner::{PluginScanner, ScannedPlugin};
-pub use state::PluginState;
+pub use scanner::{PluginScanner, ScanCache, ScannedPlugin, default_cache_path};
+pub use state::{MAX_STATE_BLOB_SIZE, PluginState};

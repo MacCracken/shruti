@@ -41,6 +41,9 @@ impl Oscillator {
             Waveform::Sine => (phase * std::f64::consts::TAU).sin() as f32,
             Waveform::Saw => {
                 let naive = 2.0 * phase - 1.0;
+                // PolyBLEP corrects both the rising edge (phase near 0) and
+                // trailing edge (phase near 1) of the discontinuity at the
+                // cycle wrap point, smoothing the transition for anti-aliasing.
                 (naive - Self::poly_blep(phase, dt)) as f32
             }
             Waveform::Square => {
@@ -178,6 +181,57 @@ mod tests {
         let normal = normal_osc.sample(0.1, 440.0);
         // Both should be valid samples (this test just validates detune doesn't panic)
         assert!(detuned.abs() <= 1.0 && normal.abs() <= 1.0);
+    }
+
+    #[test]
+    fn poly_blep_corrects_rising_edge() {
+        // At phase just after 0 (rising edge), poly_blep should return a
+        // negative correction that smooths the saw's jump from +1 to -1.
+        let dt = 0.01; // typical dt for 440Hz at 48kHz
+        let phase_near_zero = dt * 0.5;
+        let blep = Oscillator::poly_blep(phase_near_zero, dt);
+        assert!(
+            blep < 0.0,
+            "poly_blep near phase=0 should be negative (rising edge correction), got {blep}"
+        );
+    }
+
+    #[test]
+    fn poly_blep_corrects_trailing_edge() {
+        // At phase just before 1.0 (trailing edge), poly_blep should return a
+        // positive correction that smooths the saw's jump from +1 to -1.
+        let dt = 0.01;
+        let phase_near_one = 1.0 - dt * 0.5;
+        let blep = Oscillator::poly_blep(phase_near_one, dt);
+        assert!(
+            blep > 0.0,
+            "poly_blep near phase=1 should be positive (trailing edge correction), got {blep}"
+        );
+    }
+
+    #[test]
+    fn saw_blep_smooths_both_edges() {
+        // Verify that saw samples near the wrap point are smoothed (pulled
+        // toward 0) compared to the naive sawtooth.
+        let mut osc = Oscillator::new(Waveform::Saw, 48000.0);
+        let freq = 440.0;
+        let dt = freq / 48000.0;
+
+        // Just after wrap (rising edge) — naive would be near -1
+        let s_rising = osc.sample(dt * 0.5, freq);
+        let naive_rising = (2.0 * dt * 0.5 - 1.0) as f32;
+        assert!(
+            s_rising.abs() < naive_rising.abs(),
+            "PolyBLEP should smooth rising edge: blep={s_rising}, naive={naive_rising}"
+        );
+
+        // Just before wrap (trailing edge) — naive would be near +1
+        let s_trailing = osc.sample(1.0 - dt * 0.5, freq);
+        let naive_trailing = (2.0 * (1.0 - dt * 0.5) - 1.0) as f32;
+        assert!(
+            s_trailing.abs() < naive_trailing.abs(),
+            "PolyBLEP should smooth trailing edge: blep={s_trailing}, naive={naive_trailing}"
+        );
     }
 
     // ── Helper: generate N samples and return the buffer ──────────────

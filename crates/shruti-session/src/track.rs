@@ -270,6 +270,11 @@ impl TrackGroup {
 }
 
 /// A track in the session.
+///
+/// NOTE: `name` uses `String` rather than a compact/small-string type. Track
+/// names are typically short (< 30 chars) but are cloned infrequently (template
+/// creation, serialization). The extra dependency cost of `compact_str` or
+/// `smol_str` is not justified for the marginal allocation savings here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
     pub id: TrackId,
@@ -494,9 +499,13 @@ impl Track {
         self.color.unwrap_or_else(|| self.kind.default_color())
     }
 
-    /// Add a region to this track.
+    /// Add a region to this track, maintaining sorted order by `timeline_pos`.
     pub fn add_region(&mut self, region: Region) {
-        self.regions.push(region);
+        let pos = self
+            .regions
+            .binary_search_by_key(&region.timeline_pos, |r| r.timeline_pos)
+            .unwrap_or_else(|i| i);
+        self.regions.insert(pos, region);
     }
 
     /// Remove a region by ID, returning it if found.
@@ -519,10 +528,20 @@ impl Track {
     }
 
     /// Get all regions that overlap with the given frame range.
+    ///
+    /// Regions are kept sorted by `timeline_pos`, so we use binary search to
+    /// skip regions that start at or after `end`, giving O(log n + k) lookup.
     pub fn regions_in_range(&self, start: u64, end: u64) -> Vec<&Region> {
-        self.regions
+        // Find the first region whose timeline_pos >= end — everything from
+        // that index onward starts too late to overlap.
+        let upper = self
+            .regions
+            .binary_search_by_key(&end, |r| r.timeline_pos)
+            .unwrap_or_else(|i| i);
+
+        self.regions[..upper]
             .iter()
-            .filter(|r| !r.muted && r.timeline_pos < end && r.end_pos() > start)
+            .filter(|r| !r.muted && r.end_pos() > start)
             .collect()
     }
 }
@@ -1326,5 +1345,35 @@ mod tests {
                 other
             );
         }
+    }
+
+    #[test]
+    fn test_add_region_maintains_sorted_order() {
+        let mut track = Track::new_audio("Sorted");
+        // Insert in reverse order
+        track.add_region(Region::new("f3".into(), 3000, 0, 100));
+        track.add_region(Region::new("f1".into(), 1000, 0, 100));
+        track.add_region(Region::new("f2".into(), 2000, 0, 100));
+
+        let positions: Vec<u64> = track.regions.iter().map(|r| r.timeline_pos).collect();
+        assert_eq!(positions, vec![1000, 2000, 3000]);
+    }
+
+    #[test]
+    fn test_regions_in_range_binary_search() {
+        let mut track = Track::new_audio("BSearch");
+        // Add many regions at evenly spaced positions
+        for i in 0..100 {
+            track.add_region(Region::new(format!("f{i}"), i * 1000, 0, 500));
+        }
+
+        // Query a range that only overlaps a few regions
+        let found = track.regions_in_range(5000, 7000);
+        // Regions at 5000..5500, 6000..6500, 6500 doesn't exist so only those two
+        // Plus region at 4500 doesn't exist (pos 4000 ends at 4500 < 5000)
+        // Actually: pos 5000 end 5500, pos 6000 end 6500 — both overlap [5000,7000)
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].timeline_pos, 5000);
+        assert_eq!(found[1].timeline_pos, 6000);
     }
 }

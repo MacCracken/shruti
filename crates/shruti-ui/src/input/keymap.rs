@@ -24,7 +24,7 @@ pub fn default_keymap() -> ShortcutRegistry {
     reg.bind(Shortcut::key(Key::Delete), Action::Delete);
     reg.bind(Shortcut::key(Key::Backspace), Action::Delete);
     reg.bind(Shortcut::ctrl(Key::A), Action::SelectAll);
-    reg.bind(Shortcut::key(Key::S), Action::SplitAtPlayhead);
+    reg.bind(Shortcut::ctrl(Key::B), Action::SplitAtPlayhead);
     reg.bind(Shortcut::ctrl(Key::D), Action::Duplicate);
 
     // View
@@ -38,11 +38,17 @@ pub fn default_keymap() -> ShortcutRegistry {
     // Tracks
     reg.bind(Shortcut::ctrl(Key::T), Action::NewAudioTrack);
     reg.bind(Shortcut::key(Key::M), Action::ToggleMute);
+    reg.bind(Shortcut::key(Key::S), Action::ToggleSolo);
+    reg.bind(Shortcut::key(Key::A), Action::ToggleArm);
+
+    // Transport (additional)
+    reg.bind(Shortcut::key(Key::F), Action::FastForward);
 
     // File
     reg.bind(Shortcut::ctrl(Key::N), Action::NewSession);
     reg.bind(Shortcut::ctrl(Key::O), Action::OpenSession);
     reg.bind(Shortcut::ctrl(Key::S), Action::SaveSession);
+    reg.bind(Shortcut::ctrl(Key::E), Action::ExportAudio);
 
     reg
 }
@@ -80,7 +86,7 @@ mod tests {
         );
         assert_eq!(km.lookup(&Shortcut::ctrl(Key::A)), Some(Action::SelectAll));
         assert_eq!(
-            km.lookup(&Shortcut::key(Key::S)),
+            km.lookup(&Shortcut::ctrl(Key::B)),
             Some(Action::SplitAtPlayhead)
         );
         assert_eq!(km.lookup(&Shortcut::ctrl(Key::D)), Some(Action::Duplicate));
@@ -134,6 +140,23 @@ mod tests {
             Some(Action::NewAudioTrack)
         );
         assert_eq!(km.lookup(&Shortcut::key(Key::M)), Some(Action::ToggleMute));
+        assert_eq!(km.lookup(&Shortcut::key(Key::S)), Some(Action::ToggleSolo));
+        assert_eq!(km.lookup(&Shortcut::key(Key::A)), Some(Action::ToggleArm));
+    }
+
+    #[test]
+    fn default_keymap_has_fast_forward() {
+        let km = default_keymap();
+        assert_eq!(km.lookup(&Shortcut::key(Key::F)), Some(Action::FastForward));
+    }
+
+    #[test]
+    fn default_keymap_has_export() {
+        let km = default_keymap();
+        assert_eq!(
+            km.lookup(&Shortcut::ctrl(Key::E)),
+            Some(Action::ExportAudio)
+        );
     }
 
     #[test]

@@ -34,10 +34,11 @@ pub fn transport_bar(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
         // Loop toggle
         loop_toggle(ui, state, colors);
 
-        // Right-align session name
+        // Right-align session name (with dirty indicator)
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            let title = state.title_bar_text();
             ui.label(
-                egui::RichText::new(&state.session.name)
+                egui::RichText::new(title)
                     .size(11.0)
                     .color(colors.text_secondary()),
             );

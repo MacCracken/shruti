@@ -44,10 +44,16 @@ impl Delay {
     pub fn process(&mut self, buffer: &mut AudioBuffer) {
         let channels = buffer.channels() as usize;
         let frames = buffer.frames();
-        let delay_samples = self.delay_samples();
         let buf_len = self.buffers[0].len();
 
-        if delay_samples == 0 || buf_len == 0 {
+        if buf_len == 0 {
+            return;
+        }
+
+        // Explicitly clamp delay_samples to valid range instead of relying on modulo
+        let delay_samples = self.delay_samples().min(buf_len - 1);
+
+        if delay_samples == 0 {
             return;
         }
 
@@ -332,5 +338,46 @@ mod tests {
         for (i, &expected) in data.iter().enumerate() {
             assert_eq!(buf.as_interleaved()[i], expected);
         }
+    }
+
+    #[test]
+    fn test_delay_time_exceeds_buffer_is_clamped() {
+        // Set delay time longer than the max buffer (5 seconds)
+        let mut delay = Delay::new(48000.0);
+        delay.time = 10.0; // 10 seconds, but buffer is only 5 seconds (240000 samples)
+        delay.feedback = 0.0;
+        delay.mix = 1.0;
+
+        // The delay_samples would be 480000 but is clamped to buf_len-1 = 239999.
+        // We need enough frames to see the echo.
+        let buf_len = (48000.0 * 5.0) as usize; // 240000
+        let frames = buf_len; // process enough frames
+        let mut data = vec![0.0f32; frames];
+        data[0] = 1.0;
+        let mut buf = AudioBuffer::from_interleaved(data, 1);
+
+        // Should not panic — delay_samples is clamped to buf_len - 1
+        delay.process(&mut buf);
+
+        // The echo should appear at the clamped delay position (buf_len - 1)
+        let clamped_pos = buf_len - 1;
+        assert!(
+            buf.get(clamped_pos as u32, 0).abs() > 0.5,
+            "Clamped delay should produce echo at buf_len-1, got {}",
+            buf.get(clamped_pos as u32, 0)
+        );
+    }
+
+    #[test]
+    fn test_delay_exactly_at_buffer_boundary() {
+        // Set delay time to exactly match the buffer length
+        let mut delay = Delay::new(48000.0);
+        delay.time = 5.0; // exactly 5 seconds = exactly buf_len samples
+        delay.feedback = 0.0;
+        delay.mix = 1.0;
+
+        // Should not panic
+        let mut buf = AudioBuffer::new(1, 256);
+        delay.process(&mut buf);
     }
 }

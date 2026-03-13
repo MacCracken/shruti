@@ -43,6 +43,13 @@ impl Lfo {
 
     /// Advance the LFO by one sample and return the current value in `-depth..+depth`.
     pub fn tick(&mut self) -> f32 {
+        // Advance phase first so that S&H detects the wrap correctly
+        // without double-sampling at the cycle boundary.
+        let prev_phase = self.phase;
+        self.phase += self.rate as f64 / self.sample_rate as f64;
+        let wrapped = self.phase >= 1.0;
+        self.phase -= self.phase.floor();
+
         let raw = match self.shape {
             LfoShape::Sine => (self.phase * std::f64::consts::TAU).sin() as f32,
             LfoShape::Triangle => {
@@ -65,9 +72,9 @@ impl Lfo {
             LfoShape::SawUp => (self.phase as f32) * 2.0 - 1.0,
             LfoShape::SawDown => 1.0 - (self.phase as f32) * 2.0,
             LfoShape::SampleAndHold => {
-                // Update S&H value at each cycle start (phase wrap)
-                let next_phase = self.phase + self.rate as f64 / self.sample_rate as f64;
-                if next_phase >= 1.0 || self.phase == 0.0 {
+                // Update S&H value at each cycle start (phase wrap) or on
+                // the very first tick (prev_phase == 0).
+                if wrapped || prev_phase == 0.0 {
                     // xorshift32
                     self.rng_state ^= self.rng_state << 13;
                     self.rng_state ^= self.rng_state >> 17;
@@ -77,10 +84,6 @@ impl Lfo {
                 self.sh_value
             }
         };
-
-        // Advance phase
-        self.phase += self.rate as f64 / self.sample_rate as f64;
-        self.phase -= self.phase.floor();
 
         raw * self.depth
     }
@@ -195,6 +198,54 @@ mod tests {
             c5 > c1 * 3,
             "5Hz LFO should have more zero crossings than 1Hz: c1={c1}, c5={c5}"
         );
+    }
+
+    #[test]
+    fn sample_and_hold_no_double_sample_at_boundary() {
+        // At the cycle boundary (wrap point), S&H should sample exactly once,
+        // not twice. We verify by checking that the number of value changes
+        // matches the expected number of cycles.
+        let rate = 10.0; // 10 Hz
+        let sr = 48000.0;
+        let samples_per_cycle = (sr / rate) as usize;
+        let num_cycles = 5;
+        let total_samples = samples_per_cycle * num_cycles;
+
+        let mut lfo = Lfo::new(LfoShape::SampleAndHold, rate, 1.0, sr);
+        let mut prev = lfo.tick();
+        let mut changes = 0usize;
+        for _ in 1..total_samples {
+            let v = lfo.tick();
+            if (v - prev).abs() > 1e-6 {
+                changes += 1;
+            }
+            prev = v;
+        }
+        // Should have exactly num_cycles-1 value changes after the initial one
+        // (first tick sets a value, then each wrap changes it).
+        // Allow small tolerance for off-by-one at boundaries.
+        assert!(
+            changes >= num_cycles - 1 && changes <= num_cycles + 1,
+            "S&H should change ~{num_cycles} times over {num_cycles} cycles, got {changes}"
+        );
+    }
+
+    #[test]
+    fn sample_and_hold_holds_between_cycles() {
+        // Between cycle boundaries, S&H should hold the same value.
+        let rate = 1.0; // 1 Hz, so 48000 samples per cycle
+        let sr = 48000.0;
+        let mut lfo = Lfo::new(LfoShape::SampleAndHold, rate, 1.0, sr);
+
+        let first = lfo.tick();
+        // Check that the next 100 samples all have the same value
+        for i in 1..100 {
+            let v = lfo.tick();
+            assert!(
+                (v - first).abs() < 1e-6,
+                "S&H should hold value within a cycle, but changed at sample {i}: {first} vs {v}"
+            );
+        }
     }
 
     #[test]

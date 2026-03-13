@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use crate::instrument::{InstrumentNode, InstrumentParam};
 
 /// A saved snapshot of an instrument's parameter state.
+///
+/// Presets are lightweight value types intended for save/load and one-shot
+/// application via [`apply_to`](Self::apply_to).  `apply_to` borrows the
+/// preset immutably and never clones the parameter list, so applying a preset
+/// is allocation-free.  If a preset must be shared across threads, wrap it in
+/// `Arc<InstrumentPreset>` at the call site.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstrumentPreset {
     /// Human-readable preset name.
@@ -299,5 +305,39 @@ mod tests {
             (vol.value - 1.0).abs() < f32::EPSILON,
             "should be clamped to max"
         );
+    }
+
+    #[test]
+    fn apply_to_borrows_immutably() {
+        // Verify apply_to only borrows the preset, allowing reuse without clone.
+        let synth = SubtractiveSynth::new(48000.0);
+        let preset = InstrumentPreset::from_instrument(&synth, "Reusable");
+
+        let mut s1 = SubtractiveSynth::new(48000.0);
+        let mut s2 = SubtractiveSynth::new(48000.0);
+        s1.params_mut()[0].set(0.1);
+        s2.params_mut()[0].set(0.2);
+
+        // Same preset applied twice without cloning
+        preset.apply_to(&mut s1);
+        preset.apply_to(&mut s2);
+
+        assert!(
+            (s1.params()[0].value - s2.params()[0].value).abs() < f32::EPSILON,
+            "both instruments should have identical params after applying same preset"
+        );
+    }
+
+    #[test]
+    fn preset_clone_produces_independent_copy() {
+        let synth = SubtractiveSynth::new(48000.0);
+        let preset = InstrumentPreset::from_instrument(&synth, "Original");
+        let mut cloned = preset.clone();
+        cloned.name = "Cloned".to_string();
+        cloned.params[0].value = 999.0;
+
+        // Original should be unaffected
+        assert_eq!(preset.name, "Original");
+        assert!((preset.params[0].value - synth.params()[0].value).abs() < f32::EPSILON);
     }
 }

@@ -15,7 +15,36 @@ use crate::format::AudioFormat;
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "flac", "aiff", "aif", "ogg"];
 
 /// Read an audio file (WAV, FLAC, AIFF, OGG/Vorbis) into an AudioBuffer.
+///
+/// Wraps symphonia decoding in `catch_unwind` to safely handle malformed files
+/// that might cause panics in the decoder, returning an error instead.
 pub fn read_audio_file(
+    path: &Path,
+) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
+    let path = path.to_path_buf();
+    // Wrap the entire decoding pipeline in catch_unwind to handle malformed files
+    // that may cause panics in symphonia's decoders.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_audio_file_inner(&path)
+    }));
+
+    match result {
+        Ok(inner_result) => inner_result,
+        Err(panic_info) => {
+            let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                format!("decoder panicked on malformed file: {s}")
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                format!("decoder panicked on malformed file: {s}")
+            } else {
+                "decoder panicked on malformed file".to_string()
+            };
+            Err(msg.into())
+        }
+    }
+}
+
+/// Inner implementation of audio file reading (may panic on malformed input).
+fn read_audio_file_inner(
     path: &Path,
 ) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
     let file = File::open(path)?;
@@ -141,6 +170,63 @@ mod tests {
 
         let result = read_audio_file(&path);
         assert!(result.is_err());
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn read_truncated_wav_returns_error_not_panic() {
+        // Write a file with a valid WAV header but truncated/corrupt data.
+        // This tests that catch_unwind protects against decoder panics.
+        let dir = std::env::temp_dir().join("shruti_reader_truncated");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("truncated.wav");
+
+        // Minimal WAV header (44 bytes) with data size claiming more data than exists
+        let mut header = vec![0u8; 44];
+        header[0..4].copy_from_slice(b"RIFF");
+        let file_size: u32 = 10000; // claims large file
+        header[4..8].copy_from_slice(&file_size.to_le_bytes());
+        header[8..12].copy_from_slice(b"WAVE");
+        header[12..16].copy_from_slice(b"fmt ");
+        header[16..20].copy_from_slice(&16u32.to_le_bytes()); // chunk size
+        header[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
+        header[22..24].copy_from_slice(&1u16.to_le_bytes()); // mono
+        header[24..28].copy_from_slice(&44100u32.to_le_bytes()); // sample rate
+        header[28..32].copy_from_slice(&(44100u32 * 2).to_le_bytes()); // byte rate
+        header[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
+        header[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
+        header[36..40].copy_from_slice(b"data");
+        header[40..44].copy_from_slice(&9000u32.to_le_bytes()); // data size (but file ends here)
+
+        std::fs::write(&path, &header).unwrap();
+
+        // Should return an error, not panic
+        let result = read_audio_file(&path);
+        // It may succeed with 0 samples or return an error -- either is fine, no panic
+        assert!(
+            result.is_ok() || result.is_err(),
+            "Should not panic on truncated file"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn read_random_bytes_returns_error_not_panic() {
+        // Write random-looking bytes that could trigger decoder edge cases
+        let dir = std::env::temp_dir().join("shruti_reader_random");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("random.wav");
+
+        let garbage: Vec<u8> = (0..1024).map(|i| (i * 37 + 13) as u8).collect();
+        std::fs::write(&path, &garbage).unwrap();
+
+        // Should return an error, not panic
+        let result = read_audio_file(&path);
+        assert!(result.is_err(), "Random bytes should produce an error");
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);

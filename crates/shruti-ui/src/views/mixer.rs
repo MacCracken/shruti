@@ -1,5 +1,7 @@
 use egui::{ScrollArea, Ui, vec2};
 
+use shruti_session::edit::EditCommand;
+
 use crate::state::UiState;
 use crate::theme::ThemeColors;
 use crate::widgets::{fader::Fader, knob::Knob, meter::LevelMeter, track_header::track_color};
@@ -111,7 +113,8 @@ fn channel_strip(ui: &mut Ui, state: &mut UiState, track_idx: usize, colors: &Th
 
         ui.add_space(4.0);
 
-        // M S buttons
+        // M S buttons (undoable)
+        let track_id = state.session.tracks[track_idx].id;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
 
@@ -133,7 +136,9 @@ fn channel_strip(ui: &mut Ui, state: &mut UiState, track_idx: usize, colors: &Th
                 )
                 .clicked()
             {
-                state.session.tracks[track_idx].muted = !muted;
+                let cmd = EditCommand::ToggleTrackMute { track_id };
+                state.undo.execute(cmd, &mut state.session);
+                state.dirty = true;
             }
 
             let solo = state.session.tracks[track_idx].solo;
@@ -154,27 +159,53 @@ fn channel_strip(ui: &mut Ui, state: &mut UiState, track_idx: usize, colors: &Th
                 )
                 .clicked()
             {
-                state.session.tracks[track_idx].solo = !solo;
+                let cmd = EditCommand::ToggleTrackSolo { track_id };
+                state.undo.execute(cmd, &mut state.session);
+                state.dirty = true;
             }
         });
 
         ui.add_space(4.0);
 
-        // Pan knob
+        // Pan knob (undoable on release)
         ui.vertical_centered(|ui| {
-            let mut pan = state.session.tracks[track_idx].pan;
-            ui.add(Knob::pan(&mut pan, colors));
-            state.session.tracks[track_idx].pan = pan;
+            let old_pan = state.session.tracks[track_idx].pan;
+            let mut pan = old_pan;
+            let resp = ui.add(Knob::pan(&mut pan, colors));
+            if resp.changed() {
+                // Live update while dragging
+                state.session.tracks[track_idx].pan = pan;
+            }
+            if resp.drag_stopped() && (pan - old_pan).abs() > f32::EPSILON {
+                let cmd = EditCommand::SetTrackPan {
+                    track_id,
+                    old_pan,
+                    new_pan: pan,
+                };
+                state.undo.execute(cmd, &mut state.session);
+                state.dirty = true;
+            }
         });
 
         ui.add_space(4.0);
 
-        // Fader + Meter side by side
+        // Fader + Meter side by side (undoable on release)
         ui.horizontal(|ui| {
-            // Fader
-            let mut gain = state.session.tracks[track_idx].gain;
-            ui.add(Fader::new(&mut gain, colors).height(140.0));
-            state.session.tracks[track_idx].gain = gain;
+            let old_gain = state.session.tracks[track_idx].gain;
+            let mut gain = old_gain;
+            let resp = ui.add(Fader::new(&mut gain, colors).height(140.0));
+            if resp.changed() {
+                state.session.tracks[track_idx].gain = gain;
+            }
+            if resp.drag_stopped() && (gain - old_gain).abs() > f32::EPSILON {
+                let cmd = EditCommand::SetTrackGain {
+                    track_id,
+                    old_gain,
+                    new_gain: gain,
+                };
+                state.undo.execute(cmd, &mut state.session);
+                state.dirty = true;
+            }
 
             // Meter
             let meter_data = state

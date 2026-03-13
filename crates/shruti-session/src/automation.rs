@@ -122,15 +122,17 @@ impl AutomationLane {
             return Some(self.points.last().unwrap().value);
         }
 
-        // Find surrounding points
+        // Find surrounding points.
+        // After the early returns above, `position` is strictly between the
+        // first and last point, so `right_idx` is always >= 1.
         let right_idx = self
             .points
             .binary_search_by_key(&position, |p| p.position)
             .unwrap_or_else(|i| i);
-
-        if right_idx == 0 {
-            return Some(self.points[0].value);
-        }
+        debug_assert!(
+            right_idx >= 1,
+            "right_idx should be >= 1 after range guards"
+        );
 
         let left = &self.points[right_idx - 1];
         let right = &self.points[right_idx];

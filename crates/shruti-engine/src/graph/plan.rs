@@ -93,10 +93,14 @@ impl GraphProcessor {
     pub fn process(&mut self, output: &mut [f32], channels: u16, buffer_frames: u32) {
         let mut guard = match self.plan.try_lock() {
             Ok(g) => g,
-            Err(_) => {
+            Err(std::sync::TryLockError::WouldBlock) => {
                 // Mutex contended — fill with silence rather than block
                 output.fill(0.0);
                 return;
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                eprintln!("shruti-engine: graph plan mutex poisoned, recovering: {e}");
+                e.into_inner()
             }
         };
 
@@ -140,6 +144,12 @@ impl GraphProcessor {
                 let len = output.len().min(src.len());
                 output[..len].copy_from_slice(&src[..len]);
                 if output.len() > len {
+                    eprintln!(
+                        "shruti-engine: interleaved buffer shorter than expected \
+                         (got {} samples, need {}), zero-filling remainder",
+                        src.len(),
+                        output.len()
+                    );
                     output[len..].fill(0.0);
                 }
             }
@@ -152,7 +162,13 @@ impl GraphProcessor {
     pub fn is_finished(&self) -> bool {
         let guard = match self.plan.try_lock() {
             Ok(g) => g,
-            Err(_) => return false,
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                eprintln!(
+                    "shruti-engine: graph plan mutex poisoned in is_finished, recovering: {e}"
+                );
+                e.into_inner()
+            }
         };
         match guard.as_ref() {
             Some(plan) => {
@@ -183,8 +199,15 @@ pub struct GraphSwapHandle {
 
 impl GraphSwapHandle {
     pub fn swap(&self, new_plan: ExecutionPlan) {
-        if let Ok(mut guard) = self.plan.lock() {
-            *guard = Some(new_plan);
+        match self.plan.lock() {
+            Ok(mut guard) => {
+                *guard = Some(new_plan);
+            }
+            Err(e) => {
+                eprintln!("shruti-engine: graph plan mutex poisoned in swap, recovering: {e}");
+                let mut guard = e.into_inner();
+                *guard = Some(new_plan);
+            }
         }
     }
 }
@@ -501,5 +524,116 @@ mod tests {
         let conn = Connection { from: a, to: b };
         let cloned = conn.clone();
         assert_eq!(format!("{:?}", conn), format!("{:?}", cloned));
+    }
+
+    // --- Poisoned mutex recovery tests ---
+
+    #[test]
+    fn test_processor_recovers_from_poisoned_mutex() {
+        let processor = GraphProcessor::new();
+        let plan_arc = Arc::clone(&processor.plan);
+
+        // Poison the mutex by panicking in a thread that holds the lock.
+        let plan_arc2 = Arc::clone(&plan_arc);
+        let _ = std::thread::spawn(move || {
+            let _guard = plan_arc2.lock().unwrap();
+            panic!("intentional panic to poison mutex");
+        })
+        .join();
+
+        // Verify mutex is poisoned.
+        assert!(plan_arc.lock().is_err());
+
+        // is_finished should recover gracefully (not panic).
+        // With poisoned mutex, it recovers and reads None => true.
+        let result = processor.is_finished();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_swap_handle_recovers_from_poisoned_mutex() {
+        let processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        let plan_arc = Arc::clone(&processor.plan);
+
+        // Poison the mutex.
+        let plan_arc2 = Arc::clone(&plan_arc);
+        let _ = std::thread::spawn(move || {
+            let _guard = plan_arc2.lock().unwrap();
+            panic!("intentional panic to poison mutex");
+        })
+        .join();
+
+        // swap should recover and install the new plan.
+        let graph = Graph::new();
+        let plan = graph.compile().unwrap();
+        handle.swap(plan); // Should not panic.
+
+        // Verify the plan was actually installed by reading through the
+        // (still poisoned) mutex.
+        let inner = plan_arc.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(inner.is_some());
+    }
+
+    // --- Render failure logging tests ---
+
+    #[test]
+    fn test_short_interleaved_buffer_zero_fills() {
+        // Create a player with 1 frame of 1-channel audio.
+        // Request a 2-channel, 2-frame output => interleaved buffer will be
+        // shorter than the output slice.
+        let src = AudioBuffer::from_interleaved(vec![0.5], 1);
+        let player_id = NodeId::next();
+
+        let mut graph = Graph::new();
+        graph.add_node(player_id, Box::new(FilePlayerNode::new(src, false)));
+
+        let plan = graph.compile().unwrap();
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        handle.swap(plan);
+
+        // Output is 2ch * 2frames = 4 samples, but the node produces 1ch * 1frame = 1 sample.
+        // Actually the node produces output matching the AudioBuffer::new(channels, frames)
+        // passed to it, so let's verify the behaviour is correct even when the last
+        // node's output matches the requested size.
+        let mut output = vec![1.0f32; 4];
+        processor.process(&mut output, 2, 2);
+
+        // The node produces a 2ch*2frame buffer. Frame 0 gets the mono sample
+        // upmixed to both channels, frame 1 gets silence (past end).
+        // So output should be [0.5, 0.5, 0.0, 0.0].
+        assert!((output[0] - 0.5).abs() < 1e-6);
+        assert!((output[1] - 0.5).abs() < 1e-6);
+        assert_eq!(output[2], 0.0);
+        assert_eq!(output[3], 0.0);
+    }
+
+    #[test]
+    fn test_output_larger_than_rendered_fills_silence() {
+        // Even if the output slice is larger than what any node produces,
+        // the remainder should be zero-filled.
+        let src = AudioBuffer::from_interleaved(vec![0.3, -0.3], 2);
+        let player_id = NodeId::next();
+
+        let mut graph = Graph::new();
+        graph.add_node(player_id, Box::new(FilePlayerNode::new(src, false)));
+
+        let plan = graph.compile().unwrap();
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        handle.swap(plan);
+
+        // Process with buffer_frames=1 (matches source), but output is 6 samples
+        // (larger than 2ch*1frame=2).
+        let mut output = vec![9.9f32; 6];
+        processor.process(&mut output, 2, 1);
+
+        assert!((output[0] - 0.3).abs() < 1e-6);
+        assert!((output[1] - -0.3).abs() < 1e-6);
+        // Remaining should be zero-filled.
+        for &s in &output[2..] {
+            assert_eq!(s, 0.0);
+        }
     }
 }

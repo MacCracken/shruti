@@ -53,7 +53,7 @@ impl AudioBuffer {
         self.data[frame as usize * self.channels as usize + channel as usize] = value;
     }
 
-    /// Access the raw interleaved data.
+    /// Access the raw interleaved data (zero-copy: returns a slice into the internal buffer).
     pub fn as_interleaved(&self) -> &[Sample] {
         &self.data
     }
@@ -289,5 +289,32 @@ mod tests {
         let mut a = AudioBuffer::new(2, 0);
         let b = AudioBuffer::new(2, 0);
         a.mix_from(&b); // should not panic
+    }
+
+    #[test]
+    fn test_as_interleaved_is_zero_copy_pointer_identity() {
+        // Verify as_interleaved() returns a direct reference to internal data (zero-copy).
+        // Calling it twice should return pointers to the same memory.
+        let buf = AudioBuffer::from_interleaved(vec![0.1, 0.2, 0.3, 0.4], 2);
+        let slice1 = buf.as_interleaved();
+        let slice2 = buf.as_interleaved();
+        assert_eq!(
+            slice1.as_ptr(),
+            slice2.as_ptr(),
+            "as_interleaved() should return the same pointer (zero-copy)"
+        );
+        assert_eq!(slice1.len(), 4);
+    }
+
+    #[test]
+    fn test_as_interleaved_mut_is_zero_copy_pointer_identity() {
+        // Verify as_interleaved_mut() also returns a direct reference (zero-copy).
+        let mut buf = AudioBuffer::from_interleaved(vec![0.1, 0.2, 0.3, 0.4], 2);
+        let ptr = buf.as_interleaved_mut().as_ptr();
+        let ptr2 = buf.as_interleaved().as_ptr();
+        assert_eq!(
+            ptr, ptr2,
+            "Mutable and immutable interleaved access should point to the same data"
+        );
     }
 }

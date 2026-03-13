@@ -1,0 +1,20 @@
+# Shruti Caddy TLS Reverse Proxy
+#
+# Processed by envsubst in entrypoint.sh when TLS_ENABLED=true.
+#
+#   Mode A — Provided certs (TLS_CERT_PATH + TLS_KEY_PATH):
+#     Caddy uses the supplied certificate and key files.
+#
+#   Mode B — Auto HTTPS (TLS_DOMAIN set, no cert paths):
+#     Caddy obtains and renews certificates automatically via ACME.
+
+:${TLS_PORT} {
+    tls ${TLS_CERT_DIRECTIVE}
+
+    reverse_proxy 127.0.0.1:8050
+
+    log {
+        output stderr
+        format json
+    }
+}

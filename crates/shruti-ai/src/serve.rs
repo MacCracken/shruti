@@ -3,10 +3,11 @@
 //! Run with `shruti serve --port 8050`.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -17,8 +18,58 @@ use tower_http::cors::CorsLayer;
 use crate::agent_api::{AgentApi, ApiResult};
 use crate::mcp::McpTools;
 
-/// Shared application state: the AgentApi behind a mutex.
-pub type AppState = Arc<Mutex<AgentApi>>;
+/// Maximum request body size in bytes (1 MB).
+pub const MAX_BODY_SIZE: usize = 1_048_576;
+
+/// Maximum requests per second for rate limiting.
+pub const RATE_LIMIT_RPS: u32 = 100;
+
+/// Rate limiter using a sliding window counter.
+#[derive(Debug)]
+pub struct RateLimiter {
+    /// Timestamps of recent requests within the current window.
+    window_start: Instant,
+    count: u32,
+    max_rps: u32,
+}
+
+impl RateLimiter {
+    pub fn new(max_rps: u32) -> Self {
+        Self {
+            window_start: Instant::now(),
+            count: 0,
+            max_rps,
+        }
+    }
+
+    /// Check if a request is allowed. Returns true if allowed, false if rate-limited.
+    pub fn check(&mut self) -> bool {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.window_start);
+
+        // Reset window every second
+        if elapsed.as_secs() >= 1 {
+            self.window_start = now;
+            self.count = 0;
+        }
+
+        if self.count >= self.max_rps {
+            return false;
+        }
+
+        self.count += 1;
+        true
+    }
+}
+
+/// Shared application state: the AgentApi and rate limiter behind a mutex.
+pub struct SharedState {
+    pub api: AgentApi,
+    pub rate_limiter: RateLimiter,
+}
+
+/// Shared application state: the AgentApi and rate limiter behind a mutex.
+pub type AppState = Arc<Mutex<SharedState>>;
 
 /// Build the axum Router with all endpoints.
 pub fn app(state: AppState) -> Router {
@@ -31,14 +82,18 @@ pub fn app(state: AppState) -> Router {
         .route("/api/mixer", post(handle_mixer))
         .route("/api/analysis", post(handle_analysis))
         .route("/api/mcp", post(handle_mcp))
+        .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
 /// Start the HTTP server on the given port.
 pub async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let api = AgentApi::new();
-    let state = Arc::new(Mutex::new(api));
+    let shared = SharedState {
+        api: AgentApi::new(),
+        rate_limiter: RateLimiter::new(RATE_LIMIT_RPS),
+    };
+    let state = Arc::new(Mutex::new(shared));
     let app = app(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
@@ -47,6 +102,18 @@ pub async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
+    Ok(())
+}
+
+/// Check rate limit on the shared state. Returns Err with 429 if rate-limited.
+async fn check_rate_limit(state: &AppState) -> Result<(), (StatusCode, Json<ApiResult>)> {
+    let mut shared = state.lock().await;
+    if !shared.rate_limiter.check() {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ApiResult::err("rate limit exceeded")),
+        ));
+    }
     Ok(())
 }
 
@@ -91,7 +158,11 @@ async fn handle_session(
     State(state): State<AppState>,
     Json(req): Json<SessionRequest>,
 ) -> (StatusCode, Json<ApiResult>) {
-    let mut api = state.lock().await;
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    let mut shared = state.lock().await;
+    let api = &mut shared.api;
     let result = match req.action.as_str() {
         "create" => {
             let name = req.name.as_deref().unwrap_or("Untitled");
@@ -137,7 +208,11 @@ async fn handle_tracks(
     State(state): State<AppState>,
     Json(req): Json<TracksRequest>,
 ) -> (StatusCode, Json<ApiResult>) {
-    let mut api = state.lock().await;
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    let mut shared = state.lock().await;
+    let api = &mut shared.api;
     let result = match req.action.as_str() {
         "add" => {
             let name = req.name.as_deref().unwrap_or("New Track");
@@ -192,7 +267,11 @@ async fn handle_transport(
     State(state): State<AppState>,
     Json(req): Json<TransportRequest>,
 ) -> (StatusCode, Json<ApiResult>) {
-    let mut api = state.lock().await;
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    let mut shared = state.lock().await;
+    let api = &mut shared.api;
     let result = match req.action.as_str() {
         "play" | "stop" | "pause" => api.transport(&req.action),
         "seek" => {
@@ -239,7 +318,11 @@ async fn handle_export(
     State(state): State<AppState>,
     Json(req): Json<ExportRequest>,
 ) -> (StatusCode, Json<ApiResult>) {
-    let api = state.lock().await;
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    let shared = state.lock().await;
+    let api = &shared.api;
     let result = api.export_audio(&req.path, &req.format, &req.bit_depth);
     let status = if result.success {
         StatusCode::OK
@@ -260,7 +343,11 @@ async fn handle_mixer(
     State(state): State<AppState>,
     Json(req): Json<MixerRequest>,
 ) -> (StatusCode, Json<ApiResult>) {
-    let mut api = state.lock().await;
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    let mut shared = state.lock().await;
+    let api = &mut shared.api;
     let result = match req.action.as_str() {
         "status" => api.list_tracks(),
         "undo" => api.undo(),
@@ -290,7 +377,11 @@ async fn handle_analysis(
     State(state): State<AppState>,
     Json(req): Json<AnalysisRequest>,
 ) -> (StatusCode, Json<ApiResult>) {
-    let api = state.lock().await;
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    let shared = state.lock().await;
+    let api = &shared.api;
     let result = match req.action.as_str() {
         "spectrum" => {
             let track = req.track.as_deref().unwrap_or("");
@@ -331,21 +422,22 @@ struct McpResponse {
 async fn handle_mcp(
     State(state): State<AppState>,
     Json(req): Json<McpRequest>,
-) -> (StatusCode, Json<McpResponse>) {
-    let mut api = state.lock().await;
-    let result = McpTools::dispatch(&mut api, &req.tool, &req.args);
+) -> Result<(StatusCode, Json<McpResponse>), (StatusCode, Json<ApiResult>)> {
+    check_rate_limit(&state).await?;
+    let mut shared = state.lock().await;
+    let result = McpTools::dispatch(&mut shared.api, &req.tool, &req.args);
     let status = if result.is_error {
         StatusCode::BAD_REQUEST
     } else {
         StatusCode::OK
     };
-    (
+    Ok((
         status,
         Json(McpResponse {
             content: result.content,
             is_error: result.is_error,
         }),
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -355,9 +447,15 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
+    fn test_state() -> AppState {
+        Arc::new(Mutex::new(SharedState {
+            api: AgentApi::new(),
+            rate_limiter: RateLimiter::new(RATE_LIMIT_RPS),
+        }))
+    }
+
     fn test_app() -> Router {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
-        app(state)
+        app(test_state())
     }
 
     async fn post_json(
@@ -408,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_create_and_info() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         // Create session
@@ -439,7 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tracks_add_and_list() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         // Create session first
@@ -470,7 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tracks_gain_pan_mute_solo() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         post_json(
@@ -525,7 +623,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transport() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         post_json(
@@ -578,7 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transport_unknown_action() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         post_json(
@@ -600,7 +698,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_empty_session() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         post_json(
@@ -622,7 +720,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mixer_status_and_undo() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         post_json(
@@ -650,7 +748,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_analysis_composition() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         post_json(
@@ -672,7 +770,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_dispatch() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
 
         // Create session via MCP
@@ -728,7 +826,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tracks_unknown_action() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
         post_json(
             &app,
@@ -744,7 +842,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mixer_unknown_action() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
         post_json(
             &app,
@@ -760,7 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_analysis_unknown_action() {
-        let state = Arc::new(Mutex::new(AgentApi::new()));
+        let state = test_state();
         let app = app(state);
         post_json(
             &app,
@@ -777,5 +875,56 @@ mod tests {
         .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
         assert_eq!(j["success"], false);
+    }
+
+    // --- Body size limit tests ---
+
+    #[tokio::test]
+    async fn test_body_size_limit_rejects_oversized() {
+        let app = test_app();
+        // Create a body larger than MAX_BODY_SIZE (1 MB)
+        let large_value = "x".repeat(MAX_BODY_SIZE + 1);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/session")
+            .header("content-type", "application/json")
+            .body(Body::from(large_value))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        // axum returns 413 Payload Too Large when body limit is exceeded
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn test_body_size_limit_allows_normal_request() {
+        let app = test_app();
+        let (s, _) = post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Small"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+    }
+
+    // --- Rate limiter unit tests ---
+
+    #[test]
+    fn test_rate_limiter_allows_under_limit() {
+        let mut rl = RateLimiter::new(10);
+        for _ in 0..10 {
+            assert!(rl.check());
+        }
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_over_limit() {
+        let mut rl = RateLimiter::new(5);
+        for _ in 0..5 {
+            assert!(rl.check());
+        }
+        // 6th request should be blocked
+        assert!(!rl.check());
     }
 }

@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use eframe::Frame;
 use egui::{CentralPanel, Context, TopBottomPanel};
 
 use crate::engine::AudioEngine;
 use crate::input::{Action, ShortcutRegistry, default_keymap};
-use crate::state::{UiState, ViewMode};
+use crate::state::{
+    BackgroundTaskResult, DeferredAction, ToastSeverity, UiState, ViewMode, gc_toasts,
+};
 use crate::theme::{Theme, apply_theme};
 use crate::views::settings::DeviceCache;
 use crate::views::{
@@ -33,6 +37,93 @@ impl ShrutiApp {
     pub fn with_theme(mut self, theme: Theme) -> Self {
         self.theme = theme;
         self
+    }
+
+    /// Try to initialize the audio engine; on failure, store error for dialog.
+    pub fn with_engine_init(mut self) -> Self {
+        let pool = Arc::new(shruti_session::audio_pool::AudioPool::new());
+        match AudioEngine::new(&self.state.session, pool) {
+            Ok(engine) => {
+                self.engine = Some(engine);
+            }
+            Err(e) => {
+                self.state.engine_init_error = Some(format!("Audio device error: {e}"));
+            }
+        }
+        self
+    }
+
+    /// Poll for completed background tasks and process results.
+    fn poll_background_tasks(&mut self) {
+        let result = self
+            .state
+            .bg_result_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok());
+
+        if let Some(result) = result {
+            self.state.background_task = None;
+            self.state.bg_result_rx = None;
+
+            match result {
+                BackgroundTaskResult::SaveComplete(Ok(())) => {
+                    self.state.mark_clean();
+                    self.state.push_toast("Session saved", ToastSeverity::Info);
+                }
+                BackgroundTaskResult::SaveComplete(Err(e)) => {
+                    self.state
+                        .push_toast(format!("Save failed: {e}"), ToastSeverity::Error);
+                }
+                BackgroundTaskResult::LoadComplete(Ok(session)) => {
+                    self.state.session = *session;
+                    self.state.mark_clean();
+                    self.state.selected_track = None;
+                    self.state.selected_region = None;
+                    self.state.push_toast("Session loaded", ToastSeverity::Info);
+                }
+                BackgroundTaskResult::LoadComplete(Err(e)) => {
+                    self.state
+                        .push_toast(format!("Load failed: {e}"), ToastSeverity::Error);
+                }
+                BackgroundTaskResult::ExportComplete(Ok(())) => {
+                    self.state
+                        .push_toast("Export complete", ToastSeverity::Info);
+                }
+                BackgroundTaskResult::ExportComplete(Err(e)) => {
+                    self.state
+                        .push_toast(format!("Export failed: {e}"), ToastSeverity::Error);
+                }
+            }
+        }
+    }
+
+    /// Execute a deferred action (after save prompt resolution).
+    fn execute_deferred_action(&mut self) {
+        if let Some(action) = self.state.pending_action.take() {
+            match action {
+                DeferredAction::NewSession => {
+                    self.state.session = shruti_session::Session::new("Untitled", 48000, 256);
+                    self.state.selected_track = None;
+                    self.state.selected_region = None;
+                    self.state.mark_clean();
+                    self.state.session_path = None;
+                }
+                DeferredAction::OpenSession => {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Shruti Session", &["shruti"])
+                        .pick_file()
+                        && let Ok((_store, session)) =
+                            shruti_session::store::SessionStore::open(&path)
+                    {
+                        self.state.session = session;
+                        self.state.selected_track = None;
+                        self.state.selected_region = None;
+                        self.state.mark_clean();
+                        self.state.session_path = Some(path);
+                    }
+                }
+            }
+        }
     }
 
     fn handle_action(&mut self, action: Action) {
@@ -113,9 +204,19 @@ impl ShrutiApp {
             }
             Action::ZoomIn => {
                 self.state.pixels_per_frame *= 1.3;
+                self.state.pixels_per_frame = arrangement::clamp_zoom(
+                    self.state.pixels_per_frame,
+                    self.state.session.session_length(),
+                    1000.0,
+                );
             }
             Action::ZoomOut => {
-                self.state.pixels_per_frame = (self.state.pixels_per_frame / 1.3).max(0.0001);
+                self.state.pixels_per_frame /= 1.3;
+                self.state.pixels_per_frame = arrangement::clamp_zoom(
+                    self.state.pixels_per_frame,
+                    self.state.session.session_length(),
+                    1000.0,
+                );
             }
             Action::NewAudioTrack => {
                 let count = self.state.session.audio_tracks().len() + 1;
@@ -170,9 +271,12 @@ impl ShrutiApp {
             }
             Action::ZoomToFit => {
                 let length = self.state.session.session_length();
-                if length > 0 {
-                    // Approximate with 1000px available width
-                    self.state.pixels_per_frame = 1000.0 / length as f64;
+                if let Some(ppf) = arrangement::zoom_to_fit(length, 1000.0) {
+                    self.state.pixels_per_frame = ppf;
+                    self.state.scroll_x = 0.0;
+                }
+                // Empty session: just reset scroll
+                if length == 0 {
                     self.state.scroll_x = 0.0;
                 }
             }
@@ -215,20 +319,38 @@ impl ShrutiApp {
                 }
             }
             Action::NewSession => {
-                self.state.session = shruti_session::Session::new("Untitled", 48000, 256);
-                self.state.selected_track = None;
-                self.state.selected_region = None;
+                if self.state.dirty {
+                    self.state.pending_action = Some(DeferredAction::NewSession);
+                    self.state.show_save_prompt = true;
+                } else {
+                    self.state.session = shruti_session::Session::new("Untitled", 48000, 256);
+                    self.state.selected_track = None;
+                    self.state.selected_region = None;
+                    self.state.mark_clean();
+                    self.state.session_path = None;
+                }
             }
             Action::SaveSession => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Shruti Session", &["shruti"])
                     .save_file()
                 {
-                    let _ = shruti_session::store::SessionStore::create(&path, &self.state.session);
+                    if let Ok(store) =
+                        shruti_session::store::SessionStore::create(&path, &self.state.session)
+                    {
+                        // Persist audio pool files alongside the session
+                        let _ = store.save_audio_pool(
+                            &self.state.session.audio_pool,
+                            self.state.session.sample_rate,
+                        );
+                    }
                 }
             }
             Action::OpenSession => {
-                if let Some(path) = rfd::FileDialog::new()
+                if self.state.dirty {
+                    self.state.pending_action = Some(DeferredAction::OpenSession);
+                    self.state.show_save_prompt = true;
+                } else if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Shruti Session", &["shruti"])
                     .pick_file()
                     && let Ok((_store, session)) = shruti_session::store::SessionStore::open(&path)
@@ -236,6 +358,8 @@ impl ShrutiApp {
                     self.state.session = session;
                     self.state.selected_track = None;
                     self.state.selected_region = None;
+                    self.state.mark_clean();
+                    self.state.session_path = Some(path);
                 }
             }
             Action::ExportAudio => {
@@ -310,10 +434,15 @@ impl ShrutiApp {
 
 impl eframe::App for ShrutiApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        // Apply theme once
-        if !self.state.theme_applied {
+        // Apply theme only when it changes (or on first frame)
+        let needs_theme_apply = match &self.state.applied_theme_name {
+            None => true,
+            Some(name) => *name != self.theme.name,
+        };
+        if needs_theme_apply {
             apply_theme(ctx, &self.theme.colors);
             self.state.theme_applied = true;
+            self.state.applied_theme_name = Some(self.theme.name.clone());
         }
 
         // Handle keyboard shortcuts
@@ -328,8 +457,11 @@ impl eframe::App for ShrutiApp {
                     let scroll = input.raw_scroll_delta.y;
                     if scroll != 0.0 {
                         let factor = if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 };
-                        self.state.pixels_per_frame =
-                            (self.state.pixels_per_frame * factor).clamp(0.00001, 1.0);
+                        self.state.pixels_per_frame = arrangement::clamp_zoom(
+                            self.state.pixels_per_frame * factor,
+                            self.state.session.session_length(),
+                            1000.0,
+                        );
                     }
                 } else {
                     // Horizontal scroll with shift or trackpad
@@ -356,6 +488,76 @@ impl eframe::App for ShrutiApp {
                     level.1 = peak; // use peak as RMS approximation
                 }
             }
+        }
+
+        // Poll background tasks
+        self.poll_background_tasks();
+
+        // Auto-save check
+        if self.state.should_autosave() {
+            if let Some(path) = self.state.session_path.clone() {
+                let backup = crate::state::backup_path_for(&path);
+                if let Ok(store) =
+                    shruti_session::store::SessionStore::create(&backup, &self.state.session)
+                {
+                    let _ = store.save_audio_pool(
+                        &self.state.session.audio_pool,
+                        self.state.session.sample_rate,
+                    );
+                }
+            }
+        }
+
+        // Garbage-collect expired toasts
+        gc_toasts(&mut self.state.toasts);
+
+        // Show engine init error dialog
+        if let Some(err) = self.state.engine_init_error.clone() {
+            egui::Window::new("Audio Engine Error")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(&err);
+                    if ui.button("OK").clicked() {
+                        self.state.engine_init_error = None;
+                    }
+                });
+        }
+
+        // Show save prompt dialog
+        if self.state.show_save_prompt {
+            egui::Window::new("Unsaved Changes")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("You have unsaved changes. Save before continuing?");
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            self.state.show_save_prompt = false;
+                            // Save then execute pending action
+                            if let Some(path) = self.state.session_path.clone() {
+                                if let Ok(store) = shruti_session::store::SessionStore::create(
+                                    &path,
+                                    &self.state.session,
+                                ) {
+                                    let _ = store.save_audio_pool(
+                                        &self.state.session.audio_pool,
+                                        self.state.session.sample_rate,
+                                    );
+                                }
+                            }
+                            self.execute_deferred_action();
+                        }
+                        if ui.button("Don't Save").clicked() {
+                            self.state.show_save_prompt = false;
+                            self.execute_deferred_action();
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.state.show_save_prompt = false;
+                            self.state.pending_action = None;
+                        }
+                    });
+                });
         }
 
         let colors = self.theme.colors.clone();
@@ -447,5 +649,42 @@ impl eframe::App for ShrutiApp {
                 }
             }
         });
+
+        // Toast overlay
+        if !self.state.toasts.is_empty() {
+            let screen = ctx.content_rect();
+            let mut y = screen.max.y - 10.0;
+            for toast in self.state.toasts.iter().rev() {
+                let w = toast.message.len() as f32 * 7.5 + 24.0;
+                let h = 28.0;
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(screen.max.x - w - 10.0, y - h),
+                    egui::vec2(w, h),
+                );
+                y -= h + 4.0;
+
+                let bg = match toast.severity {
+                    ToastSeverity::Info => egui::Color32::from_rgba_unmultiplied(40, 40, 40, 220),
+                    ToastSeverity::Warning => {
+                        egui::Color32::from_rgba_unmultiplied(120, 100, 20, 220)
+                    }
+                    ToastSeverity::Error => egui::Color32::from_rgba_unmultiplied(140, 30, 30, 220),
+                };
+
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("toasts"),
+                ));
+                painter.rect_filled(rect, 4.0, bg);
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &toast.message,
+                    egui::FontId::proportional(13.0),
+                    egui::Color32::WHITE,
+                );
+            }
+            ctx.request_repaint();
+        }
     }
 }

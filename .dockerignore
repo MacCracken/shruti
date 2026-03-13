@@ -1,0 +1,7 @@
+target/
+.git/
+.claude/
+*.md
+tarpaulin-report.json
+tarpaulin.toml
+docs/

@@ -43,6 +43,7 @@ impl Meter {
     pub fn process(&mut self, buffer: &AudioBuffer) {
         let frames = buffer.frames();
         let channels = buffer.channels() as usize;
+        let active_channels = channels.min(self.channels);
 
         // Reset peak for this block
         for ch_peak in &mut self.peak {
@@ -50,9 +51,10 @@ impl Meter {
         }
 
         for frame in 0..frames {
-            let mut mono_sum: f64 = 0.0;
+            // EBU R128 compliant LUFS: average per-channel mean-square values
+            let mut channel_sq_sum: f64 = 0.0;
 
-            for ch in 0..channels.min(self.channels) {
+            for ch in 0..active_channels {
                 let sample = buffer.get(frame, ch as u16);
                 let abs = sample.abs();
 
@@ -62,17 +64,23 @@ impl Meter {
                 }
 
                 // RMS accumulation
-                self.rms_sum[ch] += (sample as f64).powi(2);
+                let sq = (sample as f64).powi(2);
+                self.rms_sum[ch] += sq;
 
-                mono_sum += sample as f64;
+                // LUFS: sum squared samples per channel
+                channel_sq_sum += sq;
             }
 
             self.rms_count += 1;
 
-            // LUFS: accumulate mono sum into 400ms blocks
-            let mono_avg = mono_sum / channels.max(1) as f64;
+            // LUFS: average RMS-squared per channel, then accumulate into 400ms blocks
+            let mean_sq = if active_channels > 0 {
+                channel_sq_sum / active_channels as f64
+            } else {
+                0.0
+            };
             if self.lufs_buffer_pos < self.lufs_buffer.len() {
-                self.lufs_buffer[self.lufs_buffer_pos] = mono_avg * mono_avg;
+                self.lufs_buffer[self.lufs_buffer_pos] = mean_sq;
                 self.lufs_buffer_pos += 1;
             }
 
@@ -508,5 +516,67 @@ mod tests {
             "RMS should accumulate: expected {expected_rms}, got {rms2}"
         );
         assert!(rms2 != rms1, "Second process call should change RMS");
+    }
+
+    #[test]
+    fn test_lufs_ebu_r128_mono_sine() {
+        // EBU R128: a 997 Hz sine at -3.01 dBFS (amplitude = 1/sqrt(2))
+        // has RMS of 0.5, so LUFS = -0.691 + 10*log10(0.5^2) = -0.691 + 10*(-0.30103) = -3.70 LUFS
+        // (This is approximate due to simplified gating.)
+        let mut meter = Meter::new(1, 48000.0);
+        let frames = 96000; // 2 seconds
+        let amplitude = std::f32::consts::FRAC_1_SQRT_2;
+        let data: Vec<f32> = (0..frames)
+            .map(|i| (2.0 * std::f32::consts::PI * 997.0 * i as f32 / 48000.0).sin() * amplitude)
+            .collect();
+        let buf = AudioBuffer::from_interleaved(data, 1);
+        meter.process(&buf);
+
+        // RMS of sine at amplitude A = A/sqrt(2), mean-square = A^2/2 = 0.25
+        // LUFS = -0.691 + 10*log10(0.25) = -0.691 + (-6.02) = -6.71
+        let expected_lufs = -0.691 + 10.0 * (0.25_f64).log10();
+        assert!(
+            (meter.lufs as f64 - expected_lufs).abs() < 0.5,
+            "LUFS for 1/sqrt(2) sine should be ~{:.2}, got {:.2}",
+            expected_lufs,
+            meter.lufs
+        );
+    }
+
+    #[test]
+    fn test_lufs_stereo_matches_mono_for_equal_channels() {
+        // When both channels have identical signals, LUFS should match mono result
+        let sample_rate = 48000.0;
+        let frames = 96000usize;
+        let amplitude = 0.3;
+
+        // Mono
+        let mut meter_mono = Meter::new(1, sample_rate);
+        let mono_data: Vec<f32> = (0..frames)
+            .map(|i| {
+                (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / sample_rate).sin() * amplitude
+            })
+            .collect();
+        let buf_mono = AudioBuffer::from_interleaved(mono_data, 1);
+        meter_mono.process(&buf_mono);
+
+        // Stereo (same signal both channels)
+        let mut meter_stereo = Meter::new(2, sample_rate);
+        let stereo_data: Vec<f32> = (0..frames)
+            .flat_map(|i| {
+                let s = (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / sample_rate).sin()
+                    * amplitude;
+                [s, s]
+            })
+            .collect();
+        let buf_stereo = AudioBuffer::from_interleaved(stereo_data, 2);
+        meter_stereo.process(&buf_stereo);
+
+        assert!(
+            (meter_mono.lufs - meter_stereo.lufs).abs() < 0.5,
+            "Stereo LUFS with identical channels should match mono: mono={}, stereo={}",
+            meter_mono.lufs,
+            meter_stereo.lufs
+        );
     }
 }

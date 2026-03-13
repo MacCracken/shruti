@@ -92,12 +92,21 @@ impl PluginHost {
     }
 
     /// Restore states for active plugins.
-    pub fn load_all_states(&mut self, states: &HashMap<String, PluginState>) {
+    ///
+    /// Validates each state blob before loading. Invalid states are skipped
+    /// and their slot names are returned in the error list.
+    pub fn load_all_states(&mut self, states: &HashMap<String, PluginState>) -> Vec<String> {
+        let mut errors = Vec::new();
         for (slot, state) in states {
+            if let Err(e) = state.validate() {
+                errors.push(format!("{slot}: {e}"));
+                continue;
+            }
             if let Some(inst) = self.instances.get_mut(slot) {
                 inst.load_state(state);
             }
         }
+        errors
     }
 
     /// List all active plugin slots.
@@ -429,7 +438,8 @@ mod tests {
     fn load_all_states_empty() {
         let mut host = PluginHost::new();
         let states = HashMap::new();
-        host.load_all_states(&states); // should not panic
+        let errors = host.load_all_states(&states);
+        assert!(errors.is_empty());
     }
 
     #[test]
@@ -490,6 +500,30 @@ mod tests {
             Err(msg) => assert!(msg.contains("failed to load native"), "got: {msg}"),
             Ok(_) => panic!("should have failed"),
         }
+    }
+
+    #[test]
+    fn load_all_states_rejects_oversized_blob() {
+        let mut host = PluginHost::new();
+        let mut states = HashMap::new();
+        let mut state = PluginState::new("big_plugin".into());
+        state.chunk = vec![0u8; crate::state::MAX_STATE_BLOB_SIZE + 1];
+        states.insert("slot1".to_string(), state);
+        let errors = host.load_all_states(&states);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("too large"));
+    }
+
+    #[test]
+    fn load_all_states_rejects_too_small_blob() {
+        let mut host = PluginHost::new();
+        let mut states = HashMap::new();
+        let mut state = PluginState::new("tiny_plugin".into());
+        state.chunk = vec![0x01]; // Only 1 byte
+        states.insert("slot1".to_string(), state);
+        let errors = host.load_all_states(&states);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("too small"));
     }
 
     #[test]

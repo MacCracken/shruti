@@ -8,20 +8,50 @@ use shruti_dsp::io::read_audio_file;
 ///
 /// Audio files are loaded once and referenced by ID from regions.
 /// The pool owns the decoded audio data.
+///
+/// When a `max_entries` limit is set, inserting beyond the limit evicts
+/// the least-recently-used entry (based on an internal access counter).
 pub struct AudioPool {
-    buffers: HashMap<String, AudioBuffer>,
+    buffers: HashMap<String, PoolEntry>,
+    /// Monotonically increasing counter for LRU tracking.
+    access_counter: u64,
+    /// Maximum number of entries (0 = unlimited).
+    max_entries: usize,
+}
+
+struct PoolEntry {
+    buffer: AudioBuffer,
+    last_access: u64,
 }
 
 impl AudioPool {
     pub fn new() -> Self {
         Self {
             buffers: HashMap::new(),
+            access_counter: 0,
+            max_entries: 0,
+        }
+    }
+
+    /// Create an audio pool with a maximum entry limit.
+    /// When inserting beyond this limit, the least-recently-used entry is evicted.
+    pub fn with_max_entries(max_entries: usize) -> Self {
+        Self {
+            buffers: HashMap::new(),
+            access_counter: 0,
+            max_entries,
         }
     }
 
     /// Insert a pre-decoded buffer into the pool.
     pub fn insert(&mut self, id: String, buffer: AudioBuffer) {
-        self.buffers.insert(id, buffer);
+        self.access_counter += 1;
+        let entry = PoolEntry {
+            buffer,
+            last_access: self.access_counter,
+        };
+        self.buffers.insert(id, entry);
+        self.evict_if_needed();
     }
 
     /// Load an audio file from disk and add it to the pool.
@@ -34,18 +64,26 @@ impl AudioPool {
             .to_string();
 
         let (buffer, _format) = read_audio_file(path)?;
-        self.buffers.insert(id.clone(), buffer);
+        self.insert(id.clone(), buffer);
         Ok(id)
     }
 
     /// Get a buffer by ID.
     pub fn get(&self, id: &str) -> Option<&AudioBuffer> {
-        self.buffers.get(id)
+        self.buffers.get(id).map(|e| &e.buffer)
+    }
+
+    /// Mark an entry as recently used (updates its LRU timestamp).
+    pub fn touch(&mut self, id: &str) {
+        if let Some(entry) = self.buffers.get_mut(id) {
+            self.access_counter += 1;
+            entry.last_access = self.access_counter;
+        }
     }
 
     /// Remove a buffer by ID.
     pub fn remove(&mut self, id: &str) -> Option<AudioBuffer> {
-        self.buffers.remove(id)
+        self.buffers.remove(id).map(|e| e.buffer)
     }
 
     /// List all file IDs in the pool.
@@ -59,6 +97,22 @@ impl AudioPool {
 
     pub fn is_empty(&self) -> bool {
         self.buffers.is_empty()
+    }
+
+    /// Evict the least-recently-used entry if we exceed `max_entries`.
+    fn evict_if_needed(&mut self) {
+        if self.max_entries == 0 || self.buffers.len() <= self.max_entries {
+            return;
+        }
+        // Find the entry with the smallest last_access
+        let lru_key = self
+            .buffers
+            .iter()
+            .min_by_key(|(_, e)| e.last_access)
+            .map(|(k, _)| k.clone());
+        if let Some(key) = lru_key {
+            self.buffers.remove(&key);
+        }
     }
 }
 
@@ -160,5 +214,52 @@ mod tests {
         let removed = pool.remove("manual");
         assert!(removed.is_some());
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_lru_eviction_evicts_oldest() {
+        let mut pool = AudioPool::with_max_entries(2);
+        pool.insert("a".into(), AudioBuffer::new(1, 10));
+        pool.insert("b".into(), AudioBuffer::new(1, 10));
+        // Pool is at capacity (2). Inserting a third should evict "a" (oldest).
+        pool.insert("c".into(), AudioBuffer::new(1, 10));
+
+        assert_eq!(pool.len(), 2);
+        assert!(pool.get("a").is_none(), "a should have been evicted");
+        assert!(pool.get("b").is_some());
+        assert!(pool.get("c").is_some());
+    }
+
+    #[test]
+    fn test_lru_touch_prevents_eviction() {
+        let mut pool = AudioPool::with_max_entries(2);
+        pool.insert("a".into(), AudioBuffer::new(1, 10));
+        pool.insert("b".into(), AudioBuffer::new(1, 10));
+        // Touch "a" so it's more recently used than "b"
+        pool.touch("a");
+        // Inserting "c" should evict "b" (now the LRU)
+        pool.insert("c".into(), AudioBuffer::new(1, 10));
+
+        assert_eq!(pool.len(), 2);
+        assert!(pool.get("a").is_some(), "a was touched, should survive");
+        assert!(pool.get("b").is_none(), "b should have been evicted");
+        assert!(pool.get("c").is_some());
+    }
+
+    #[test]
+    fn test_unlimited_pool_no_eviction() {
+        let mut pool = AudioPool::new(); // max_entries = 0 (unlimited)
+        for i in 0..100 {
+            pool.insert(format!("file_{i}"), AudioBuffer::new(1, 10));
+        }
+        assert_eq!(pool.len(), 100);
+    }
+
+    #[test]
+    fn test_touch_nonexistent_is_noop() {
+        let mut pool = AudioPool::with_max_entries(2);
+        pool.insert("a".into(), AudioBuffer::new(1, 10));
+        pool.touch("nonexistent"); // should not panic
+        assert_eq!(pool.len(), 1);
     }
 }

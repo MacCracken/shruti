@@ -7,6 +7,9 @@ use shruti_engine::backend::{AudioHost, CpalBackend, DeviceInfo};
 use shruti_engine::midi_io::{MidiPortInfo, enumerate_midi_ports};
 
 /// Cached device enumeration to avoid scanning every frame.
+///
+/// Uses diff-based refresh: on each scan, new and removed devices are
+/// detected by name rather than rebuilding the entire list from scratch.
 pub struct DeviceCache {
     pub audio_devices: Vec<DeviceInfo>,
     pub midi_ports: Vec<MidiPortInfo>,
@@ -28,11 +31,58 @@ impl DeviceCache {
         }
     }
 
+    /// Diff-based refresh: compares the current device list against the
+    /// previously cached list and only adds/removes changed entries.
+    /// Existing entries that are still present are updated in-place so
+    /// any UI state that references them by index stays valid.
     pub fn refresh(&mut self) {
         let backend = CpalBackend::new();
-        self.audio_devices = backend.all_devices();
-        self.midi_ports = enumerate_midi_ports();
+        let fresh_audio = backend.all_devices();
+        let fresh_midi = enumerate_midi_ports();
+
+        diff_device_list(&mut self.audio_devices, fresh_audio);
+        diff_midi_list(&mut self.midi_ports, fresh_midi);
+
         self.needs_refresh = false;
+    }
+}
+
+/// Diff audio device lists: remove stale devices, update existing ones,
+/// and append new ones.
+fn diff_device_list(cached: &mut Vec<DeviceInfo>, fresh: Vec<DeviceInfo>) {
+    // Remove devices that no longer appear in the fresh list.
+    cached.retain(|d| fresh.iter().any(|f| f.name == d.name));
+
+    for new_dev in fresh {
+        if let Some(existing) = cached.iter_mut().find(|d| d.name == new_dev.name) {
+            // Update fields that may have changed.
+            existing.is_default = new_dev.is_default;
+            existing.is_input = new_dev.is_input;
+            existing.is_output = new_dev.is_output;
+            existing.max_channels = new_dev.max_channels;
+            existing.supported_sample_rates = new_dev.supported_sample_rates;
+        } else {
+            // Brand new device.
+            cached.push(new_dev);
+        }
+    }
+}
+
+/// Diff MIDI port lists by name and direction.
+fn diff_midi_list(cached: &mut Vec<MidiPortInfo>, fresh: Vec<MidiPortInfo>) {
+    cached.retain(|p| {
+        fresh
+            .iter()
+            .any(|f| f.name == p.name && f.is_input == p.is_input)
+    });
+
+    for new_port in fresh {
+        let already = cached
+            .iter()
+            .any(|p| p.name == new_port.name && p.is_input == new_port.is_input);
+        if !already {
+            cached.push(new_port);
+        }
     }
 }
 
@@ -273,4 +323,130 @@ pub fn settings_view(
                 );
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_device(name: &str, is_default: bool) -> DeviceInfo {
+        DeviceInfo {
+            name: name.to_string(),
+            is_default,
+            is_input: false,
+            is_output: true,
+            max_channels: 2,
+            supported_sample_rates: vec![48000],
+        }
+    }
+
+    fn make_midi(name: &str, is_input: bool) -> MidiPortInfo {
+        MidiPortInfo {
+            name: name.to_string(),
+            is_input,
+            is_output: !is_input,
+        }
+    }
+
+    #[test]
+    fn test_diff_device_list_no_change() {
+        let mut cached = vec![make_device("A", true), make_device("B", false)];
+        let fresh = vec![make_device("A", true), make_device("B", false)];
+        diff_device_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[0].name, "A");
+        assert_eq!(cached[1].name, "B");
+    }
+
+    #[test]
+    fn test_diff_device_list_adds_new() {
+        let mut cached = vec![make_device("A", true)];
+        let fresh = vec![make_device("A", true), make_device("C", false)];
+        diff_device_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 2);
+        assert!(cached.iter().any(|d| d.name == "C"));
+    }
+
+    #[test]
+    fn test_diff_device_list_removes_stale() {
+        let mut cached = vec![make_device("A", true), make_device("B", false)];
+        let fresh = vec![make_device("A", true)];
+        diff_device_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].name, "A");
+    }
+
+    #[test]
+    fn test_diff_device_list_updates_fields() {
+        let mut cached = vec![make_device("A", false)];
+        let mut fresh_dev = make_device("A", true);
+        fresh_dev.max_channels = 8;
+        diff_device_list(&mut cached, vec![fresh_dev]);
+        assert_eq!(cached.len(), 1);
+        assert!(cached[0].is_default);
+        assert_eq!(cached[0].max_channels, 8);
+    }
+
+    #[test]
+    fn test_diff_device_list_empty_to_populated() {
+        let mut cached = vec![];
+        let fresh = vec![make_device("X", true)];
+        diff_device_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].name, "X");
+    }
+
+    #[test]
+    fn test_diff_device_list_populated_to_empty() {
+        let mut cached = vec![make_device("A", true)];
+        diff_device_list(&mut cached, vec![]);
+        assert!(cached.is_empty());
+    }
+
+    #[test]
+    fn test_diff_midi_list_no_change() {
+        let mut cached = vec![make_midi("M1", true)];
+        let fresh = vec![make_midi("M1", true)];
+        diff_midi_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 1);
+    }
+
+    #[test]
+    fn test_diff_midi_list_adds_new() {
+        let mut cached = vec![make_midi("M1", true)];
+        let fresh = vec![make_midi("M1", true), make_midi("M2", false)];
+        diff_midi_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 2);
+    }
+
+    #[test]
+    fn test_diff_midi_list_removes_stale() {
+        let mut cached = vec![make_midi("M1", true), make_midi("M2", false)];
+        let fresh = vec![make_midi("M1", true)];
+        diff_midi_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].name, "M1");
+    }
+
+    #[test]
+    fn test_diff_midi_distinguishes_input_output() {
+        let mut cached = vec![make_midi("Port", true)];
+        let fresh = vec![make_midi("Port", true), make_midi("Port", false)];
+        diff_midi_list(&mut cached, fresh);
+        assert_eq!(cached.len(), 2);
+    }
+
+    #[test]
+    fn test_device_cache_starts_needing_refresh() {
+        let cache = DeviceCache::new();
+        assert!(cache.needs_refresh);
+        assert!(cache.audio_devices.is_empty());
+        assert!(cache.midi_ports.is_empty());
+    }
+
+    #[test]
+    fn test_device_cache_default() {
+        let cache = DeviceCache::default();
+        assert!(cache.needs_refresh);
+    }
 }

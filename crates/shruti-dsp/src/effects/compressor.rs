@@ -40,16 +40,19 @@ impl Compressor {
     }
 
     /// Compute gain reduction in dB for a given input level in dB.
+    ///
+    /// Uses the standard soft knee formula:
+    ///   gain = (1/ratio - 1) * (input_db - threshold + knee/2)^2 / (2 * knee)
+    /// which ensures a smooth C1-continuous transition from 0 dB gain reduction
+    /// at the bottom of the knee to full ratio compression at the top.
     fn compute_gain_db(&self, input_db: f32) -> f32 {
         let half_knee = self.knee_db / 2.0;
         let over = input_db - self.threshold_db;
 
         if self.knee_db > 0.0 && over.abs() < half_knee {
-            // Soft knee region
+            // Soft knee region: standard quadratic interpolation
             let x = over + half_knee;
-            let compressed = self.threshold_db + x - x * x / (2.0 * self.knee_db)
-                + (x * x / (2.0 * self.knee_db)) / self.ratio;
-            compressed - input_db
+            (1.0 / self.ratio - 1.0) * x * x / (2.0 * self.knee_db)
         } else if over <= -half_knee {
             // Below threshold
             0.0
@@ -179,11 +182,12 @@ mod tests {
     fn test_soft_knee_behavior() {
         let comp = Compressor::new(48000.0);
         // Default: threshold=-20, ratio=4, knee=6
+        // Knee region: -23 to -17
 
         // Below the knee entirely (below threshold - half_knee = -23)
         let gain_below = comp.compute_gain_db(-26.0);
-        // In the knee region (between -23 and -17)
-        let gain_in_knee = comp.compute_gain_db(-18.0);
+        // Just inside the knee from the bottom
+        let gain_in_knee_low = comp.compute_gain_db(-22.0);
         // Above the knee entirely (above threshold + half_knee = -17)
         let gain_above = comp.compute_gain_db(-14.0);
 
@@ -193,22 +197,27 @@ mod tests {
             "Below knee should have ~0 dB gain reduction: {gain_below}"
         );
 
-        // Compare soft knee vs hard knee at the same point above threshold
-        let mut comp_hard = Compressor::new(48000.0);
-        comp_hard.knee_db = 0.0;
-        let gain_hard = comp_hard.compute_gain_db(-18.0);
-
-        // Soft knee should compress less than hard knee at the same input level
-        // in the transition region (soft knee gain should be closer to 0 / less negative)
+        // Inside the knee near the bottom: soft knee should apply only a small amount
+        // of compression (gradual onset)
         assert!(
-            gain_in_knee > gain_hard,
-            "Soft knee should compress less than hard knee in transition: soft={gain_in_knee}, hard={gain_hard}"
+            gain_in_knee_low < 0.0,
+            "Soft knee should start compressing inside knee region: {gain_in_knee_low}"
+        );
+        assert!(
+            gain_in_knee_low > -1.0,
+            "Near bottom of knee, compression should be gentle: {gain_in_knee_low}"
         );
 
         // Above knee: significant compression (negative gain)
         assert!(
             gain_above < 0.0,
             "Above knee should have compression: {gain_above}"
+        );
+
+        // Compression should increase as we go through the knee
+        assert!(
+            gain_in_knee_low > gain_above,
+            "More compression above knee than inside: inside={gain_in_knee_low}, above={gain_above}"
         );
     }
 
@@ -430,5 +439,61 @@ mod tests {
     fn test_db_to_linear_minus_6() {
         let lin = db_to_linear(-6.0206);
         assert!((lin - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_soft_knee_smooth_transition() {
+        // Verify the knee region produces a smooth (monotonic, no discontinuities) gain curve.
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.knee_db = 6.0;
+
+        let half_knee = comp.knee_db / 2.0;
+        let start = comp.threshold_db - half_knee; // -23
+        let end = comp.threshold_db + half_knee; // -17
+
+        // Sample the gain curve at fine steps through the knee region
+        let steps = 100;
+        let mut prev_gain = comp.compute_gain_db(start - 0.01);
+        for i in 0..=steps {
+            let db = start + (end - start) * i as f32 / steps as f32;
+            let gain = comp.compute_gain_db(db);
+
+            // Gain should be monotonically decreasing (more negative) as input increases
+            assert!(
+                gain <= prev_gain + 1e-4,
+                "Gain should be monotonically decreasing: at {db:.2} dB, gain={gain:.4}, prev={prev_gain:.4}"
+            );
+            prev_gain = gain;
+        }
+    }
+
+    #[test]
+    fn test_soft_knee_boundary_continuity() {
+        // At the boundaries of the knee region, the soft knee should match
+        // the linear (no-compression and full-compression) regions.
+        let mut comp = Compressor::new(48000.0);
+        comp.threshold_db = -20.0;
+        comp.ratio = 4.0;
+        comp.knee_db = 6.0;
+
+        let half_knee = comp.knee_db / 2.0;
+
+        // At bottom of knee (threshold - knee/2 = -23), gain should be ~0
+        let gain_bottom = comp.compute_gain_db(comp.threshold_db - half_knee);
+        assert!(
+            gain_bottom.abs() < 0.01,
+            "At bottom of knee, gain should be ~0 dB, got {gain_bottom}"
+        );
+
+        // At top of knee (threshold + knee/2 = -17), gain should match the hard-knee formula
+        let gain_top = comp.compute_gain_db(comp.threshold_db + half_knee);
+        let expected_hard =
+            (comp.threshold_db + half_knee / comp.ratio) - (comp.threshold_db + half_knee);
+        assert!(
+            (gain_top - expected_hard).abs() < 0.1,
+            "At top of knee, soft knee ({gain_top:.3}) should match hard knee ({expected_hard:.3})"
+        );
     }
 }

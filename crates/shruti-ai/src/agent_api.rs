@@ -480,12 +480,8 @@ impl AgentApi {
         // Render the track's first region to a buffer for analysis
         let region = &track.regions[0];
         if let Some(source) = session.audio_pool.get(&region.audio_file_id) {
-            let samples = source.as_interleaved();
-            let channels = source.channels();
-            let buf = shruti_dsp::AudioBuffer::from_interleaved(samples.to_vec(), channels);
-
             let analysis =
-                match shruti_dsp::analyze_spectrum(&buf, 0, session.sample_rate, fft_size) {
+                match shruti_dsp::analyze_spectrum(source, 0, session.sample_rate, fft_size) {
                     Some(a) => a,
                     None => {
                         return ApiResult::err(format!(
@@ -528,11 +524,7 @@ impl AgentApi {
 
         let region = &track.regions[0];
         if let Some(source) = session.audio_pool.get(&region.audio_file_id) {
-            let samples = source.as_interleaved();
-            let channels = source.channels();
-            let buf = shruti_dsp::AudioBuffer::from_interleaved(samples.to_vec(), channels);
-
-            let analysis = shruti_dsp::analyze_dynamics(&buf, session.sample_rate);
+            let analysis = shruti_dsp::analyze_dynamics(source, session.sample_rate);
 
             let data = serde_json::json!({
                 "channels": analysis.channel_count,
@@ -576,13 +568,9 @@ impl AgentApi {
             let region = &track.regions[0];
             let (peak_db, rms_db, centroid) =
                 if let Some(source) = session.audio_pool.get(&region.audio_file_id) {
-                    let samples = source.as_interleaved();
-                    let channels = source.channels();
-                    let buf = shruti_dsp::AudioBuffer::from_interleaved(samples.to_vec(), channels);
-
-                    let dyn_analysis = shruti_dsp::analyze_dynamics(&buf, session.sample_rate);
+                    let dyn_analysis = shruti_dsp::analyze_dynamics(source, session.sample_rate);
                     let spec_analysis =
-                        shruti_dsp::analyze_spectrum(&buf, 0, session.sample_rate, 4096);
+                        shruti_dsp::analyze_spectrum(source, 0, session.sample_rate, 4096);
 
                     let avg_peak = dyn_analysis.peak_db.iter().sum::<f32>()
                         / dyn_analysis.peak_db.len() as f32;
