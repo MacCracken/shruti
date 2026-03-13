@@ -42,6 +42,7 @@ impl Lfo {
     }
 
     /// Advance the LFO by one sample and return the current value in `-depth..+depth`.
+    #[inline]
     pub fn tick(&mut self) -> f32 {
         // Advance phase first so that S&H detects the wrap correctly
         // without double-sampling at the cycle boundary.

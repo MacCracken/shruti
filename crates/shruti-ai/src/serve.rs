@@ -13,7 +13,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::agent_api::{AgentApi, ApiResult};
 use crate::mcp::McpTools;
@@ -83,7 +83,17 @@ pub fn app(state: AppState) -> Router {
         .route("/api/analysis", post(handle_analysis))
         .route("/api/mcp", post(handle_mcp))
         .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
-        .layer(CorsLayer::permissive())
+        // Only allow requests from localhost origins — the agent API is
+        // not designed for cross-origin browser access from arbitrary sites.
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::predicate(|origin, _| {
+                    origin.as_bytes().starts_with(b"http://localhost")
+                        || origin.as_bytes().starts_with(b"http://127.0.0.1")
+                }))
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any),
+        )
         .with_state(state)
 }
 
@@ -96,7 +106,9 @@ pub async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(Mutex::new(shared));
     let app = app(state);
 
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    // Bind to localhost only — the agent API should not be exposed to the
+    // network.  Use a reverse proxy if remote access is needed.
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     eprintln!("shruti serve listening on http://{addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -926,5 +938,75 @@ mod tests {
         }
         // 6th request should be blocked
         assert!(!rl.check());
+    }
+
+    // --- Security: CORS restriction ---
+
+    #[tokio::test]
+    async fn test_cors_rejects_foreign_origin() {
+        let app = test_app();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/session")
+            .header("content-type", "application/json")
+            .header("origin", "https://evil.example.com")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({"action": "info"})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        // The response should NOT include an Access-Control-Allow-Origin
+        // header for a foreign origin.
+        let cors_header = response.headers().get("access-control-allow-origin");
+        assert!(
+            cors_header.is_none(),
+            "CORS should not allow foreign origin, got: {:?}",
+            cors_header
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cors_allows_localhost_origin() {
+        let app = test_app();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/session")
+            .header("content-type", "application/json")
+            .header("origin", "http://localhost:3000")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({"action": "info"})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let cors_header = response.headers().get("access-control-allow-origin");
+        assert!(cors_header.is_some(), "CORS should allow localhost origin");
+    }
+
+    // --- Security: create_session input validation via HTTP ---
+
+    #[tokio::test]
+    async fn test_create_session_rejects_zero_sample_rate_http() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Bad", "sample_rate": 0}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_create_session_rejects_bad_buffer_size_http() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Bad", "buffer_size": 0}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
     }
 }

@@ -21,7 +21,9 @@ pub fn browser_panel(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
             if matches!(ext, "wav" | "flac" | "aif" | "aiff")
                 && !state.file_entries.contains(&path_str)
             {
-                let _ = state.session.audio_pool.load(path);
+                if let Err(e) = state.session.audio_pool.load(path) {
+                    eprintln!("Failed to load audio file: {e}");
+                }
                 state.file_entries.push(path_str.clone());
             }
         }
@@ -49,7 +51,9 @@ pub fn browser_panel(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
                     .add_filter("Audio", &["wav", "flac", "aif", "aiff"])
                     .pick_file()
             {
-                let _ = state.session.audio_pool.load(&path);
+                if let Err(e) = state.session.audio_pool.load(&path) {
+                    eprintln!("Failed to load audio file: {e}");
+                }
                 state.file_entries.push(path.display().to_string());
             }
         });

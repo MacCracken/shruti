@@ -368,7 +368,13 @@ Format: CalVer (YYYY.M.D-N).
 - **UI Critical**: Auto-save with `.shruti_backup` (60s interval), background file I/O via `mpsc`, save prompt on New/Open, toast notifications, comprehensive undo in mixer (mute/solo/gain/pan), engine init error dialog
 - **UI Medium**: Waveform peaks caching, snap-to-grid, recording animation, grid level-of-detail, zoom boundary clamping (`clamp_zoom`/`zoom_to_fit`), keyboard shortcuts, audio pool persistence, theme caching
 - **Security**: MCP request size limit, agent API rate limiting, plugin scanner symlink depth, preferences file permissions (0600), plugin state blob validation, scanner disk cache
-- 1292 total tests across workspace
+### Code Audit Round 8 (Memory, Security, Performance, Quality)
+- **Security**: HTTP server bound to localhost only (was 0.0.0.0), CORS restricted to localhost origins, `create_session` validates sample_rate/buffer_size ranges, error responses sanitized (no internal path leakage), SF2 parser `saturating_sub` for malformed loop points
+- **Memory**: Pre-allocated `node_outputs` HashMap in GraphProcessor (eliminates per-callback heap allocation), pre-allocated `dry_buffer` in InstrumentEffect, iterator-based `select_layer()` (zero allocation), LUFS blocks capped at 1500 entries
+- **Performance**: `#[inline]` on all per-sample DSP functions (AudioBuffer::get/set, Oscillator::sample/advance_phase, Envelope::tick, Lfo::tick, CombFilter/AllpassFilter::process), `fast_exp2_f64()` minimax polynomial for oscillator detune, pre-computed osc2/osc3 detune ratios outside per-sample loop, `fast_linear_to_db()`/`fast_db_to_linear()` IEEE 754 bit-tricks in compressor, cached pan gains in DrumPad
+- **Quality**: All clippy warnings fixed (31 across 12 files), dead code eliminated, silent error swallowing replaced with `eprintln!` logging, reverb safety tests for low sample rates
+- **E2E Integration Tests**: 23 cross-crate tests — full audio pipeline, instrument pipeline (synth + drum machine), effects chain (EQ→compressor→reverb→delay), session persistence roundtrip, comprehensive undo/redo (12 ops), audio format roundtrip (WAV int16/int24/float32), preset roundtrip (all 3 instruments), MIDI routing (velocity curves, channel filter, note range), sampler zone mapping, bus send rendering, automation timeline render
+- 1327 total tests across workspace, 0 clippy warnings, 0 audit vulnerabilities
 
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)

@@ -36,6 +36,7 @@ impl CombFilter {
         }
     }
 
+    #[inline]
     fn process(&mut self, input: f32) -> f32 {
         let output = self.buffer[self.index];
         self.filter_store = output * self.damp2 + self.filter_store * self.damp1;
@@ -64,6 +65,7 @@ impl AllpassFilter {
         }
     }
 
+    #[inline]
     fn process(&mut self, input: f32) -> f32 {
         let buffered = self.buffer[self.index];
         let output = -input + buffered;
@@ -352,10 +354,10 @@ mod tests {
         let reverb = Reverb::new(100.0);
         assert_eq!(reverb.comb_filters.len(), 8);
         for comb in &reverb.comb_filters {
-            assert!(comb.buffer.len() >= 1, "Comb buffer should be at least 1");
+            assert!(!comb.buffer.is_empty(), "Comb buffer should be at least 1");
         }
         for ap in &reverb.allpass_filters {
-            assert!(ap.buffer.len() >= 1, "Allpass buffer should be at least 1");
+            assert!(!ap.buffer.is_empty(), "Allpass buffer should be at least 1");
         }
     }
 
@@ -460,14 +462,14 @@ mod tests {
         reverb.set_sample_rate(1.0); // extremely low sample rate
         for (i, comb) in reverb.comb_filters.iter().enumerate() {
             assert!(
-                comb.buffer.len() >= 1,
+                !comb.buffer.is_empty(),
                 "Comb filter {i} buffer should be at least 1 after set_sample_rate(1.0), got {}",
                 comb.buffer.len()
             );
         }
         for (i, ap) in reverb.allpass_filters.iter().enumerate() {
             assert!(
-                ap.buffer.len() >= 1,
+                !ap.buffer.is_empty(),
                 "Allpass filter {i} buffer should be at least 1 after set_sample_rate(1.0), got {}",
                 ap.buffer.len()
             );

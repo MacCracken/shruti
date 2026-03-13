@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn source_returns_inner_for_io() {
-        let err = SessionError::Io(std::io::Error::new(std::io::ErrorKind::Other, "x"));
+        let err = SessionError::Io(std::io::Error::other("x"));
         assert!(std::error::Error::source(&err).is_some());
     }
 

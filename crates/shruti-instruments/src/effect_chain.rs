@@ -19,6 +19,9 @@ pub struct InstrumentEffect {
     pub enabled: bool,
     pub mix: f32,
     state: EffectState,
+    /// Pre-allocated dry signal buffer for effects that need dry/wet mixing.
+    /// Reused across process() calls to avoid RT allocations.
+    dry_buffer: AudioBuffer,
 }
 
 /// Internal state for each effect type.
@@ -203,6 +206,7 @@ impl InstrumentEffect {
             enabled: true,
             mix: 0.5,
             state,
+            dry_buffer: AudioBuffer::new(2, 256),
         }
     }
 
@@ -211,6 +215,11 @@ impl InstrumentEffect {
         if !self.enabled {
             return;
         }
+
+        // Pre-size dry buffer before borrowing self.state (avoids double-borrow).
+        let channels = buffer.channels();
+        let frames = buffer.frames();
+        self.ensure_dry_buffer(channels, frames);
 
         // For effects that handle mix internally (Delay, Reverb), pass through directly.
         // For others, apply dry/wet mix manually.
@@ -224,63 +233,54 @@ impl InstrumentEffect {
                 reverb.process(buffer);
             }
             EffectState::Chorus(chorus) => {
-                // Chorus mixes the delayed signal with original inside process,
-                // so we scale the effect amount via mix
-                let frames = buffer.frames();
-                let channels = buffer.channels();
-                // Save dry signal
-                let mut dry = AudioBuffer::new(channels, frames);
-                for f in 0..frames {
-                    for ch in 0..channels {
-                        dry.set(f, ch, buffer.get(f, ch));
-                    }
-                }
+                // Copy dry signal using interleaved slice (vectorizable)
+                self.dry_buffer
+                    .as_interleaved_mut()
+                    .copy_from_slice(buffer.as_interleaved());
                 chorus.process(buffer);
-                // Crossfade dry/wet
-                for f in 0..frames {
-                    for ch in 0..channels {
-                        let d = dry.get(f, ch);
-                        let w = buffer.get(f, ch);
-                        buffer.set(f, ch, d * (1.0 - self.mix) + w * self.mix);
-                    }
+                // Crossfade dry/wet using interleaved slices (vectorizable)
+                let mix = self.mix;
+                let dry_mix = 1.0 - mix;
+                let wet = buffer.as_interleaved_mut();
+                let dry = self.dry_buffer.as_interleaved();
+                for i in 0..wet.len() {
+                    wet[i] = dry[i] * dry_mix + wet[i] * mix;
                 }
             }
             EffectState::Distortion(dist) => {
-                let frames = buffer.frames();
-                let channels = buffer.channels();
-                let mut dry = AudioBuffer::new(channels, frames);
-                for f in 0..frames {
-                    for ch in 0..channels {
-                        dry.set(f, ch, buffer.get(f, ch));
-                    }
-                }
+                self.dry_buffer
+                    .as_interleaved_mut()
+                    .copy_from_slice(buffer.as_interleaved());
                 dist.process(buffer);
-                for f in 0..frames {
-                    for ch in 0..channels {
-                        let d = dry.get(f, ch);
-                        let w = buffer.get(f, ch);
-                        buffer.set(f, ch, d * (1.0 - self.mix) + w * self.mix);
-                    }
+                let mix = self.mix;
+                let dry_mix = 1.0 - mix;
+                let wet = buffer.as_interleaved_mut();
+                let dry = self.dry_buffer.as_interleaved();
+                for i in 0..wet.len() {
+                    wet[i] = dry[i] * dry_mix + wet[i] * mix;
                 }
             }
             EffectState::FilterDrive(fd) => {
-                let frames = buffer.frames();
-                let channels = buffer.channels();
-                let mut dry = AudioBuffer::new(channels, frames);
-                for f in 0..frames {
-                    for ch in 0..channels {
-                        dry.set(f, ch, buffer.get(f, ch));
-                    }
-                }
+                self.dry_buffer
+                    .as_interleaved_mut()
+                    .copy_from_slice(buffer.as_interleaved());
                 fd.process(buffer);
-                for f in 0..frames {
-                    for ch in 0..channels {
-                        let d = dry.get(f, ch);
-                        let w = buffer.get(f, ch);
-                        buffer.set(f, ch, d * (1.0 - self.mix) + w * self.mix);
-                    }
+                let mix = self.mix;
+                let dry_mix = 1.0 - mix;
+                let wet = buffer.as_interleaved_mut();
+                let dry = self.dry_buffer.as_interleaved();
+                for i in 0..wet.len() {
+                    wet[i] = dry[i] * dry_mix + wet[i] * mix;
                 }
             }
+        }
+    }
+
+    /// Ensure the pre-allocated dry buffer matches the required dimensions.
+    /// Only reallocates when buffer size changes (rare, not per-call).
+    fn ensure_dry_buffer(&mut self, channels: u16, frames: u32) {
+        if self.dry_buffer.channels() != channels || self.dry_buffer.frames() != frames {
+            self.dry_buffer = AudioBuffer::new(channels, frames);
         }
     }
 
@@ -311,6 +311,9 @@ pub struct EffectChain {
     effects: Vec<InstrumentEffect>,
     /// Scratch buffer for isolating instrument output before applying effects.
     scratch: AudioBuffer,
+    /// Pre-allocated dry signal buffer for effects needing dry/wet mixing.
+    /// Avoids heap allocation per effect process call.
+    dry_scratch: AudioBuffer,
 }
 
 impl EffectChain {
@@ -318,6 +321,7 @@ impl EffectChain {
         Self {
             effects: Vec::new(),
             scratch: AudioBuffer::new(2, 256),
+            dry_scratch: AudioBuffer::new(2, 256),
         }
     }
 
@@ -382,11 +386,7 @@ impl EffectChain {
         self.ensure_scratch(channels, frames);
 
         // Zero the scratch buffer
-        for f in 0..frames {
-            for ch in 0..channels {
-                self.scratch.set(f, ch, 0.0);
-            }
-        }
+        self.scratch.clear();
 
         // Render instrument into scratch
         render_fn(&mut self.scratch);
@@ -397,12 +397,7 @@ impl EffectChain {
         }
 
         // Add processed signal to output
-        for f in 0..frames {
-            for ch in 0..channels {
-                let current = output.get(f, ch);
-                output.set(f, ch, current + self.scratch.get(f, ch));
-            }
-        }
+        output.mix_from(&self.scratch);
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {

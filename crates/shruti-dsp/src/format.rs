@@ -113,7 +113,7 @@ mod tests {
     fn test_format_clone_and_copy() {
         let fmt = AudioFormat::new(48000, 2, 256);
         let fmt2 = fmt; // Copy
-        let fmt3 = fmt.clone();
+        let fmt3 = fmt;
         assert_eq!(fmt, fmt2);
         assert_eq!(fmt, fmt3);
     }

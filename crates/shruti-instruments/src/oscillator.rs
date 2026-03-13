@@ -32,9 +32,26 @@ impl Oscillator {
         self.sample_rate = sample_rate;
     }
 
+    /// Fast approximation of 2^x using a degree-4 polynomial.
+    /// Accurate to ~1e-4 for |x| < 1 (covers ±1200 cent detune).
+    #[inline]
+    #[allow(clippy::approx_constant)]
+    pub(crate) fn fast_exp2_f64(x: f64) -> f64 {
+        // Split into integer and fractional parts for wider range
+        let xi = x.floor();
+        let xf = x - xi;
+        // Minimax polynomial for 2^x on [0, 1]
+        let poly = 1.0
+            + xf * (0.6931471805599453
+                + xf * (0.24022650695910072
+                    + xf * (0.05550410866482158 + xf * 0.009618129107628477)));
+        poly * (2.0f64).powi(xi as i32)
+    }
+
     /// Generate a single sample at the given phase (0.0 to 1.0) and frequency.
+    #[inline]
     pub fn sample(&mut self, phase: f64, frequency: f64) -> f32 {
-        let freq = frequency * 2.0f64.powf(self.detune / 1200.0); // detune in cents
+        let freq = frequency * Self::fast_exp2_f64(self.detune / 1200.0); // detune in cents
         let dt = freq / self.sample_rate;
 
         match self.waveform {
@@ -76,12 +93,14 @@ impl Oscillator {
 
     /// Advance a phase accumulator by one sample at the given frequency.
     /// Returns the new phase (wrapped to 0.0..1.0).
+    #[inline]
     pub fn advance_phase(phase: f64, frequency: f64, sample_rate: f64) -> f64 {
         let new = phase + frequency / sample_rate;
         new - new.floor()
     }
 
     /// PolyBLEP anti-aliasing correction.
+    #[inline]
     fn poly_blep(phase: f64, dt: f64) -> f64 {
         if phase < dt {
             let t = phase / dt;

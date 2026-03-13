@@ -112,38 +112,59 @@ impl Meter {
     }
 
     /// Compute integrated LUFS using simplified EBU R128 gating.
+    /// Uses in-place iteration to avoid temporary Vec allocations.
     fn compute_lufs(&mut self) {
         if self.lufs_blocks.is_empty() {
             self.lufs = -200.0;
             return;
         }
 
+        // Cap lufs_blocks to prevent unbounded growth.
+        // Keep the most recent blocks (roughly 10 minutes of 400ms blocks = 1500).
+        const MAX_LUFS_BLOCKS: usize = 1500;
+        if self.lufs_blocks.len() > MAX_LUFS_BLOCKS {
+            let drain_count = self.lufs_blocks.len() - MAX_LUFS_BLOCKS;
+            self.lufs_blocks.drain(..drain_count);
+        }
+
         // Absolute gate: -70 LUFS
         let abs_gate = 10.0_f64.powf(-70.0 / 10.0);
-        let gated: Vec<f64> = self
-            .lufs_blocks
-            .iter()
-            .copied()
-            .filter(|&p| p > abs_gate)
-            .collect();
 
-        if gated.is_empty() {
+        // First pass: compute count and sum of blocks above absolute gate
+        let mut gated_count: usize = 0;
+        let mut gated_sum: f64 = 0.0;
+        for &p in &self.lufs_blocks {
+            if p > abs_gate {
+                gated_count += 1;
+                gated_sum += p;
+            }
+        }
+
+        if gated_count == 0 {
             self.lufs = -200.0;
             return;
         }
 
         // Relative gate: mean - 10 LUFS
-        let mean_power = gated.iter().sum::<f64>() / gated.len() as f64;
+        let mean_power = gated_sum / gated_count as f64;
         let rel_gate = mean_power * 10.0_f64.powf(-10.0 / 10.0);
 
-        let final_blocks: Vec<f64> = gated.into_iter().filter(|&p| p > rel_gate).collect();
+        // Second pass: compute count and sum of blocks above both gates
+        let mut final_count: usize = 0;
+        let mut final_sum: f64 = 0.0;
+        for &p in &self.lufs_blocks {
+            if p > abs_gate && p > rel_gate {
+                final_count += 1;
+                final_sum += p;
+            }
+        }
 
-        if final_blocks.is_empty() {
+        if final_count == 0 {
             self.lufs = -200.0;
             return;
         }
 
-        let integrated = final_blocks.iter().sum::<f64>() / final_blocks.len() as f64;
+        let integrated = final_sum / final_count as f64;
         self.lufs = (-0.691 + 10.0 * integrated.log10()) as f32;
     }
 

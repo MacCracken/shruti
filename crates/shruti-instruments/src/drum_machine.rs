@@ -133,6 +133,9 @@ pub struct DrumPad {
     envelope: f32,
     /// Currently active sample data pointer (index into layers, or usize::MAX for main samples).
     active_layer: usize,
+    /// Cached pan gains (recomputed when pan changes).
+    pan_gain_l: f32,
+    pan_gain_r: f32,
 }
 
 impl DrumPad {
@@ -156,7 +159,18 @@ impl DrumPad {
             velocity: 0.0,
             envelope: 0.0,
             active_layer: usize::MAX,
+            pan_gain_l: std::f32::consts::FRAC_PI_4.cos(),
+            pan_gain_r: std::f32::consts::FRAC_PI_4.sin(),
         }
+    }
+
+    /// Recompute cached pan gains from the current `pan` value.
+    /// Call this after changing `pan`.
+    pub fn update_pan_gains(&mut self) {
+        let pan_normalized = (self.pan + 1.0) * 0.5;
+        let angle = pan_normalized * std::f32::consts::FRAC_PI_2;
+        self.pan_gain_l = angle.cos();
+        self.pan_gain_r = angle.sin();
     }
 
     pub fn load_sample(&mut self, samples: Vec<f32>, sample_rate: u32) {
@@ -195,42 +209,51 @@ impl DrumPad {
     }
 
     /// Select a layer index matching the given velocity, or usize::MAX for main samples.
+    /// Uses iterator-based counting to avoid heap allocation in the audio thread.
     fn select_layer(&mut self, velocity: u8) -> usize {
         if self.layers.is_empty() {
             return usize::MAX;
         }
 
-        // Find all layers matching this velocity
-        let matching: Vec<usize> = self
-            .layers
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.matches(velocity))
-            .map(|(i, _)| i)
-            .collect();
+        // Count matching layers without allocating a Vec
+        let match_count = self.layers.iter().filter(|l| l.matches(velocity)).count();
 
-        if matching.is_empty() {
+        if match_count == 0 {
             return usize::MAX; // fall back to main samples
         }
 
-        if matching.len() == 1 {
-            return matching[0];
+        if match_count == 1 {
+            return self
+                .layers
+                .iter()
+                .enumerate()
+                .find(|(_, l)| l.matches(velocity))
+                .map(|(i, _)| i)
+                .unwrap();
         }
 
-        // Multiple matches — use selection mode
-        match self.layer_selection {
+        // Multiple matches -- select the nth matching layer without allocating
+        let selected_nth = match self.layer_selection {
             LayerSelection::RoundRobin => {
-                let idx = self.round_robin_idx % matching.len();
+                let idx = self.round_robin_idx % match_count;
                 self.round_robin_idx = self.round_robin_idx.wrapping_add(1);
-                matching[idx]
+                idx
             }
             LayerSelection::Random => {
-                // Simple pseudo-random using play_pos bits + round_robin counter
                 let pseudo = self.round_robin_idx.wrapping_mul(2654435761);
                 self.round_robin_idx = self.round_robin_idx.wrapping_add(1);
-                matching[pseudo % matching.len()]
+                pseudo % match_count
             }
-        }
+        };
+
+        // Find the nth matching layer by iterating (no allocation)
+        self.layers
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.matches(velocity))
+            .nth(selected_nth)
+            .map(|(i, _)| i)
+            .unwrap_or(usize::MAX)
     }
 
     pub fn stop(&mut self) {
@@ -312,14 +335,7 @@ impl DrumPad {
             }
         }
 
-        // Equal-power pan law
-        // pan: -1.0 = full left, 0.0 = center, 1.0 = full right
-        let pan_normalized = (self.pan + 1.0) * 0.5; // 0.0 to 1.0
-        let angle = pan_normalized * std::f32::consts::FRAC_PI_2;
-        let left_gain = angle.cos();
-        let right_gain = angle.sin();
-
-        let (l, r) = (out * left_gain, out * right_gain);
+        let (l, r) = (out * self.pan_gain_l, out * self.pan_gain_r);
 
         // Apply per-pad effects (filter + drive)
         self.effects.process(l, r)
@@ -394,6 +410,11 @@ impl DrumMachine {
 
         for event in note_events {
             self.note_on(event.note, event.velocity, event.channel);
+        }
+
+        // Update cached pan gains once per buffer (avoids sin/cos per sample)
+        for pad in &mut self.pads {
+            pad.update_pan_gains();
         }
 
         for frame in 0..frames {
@@ -554,6 +575,7 @@ mod tests {
         pad.load_sample(vec![1.0; 100], 44100);
         pad.decay = 0.0;
         pad.pan = -1.0; // full left
+        pad.update_pan_gains();
         pad.trigger(127);
 
         let (l, r) = pad.tick();
@@ -570,6 +592,7 @@ mod tests {
         pad.load_sample(vec![1.0; 100], 44100);
         pad.decay = 0.0;
         pad.pan = 1.0; // full right
+        pad.update_pan_gains();
         pad.trigger(127);
 
         let (l, r) = pad.tick();
@@ -586,6 +609,7 @@ mod tests {
         pad.load_sample(vec![1.0; 100], 44100);
         pad.decay = 0.0;
         pad.pan = 0.0;
+        pad.update_pan_gains();
         pad.trigger(127);
 
         let (l, r) = pad.tick();

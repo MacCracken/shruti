@@ -78,6 +78,18 @@ impl AgentApi {
     // --- Session Control ---
 
     pub fn create_session(&mut self, name: &str, sample_rate: u32, buffer_size: u32) -> ApiResult {
+        // Reject clearly invalid parameters that could cause division-by-zero
+        // or excessive allocations downstream.
+        if sample_rate < 1000 || sample_rate > 384_000 {
+            return ApiResult::err(format!(
+                "sample_rate {sample_rate} is outside the allowed range [1000, 384000]"
+            ));
+        }
+        if buffer_size < 16 || buffer_size > 8192 || !buffer_size.is_power_of_two() {
+            return ApiResult::err(format!(
+                "buffer_size {buffer_size} must be a power of two in [16, 8192]"
+            ));
+        }
         self.session = Some(Session::new(name, sample_rate, buffer_size));
         ApiResult::ok(format!("session '{name}' created"))
     }
@@ -93,7 +105,10 @@ impl AgentApi {
                 self.store = Some(store);
                 ApiResult::ok(format!("session opened from '{path}'"))
             }
-            Err(e) => ApiResult::err(format!("failed to open session: {e}")),
+            Err(e) => {
+                eprintln!("session open error: {e}");
+                ApiResult::err("failed to open session")
+            }
         }
     }
 
@@ -109,7 +124,10 @@ impl AgentApi {
 
         match SessionStore::create(p, session) {
             Ok(_) => ApiResult::ok(format!("session saved to '{path}'")),
-            Err(e) => ApiResult::err(format!("failed to save session: {e}")),
+            Err(e) => {
+                eprintln!("session save error: {e}");
+                ApiResult::err("failed to save session")
+            }
         }
     }
 
@@ -392,7 +410,10 @@ impl AgentApi {
         let format = AudioFormat::new(session.sample_rate, channels, 0);
         match write_wav_file(p, &output, &format) {
             Ok(()) => ApiResult::ok(format!("exported to '{path}'")),
-            Err(e) => ApiResult::err(format!("export failed: {e}")),
+            Err(e) => {
+                eprintln!("export error: {e}");
+                ApiResult::err("export failed")
+            }
         }
     }
 
@@ -455,7 +476,10 @@ impl AgentApi {
 
         match write_audio_file(p, &output, &config) {
             Ok(()) => ApiResult::ok(format!("exported to '{path}' ({format}, {bit_depth}-bit)")),
-            Err(e) => ApiResult::err(format!("export failed: {e}")),
+            Err(e) => {
+                eprintln!("export error: {e}");
+                ApiResult::err("export failed")
+            }
         }
     }
 
@@ -1452,5 +1476,68 @@ mod tests {
     fn test_agent_api_default() {
         let api = AgentApi::default();
         assert!(api.session.is_none());
+    }
+
+    // --- Security: create_session input validation ---
+
+    #[test]
+    fn test_create_session_rejects_zero_sample_rate() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 0, 256);
+        assert!(!r.success);
+        assert!(r.message.contains("sample_rate"));
+    }
+
+    #[test]
+    fn test_create_session_rejects_extreme_sample_rate() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 1_000_000, 256);
+        assert!(!r.success);
+        assert!(r.message.contains("sample_rate"));
+    }
+
+    #[test]
+    fn test_create_session_rejects_zero_buffer_size() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 48000, 0);
+        assert!(!r.success);
+        assert!(r.message.contains("buffer_size"));
+    }
+
+    #[test]
+    fn test_create_session_rejects_non_power_of_two_buffer() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 48000, 300);
+        assert!(!r.success);
+        assert!(r.message.contains("buffer_size"));
+    }
+
+    #[test]
+    fn test_create_session_rejects_huge_buffer_size() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 48000, 16384);
+        assert!(!r.success);
+        assert!(r.message.contains("buffer_size"));
+    }
+
+    // --- Security: error message sanitization ---
+
+    #[test]
+    fn test_open_session_error_does_not_leak_details() {
+        let mut api = AgentApi::new();
+        let r = api.open_session("/nonexistent/path/session.shruti");
+        assert!(!r.success);
+        // Should NOT contain the underlying OS error message
+        assert!(!r.message.contains("No such file"));
+        assert_eq!(r.message, "failed to open session");
+    }
+
+    #[test]
+    fn test_save_session_error_does_not_leak_details() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        let r = api.save_session("/proc/nonexistent/deep/path/session.shruti");
+        assert!(!r.success);
+        assert_eq!(r.message, "failed to save session");
     }
 }

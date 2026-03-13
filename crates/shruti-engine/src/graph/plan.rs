@@ -72,12 +72,16 @@ pub struct ExecutionPlan {
 /// processes with a local reference.
 pub struct GraphProcessor {
     plan: Arc<Mutex<Option<ExecutionPlan>>>,
+    /// Pre-allocated node output buffers, reused across process() calls.
+    /// Avoids HashMap + AudioBuffer heap allocation on every audio callback.
+    node_outputs: HashMap<NodeId, AudioBuffer>,
 }
 
 impl GraphProcessor {
     pub fn new() -> Self {
         Self {
             plan: Arc::new(Mutex::new(None)),
+            node_outputs: HashMap::new(),
         }
     }
 
@@ -112,20 +116,36 @@ impl GraphProcessor {
             }
         };
 
-        // Pre-allocate output buffers for each node
-        let mut node_outputs: HashMap<NodeId, AudioBuffer> = HashMap::new();
-
+        // Reuse pre-allocated node output buffers (avoid HashMap + AudioBuffer
+        // allocation on the RT thread). Only clear values, keep capacity.
+        for buf in self.node_outputs.values_mut() {
+            buf.clear();
+        }
         for &node_id in &plan.order {
-            let mut node_buf = AudioBuffer::new(channels, buffer_frames);
+            self.node_outputs
+                .entry(node_id)
+                .or_insert_with(|| AudioBuffer::new(channels, buffer_frames));
+            let entry = self.node_outputs.get_mut(&node_id).unwrap();
+            if entry.channels() != channels || entry.frames() != buffer_frames {
+                *entry = AudioBuffer::new(channels, buffer_frames);
+            }
+        }
 
-            // Gather inputs
+        for idx in 0..plan.order.len() {
+            let node_id = plan.order[idx];
+
+            // Temporarily remove this node's buffer to get a mutable ref
+            // while holding immutable refs to other buffers.
+            let mut node_buf = self.node_outputs.remove(&node_id).unwrap();
+
+            // Gather input references from already-processed nodes
             let inputs: Vec<&AudioBuffer> = plan
                 .input_map
                 .get(&node_id)
                 .map(|sources| {
                     sources
                         .iter()
-                        .filter_map(|src_id| node_outputs.get(src_id))
+                        .filter_map(|src_id| self.node_outputs.get(src_id))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -134,12 +154,13 @@ impl GraphProcessor {
                 node.process(&inputs, &mut node_buf);
             }
 
-            node_outputs.insert(node_id, node_buf);
+            // Put the buffer back
+            self.node_outputs.insert(node_id, node_buf);
         }
 
         // The last node in the plan is the output — copy to device buffer
         if let Some(last_id) = plan.order.last() {
-            if let Some(last_buf) = node_outputs.get(last_id) {
+            if let Some(last_buf) = self.node_outputs.get(last_id) {
                 let src = last_buf.as_interleaved();
                 let len = output.len().min(src.len());
                 output[..len].copy_from_slice(&src[..len]);

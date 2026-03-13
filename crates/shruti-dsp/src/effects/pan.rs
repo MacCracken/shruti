@@ -27,13 +27,10 @@ impl StereoPanner {
     /// At hard right (1.0): L = 0.0, R = 1.0.
     pub fn gains(&self) -> (f32, f32) {
         let p = self.pan.clamp(-1.0, 1.0);
-        // Map pan [-1, 1] to angle [0, PI/2]
-        let angle = (p + 1.0) * 0.25 * std::f32::consts::PI;
-        // At center: cos(PI/4) = sin(PI/4) ≈ 0.707, but we want unity at center.
-        // Use linear crossfade for balance: left fades down as pan goes right.
+        // Linear crossfade for balance: left fades down as pan goes right.
+        // Future: equal-power option using angle = (p + 1.0) * 0.25 * PI
         let gain_l = if p <= 0.0 { 1.0 } else { 1.0 - p };
         let gain_r = if p >= 0.0 { 1.0 } else { 1.0 + p };
-        let _ = angle; // Reserved for future equal-power option
         (gain_l, gain_r)
     }
 

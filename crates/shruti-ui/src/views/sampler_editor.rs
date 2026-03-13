@@ -518,8 +518,8 @@ mod tests {
         let zone = 0;
         let vel_low = params[zone_param_index(zone, ZONE_VEL_LOW)];
         let vel_high = params[zone_param_index(zone, ZONE_VEL_HIGH)];
-        assert!(vel_low >= 0.0 && vel_low <= 127.0);
-        assert!(vel_high >= 0.0 && vel_high <= 127.0);
+        assert!((0.0..=127.0).contains(&vel_low));
+        assert!((0.0..=127.0).contains(&vel_high));
     }
 
     #[test]

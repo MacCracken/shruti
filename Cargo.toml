@@ -51,6 +51,12 @@ clap = { workspace = true }
 rtrb = { workspace = true }
 tokio = { workspace = true }
 
+[dev-dependencies]
+shruti-instruments = { path = "crates/shruti-instruments" }
+serde_json = { workspace = true }
+tempfile = "3"
+uuid = { workspace = true }
+
 [[bin]]
 name = "shruti"
 path = "src/main.rs"
@@ -58,4 +64,5 @@ path = "src/main.rs"
 [[bin]]
 name = "shruti-play"
 path = "src/bin/play.rs"
+
 

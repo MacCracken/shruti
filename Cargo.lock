@@ -3120,12 +3120,16 @@ version = "2026.3.11"
 dependencies = [
  "clap",
  "rtrb",
+ "serde_json",
  "shruti-ai",
  "shruti-dsp",
  "shruti-engine",
+ "shruti-instruments",
  "shruti-session",
  "shruti-ui",
+ "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

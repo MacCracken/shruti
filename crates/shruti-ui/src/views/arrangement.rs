@@ -55,7 +55,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
             if matches!(ext, "wav" | "flac" | "aif" | "aiff")
                 && !state.file_entries.contains(&path_str)
             {
-                let _ = state.session.audio_pool.load(path);
+                if let Err(e) = state.session.audio_pool.load(path) {
+                    eprintln!("Failed to load audio file: {e}");
+                }
                 state.file_entries.push(path_str);
             }
         }
@@ -291,17 +293,16 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                                     .get(&region.audio_file_id)
                                     .is_some()
                                 {
-                                    if !state.waveform_cache.contains_key(&region.id) {
-                                        if let Some(source) =
+                                    if !state.waveform_cache.contains_key(&region.id)
+                                        && let Some(source) =
                                             state.session.audio_pool.get(&region.audio_file_id)
-                                        {
-                                            let peaks = waveform::WaveformPeaks::from_samples(
-                                                source.as_interleaved(),
-                                                0,
-                                                source.channels() as usize,
-                                            );
-                                            state.waveform_cache.insert(region.id, peaks);
-                                        }
+                                    {
+                                        let peaks = waveform::WaveformPeaks::from_samples(
+                                            source.as_interleaved(),
+                                            0,
+                                            source.channels() as usize,
+                                        );
+                                        state.waveform_cache.insert(region.id, peaks);
                                     }
                                     if let Some(peaks) = state.waveform_cache.get(&region.id) {
                                         let samples_per_pixel = (1.0 / pixels_per_frame) as f32;
@@ -738,30 +739,27 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
         track_index,
         ..
     }) = &state.drag
+        && *track_index < state.session.tracks.len()
+        && let Some(region) = state.session.tracks[*track_index].region(*region_id)
     {
-        if *track_index < state.session.tracks.len()
-            && let Some(region) = state.session.tracks[*track_index].region(*region_id)
-        {
-            let lane_left = available.left() + TRACK_HEADER_WIDTH;
-            let ghost_x =
-                lane_left + (region.timeline_pos as f64 * pixels_per_frame - scroll_x) as f32;
-            let ghost_w = (region.duration as f64 * pixels_per_frame) as f32;
-            let ghost_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
-            let ghost_rect =
-                Rect::from_min_size(pos2(ghost_x, ghost_y), vec2(ghost_w, TRACK_HEIGHT - 4.0));
-            let painter = ui.painter();
-            painter.rect_filled(
-                ghost_rect,
-                egui::CornerRadius::same(3),
-                Color32::from_rgba_premultiplied(100, 160, 255, 50),
-            );
-            painter.rect_stroke(
-                ghost_rect,
-                egui::CornerRadius::same(3),
-                Stroke::new(1.0, Color32::from_rgba_premultiplied(100, 160, 255, 120)),
-                egui::StrokeKind::Outside,
-            );
-        }
+        let lane_left = available.left() + TRACK_HEADER_WIDTH;
+        let ghost_x = lane_left + (region.timeline_pos as f64 * pixels_per_frame - scroll_x) as f32;
+        let ghost_w = (region.duration as f64 * pixels_per_frame) as f32;
+        let ghost_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
+        let ghost_rect =
+            Rect::from_min_size(pos2(ghost_x, ghost_y), vec2(ghost_w, TRACK_HEIGHT - 4.0));
+        let painter = ui.painter();
+        painter.rect_filled(
+            ghost_rect,
+            egui::CornerRadius::same(3),
+            Color32::from_rgba_premultiplied(100, 160, 255, 50),
+        );
+        painter.rect_stroke(
+            ghost_rect,
+            egui::CornerRadius::same(3),
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(100, 160, 255, 120)),
+            egui::StrokeKind::Outside,
+        );
     }
 
     // Show drop zone overlay when dragging files

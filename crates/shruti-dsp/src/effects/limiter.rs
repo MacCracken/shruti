@@ -213,8 +213,8 @@ mod tests {
         limiter.process(&mut buf);
 
         // Output should be very close to input
-        for i in 10..frames {
-            let diff = (buf.get(i as u32, 0) - original[i]).abs();
+        for (i, orig) in original.iter().enumerate().take(frames).skip(10) {
+            let diff = (buf.get(i as u32, 0) - orig).abs();
             assert!(
                 diff < 0.05,
                 "Below ceiling, frame {i} should be ~unchanged, diff={diff}"

@@ -44,11 +44,13 @@ impl AudioBuffer {
     }
 
     /// Get a single sample at (frame, channel).
+    #[inline]
     pub fn get(&self, frame: u32, channel: u16) -> Sample {
         self.data[frame as usize * self.channels as usize + channel as usize]
     }
 
     /// Set a single sample at (frame, channel).
+    #[inline]
     pub fn set(&mut self, frame: u32, channel: u16, value: Sample) {
         self.data[frame as usize * self.channels as usize + channel as usize] = value;
     }

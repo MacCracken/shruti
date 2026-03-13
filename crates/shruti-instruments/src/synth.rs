@@ -266,6 +266,7 @@ impl SubtractiveSynth {
     }
 
     /// Apply LFO modulation to a target value. Returns (cutoff_mod, pitch_mod, volume_mod).
+    #[inline]
     fn apply_lfo(lfo_val: f32, target: u8) -> (f32, f32, f32) {
         match target {
             1 => (lfo_val, 0.0, 0.0), // cutoff
@@ -352,6 +353,10 @@ impl SubtractiveSynth {
             lfo2_values[i] = self.lfo2.tick();
         }
 
+        // Pre-compute detune ratios (avoids pow() in per-sample loop)
+        let osc2_detune_ratio = Oscillator::fast_exp2_f64(osc2_detune / 1200.0);
+        let osc3_detune_ratio = Oscillator::fast_exp2_f64(osc3_detune / 1200.0);
+
         // Compute osc level normalization: divide by number of active oscillators
         let active_osc_count =
             1.0f32 + if osc2_enabled { 1.0 } else { 0.0 } + if osc3_enabled { 1.0 } else { 0.0 };
@@ -416,8 +421,8 @@ impl SubtractiveSynth {
                         phase2 = 0.0;
                     }
 
-                    // Apply osc2 detune to base frequency
-                    let osc2_base_freq = effective_freq * 2.0f64.powf(osc2_detune / 1200.0);
+                    // Apply osc2 detune to base frequency (pre-computed ratio)
+                    let osc2_base_freq = effective_freq * osc2_detune_ratio;
 
                     // FM: osc1 modulates osc2 frequency
                     let fm_mod = if fm_amount > 0.0001 {
@@ -444,8 +449,8 @@ impl SubtractiveSynth {
                 }
 
                 if osc3_enabled {
-                    // Apply osc3 detune to base frequency
-                    let osc3_freq = effective_freq * 2.0f64.powf(osc3_detune / 1200.0);
+                    // Apply osc3 detune to base frequency (pre-computed ratio)
+                    let osc3_freq = effective_freq * osc3_detune_ratio;
                     let osc3_sample = self.oscillators3[i].sample(phase3, osc3_freq);
                     phase3 = Oscillator::advance_phase(phase3, osc3_freq, sample_rate);
                     mix += osc3_sample * osc3_level * osc_norm;

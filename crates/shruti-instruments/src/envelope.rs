@@ -78,6 +78,7 @@ impl Envelope {
     }
 
     /// Process one sample. Returns the current envelope level.
+    #[inline]
     pub fn tick(&mut self) -> f32 {
         match self.state {
             EnvelopeState::Idle => {

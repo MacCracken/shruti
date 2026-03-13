@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.13 | **Last Updated**: 2026-03-13
-> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog — MVP v1 + instruments + full AGNOS integration + audit fixes
-> **Tests**: 1292 passing (184 dsp, 75 engine, 358 instruments, 260 session, 34 plugin, 123 ai, 251 ui + 7 shruti), 0 clippy warnings, 0 audit vulnerabilities
+> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog + code audit R8 — MVP v1 + instruments + full AGNOS integration + audit fixes
+> **Tests**: 1327 passing (184 dsp, 75 engine, 359 instruments, 260 session, 34 plugin, 134 ai, 251 ui + 7 shruti + 23 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 

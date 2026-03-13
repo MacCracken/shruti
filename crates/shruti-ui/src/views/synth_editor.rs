@@ -421,12 +421,12 @@ mod tests {
         ensure_param_count(&mut params);
         assert_eq!(params.len(), MIN_PARAM_COUNT);
         // Original values preserved
-        for i in 0..5 {
-            assert!((params[i] - 0.5).abs() < f32::EPSILON);
+        for param in params.iter().take(5) {
+            assert!((param - 0.5).abs() < f32::EPSILON);
         }
         // Padded values are 0.0
-        for i in 5..MIN_PARAM_COUNT {
-            assert!((params[i] - 0.0).abs() < f32::EPSILON);
+        for param in params.iter().take(MIN_PARAM_COUNT).skip(5) {
+            assert!((param - 0.0).abs() < f32::EPSILON);
         }
     }
 
