@@ -80,12 +80,12 @@ impl AgentApi {
     pub fn create_session(&mut self, name: &str, sample_rate: u32, buffer_size: u32) -> ApiResult {
         // Reject clearly invalid parameters that could cause division-by-zero
         // or excessive allocations downstream.
-        if sample_rate < 1000 || sample_rate > 384_000 {
+        if !(1000..=384_000).contains(&sample_rate) {
             return ApiResult::err(format!(
                 "sample_rate {sample_rate} is outside the allowed range [1000, 384000]"
             ));
         }
-        if buffer_size < 16 || buffer_size > 8192 || !buffer_size.is_power_of_two() {
+        if !(16..=8192).contains(&buffer_size) || !buffer_size.is_power_of_two() {
             return ApiResult::err(format!(
                 "buffer_size {buffer_size} must be a power of two in [16, 8192]"
             ));

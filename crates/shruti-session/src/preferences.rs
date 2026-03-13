@@ -451,8 +451,10 @@ mod tests {
         prefs.save(&path).unwrap();
 
         // Second save (overwrite)
-        let mut prefs2 = Preferences::default();
-        prefs2.sample_rate = 96000;
+        let prefs2 = Preferences {
+            sample_rate: 96000,
+            ..Preferences::default()
+        };
         prefs2.save(&path).unwrap();
 
         let meta = std::fs::metadata(&path).unwrap();
@@ -466,13 +468,15 @@ mod tests {
 
     #[test]
     fn preferences_recording_config_roundtrip() {
-        let mut prefs = Preferences::default();
-        prefs.recording = RecordingConfig {
-            sample_rate: 192000,
-            channels: 8,
-            max_duration_secs: 600,
-            buffer_size: 1024,
-            input_device: Some("USB Audio".into()),
+        let prefs = Preferences {
+            recording: RecordingConfig {
+                sample_rate: 192000,
+                channels: 8,
+                max_duration_secs: 600,
+                buffer_size: 1024,
+                input_device: Some("USB Audio".into()),
+            },
+            ..Preferences::default()
         };
 
         let tmp = std::env::temp_dir().join("shruti_test_rec_prefs.json");

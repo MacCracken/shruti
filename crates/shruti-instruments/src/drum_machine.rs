@@ -791,8 +791,10 @@ mod tests {
 
     #[test]
     fn pad_effects_filter_attenuates() {
-        let mut effects = PadEffects::default();
-        effects.filter_cutoff = 0.05; // very low cutoff
+        let mut effects = PadEffects {
+            filter_cutoff: 0.05, // very low cutoff
+            ..PadEffects::default()
+        };
 
         // Feed an alternating signal (high frequency content) — filter should smooth it
         let mut sum_filtered = 0.0_f32;
@@ -812,8 +814,10 @@ mod tests {
 
     #[test]
     fn pad_effects_drive_saturates() {
-        let mut effects = PadEffects::default();
-        effects.drive = 5.0;
+        let mut effects = PadEffects {
+            drive: 5.0,
+            ..PadEffects::default()
+        };
 
         let (l, _) = effects.process(0.8, 0.0);
         // tanh(0.8 * 5.0) = tanh(4.0) ≈ 0.9993
@@ -856,8 +860,10 @@ mod tests {
 
     #[test]
     fn pad_effects_reset_clears_filter_state() {
-        let mut effects = PadEffects::default();
-        effects.filter_cutoff = 0.5;
+        let mut effects = PadEffects {
+            filter_cutoff: 0.5,
+            ..PadEffects::default()
+        };
         effects.process(1.0, 1.0);
         assert!(effects.filter_state[0] != 0.0);
 
@@ -1015,7 +1021,7 @@ mod tests {
             "one-shot should stop after exhausting samples"
         );
         assert!(
-            non_silent_count >= 28 && non_silent_count <= 32,
+            (28..=32).contains(&non_silent_count),
             "expected ~30 non-silent frames, got {non_silent_count}"
         );
     }
@@ -1149,7 +1155,7 @@ mod tests {
             }
         }
         assert!(
-            ticks >= 195 && ticks <= 205,
+            (195..=205).contains(&ticks),
             "pitch=0.5 should ~double playback time, got {ticks} ticks for {sample_len} samples"
         );
     }

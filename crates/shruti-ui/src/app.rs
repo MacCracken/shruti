@@ -334,16 +334,14 @@ impl ShrutiApp {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Shruti Session", &["shruti"])
                     .save_file()
-                {
-                    if let Ok(store) =
+                    && let Ok(store) =
                         shruti_session::store::SessionStore::create(&path, &self.state.session)
-                    {
-                        // Persist audio pool files alongside the session
-                        let _ = store.save_audio_pool(
-                            &self.state.session.audio_pool,
-                            self.state.session.sample_rate,
-                        );
-                    }
+                {
+                    // Persist audio pool files alongside the session
+                    let _ = store.save_audio_pool(
+                        &self.state.session.audio_pool,
+                        self.state.session.sample_rate,
+                    );
                 }
             }
             Action::OpenSession => {
@@ -494,17 +492,17 @@ impl eframe::App for ShrutiApp {
         self.poll_background_tasks();
 
         // Auto-save check
-        if self.state.should_autosave() {
-            if let Some(path) = self.state.session_path.clone() {
-                let backup = crate::state::backup_path_for(&path);
-                if let Ok(store) =
-                    shruti_session::store::SessionStore::create(&backup, &self.state.session)
-                {
-                    let _ = store.save_audio_pool(
-                        &self.state.session.audio_pool,
-                        self.state.session.sample_rate,
-                    );
-                }
+        if self.state.should_autosave()
+            && let Some(path) = self.state.session_path.clone()
+        {
+            let backup = crate::state::backup_path_for(&path);
+            if let Ok(store) =
+                shruti_session::store::SessionStore::create(&backup, &self.state.session)
+            {
+                let _ = store.save_audio_pool(
+                    &self.state.session.audio_pool,
+                    self.state.session.sample_rate,
+                );
             }
         }
 
@@ -535,16 +533,16 @@ impl eframe::App for ShrutiApp {
                         if ui.button("Save").clicked() {
                             self.state.show_save_prompt = false;
                             // Save then execute pending action
-                            if let Some(path) = self.state.session_path.clone() {
-                                if let Ok(store) = shruti_session::store::SessionStore::create(
+                            if let Some(path) = self.state.session_path.clone()
+                                && let Ok(store) = shruti_session::store::SessionStore::create(
                                     &path,
                                     &self.state.session,
-                                ) {
-                                    let _ = store.save_audio_pool(
-                                        &self.state.session.audio_pool,
-                                        self.state.session.sample_rate,
-                                    );
-                                }
+                                )
+                            {
+                                let _ = store.save_audio_pool(
+                                    &self.state.session.audio_pool,
+                                    self.state.session.sample_rate,
+                                );
                             }
                             self.execute_deferred_action();
                         }

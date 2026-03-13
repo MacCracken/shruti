@@ -48,7 +48,7 @@ impl ScanCache {
         std::fs::read_to_string(path)
             .ok()
             .and_then(|data| serde_json::from_str(&data).ok())
-            .unwrap_or_else(Self::new)
+            .unwrap_or_default()
     }
 
     /// Save cache to a JSON file.
@@ -63,16 +63,15 @@ impl ScanCache {
 
     /// Check if a directory's cached results are still valid (modification time unchanged).
     pub fn is_valid(&self, dir: &Path) -> bool {
-        if let Some(entry) = self.entries.get(dir) {
-            if let Ok(meta) = std::fs::metadata(dir) {
-                if let Ok(mtime) = meta.modified() {
-                    let secs = mtime
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    return secs == entry.mtime_secs;
-                }
-            }
+        if let Some(entry) = self.entries.get(dir)
+            && let Ok(meta) = std::fs::metadata(dir)
+            && let Ok(mtime) = meta.modified()
+        {
+            let secs = mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            return secs == entry.mtime_secs;
         }
         false
     }
@@ -179,17 +178,17 @@ impl PluginScanner {
             }
 
             // Check cache first
-            if let Some(cache) = &self.cache {
-                if let Some(cached) = cache.get(dir) {
-                    // Filter cached results for this format
-                    let format_results: Vec<ScannedPlugin> = cached
-                        .iter()
-                        .filter(|p| p.format == format)
-                        .cloned()
-                        .collect();
-                    results.extend(format_results);
-                    continue;
-                }
+            if let Some(cache) = &self.cache
+                && let Some(cached) = cache.get(dir)
+            {
+                // Filter cached results for this format
+                let format_results: Vec<ScannedPlugin> = cached
+                    .iter()
+                    .filter(|p| p.format == format)
+                    .cloned()
+                    .collect();
+                results.extend(format_results);
+                continue;
             }
 
             let mut dir_results = Vec::new();
@@ -351,8 +350,8 @@ mod tests {
     #[test]
     fn test_max_symlink_depth_is_reasonable() {
         // Verify the constant is in a reasonable range
-        assert!(MAX_SYMLINK_DEPTH >= 3);
-        assert!(MAX_SYMLINK_DEPTH <= 10);
+        const { assert!(MAX_SYMLINK_DEPTH >= 3) };
+        const { assert!(MAX_SYMLINK_DEPTH <= 10) };
     }
 
     // --- Scan cache tests ---

@@ -311,9 +311,6 @@ pub struct EffectChain {
     effects: Vec<InstrumentEffect>,
     /// Scratch buffer for isolating instrument output before applying effects.
     scratch: AudioBuffer,
-    /// Pre-allocated dry signal buffer for effects needing dry/wet mixing.
-    /// Avoids heap allocation per effect process call.
-    dry_scratch: AudioBuffer,
 }
 
 impl EffectChain {
@@ -321,7 +318,6 @@ impl EffectChain {
         Self {
             effects: Vec::new(),
             scratch: AudioBuffer::new(2, 256),
-            dry_scratch: AudioBuffer::new(2, 256),
         }
     }
 

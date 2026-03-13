@@ -134,8 +134,10 @@ mod tests {
 
     #[test]
     fn validate_empty_name_fails() {
-        let mut theme = Theme::default();
-        theme.name = "".into();
+        let theme = Theme {
+            name: "".into(),
+            ..Theme::default()
+        };
         let result = theme.validate();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("name must not be empty"));
@@ -143,8 +145,10 @@ mod tests {
 
     #[test]
     fn validate_whitespace_only_name_fails() {
-        let mut theme = Theme::default();
-        theme.name = "   ".into();
+        let theme = Theme {
+            name: "   ".into(),
+            ..Theme::default()
+        };
         let result = theme.validate();
         assert!(result.is_err());
     }

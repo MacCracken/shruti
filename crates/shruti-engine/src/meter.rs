@@ -260,8 +260,8 @@ mod tests {
         // Reader in main thread — should never panic or get garbage
         for _ in 0..1000 {
             let [l, r] = reader.load(0);
-            assert!(l >= 0.0 && l <= 1.0);
-            assert!(r >= 0.0 && r <= 1.0);
+            assert!((0.0..=1.0).contains(&l));
+            assert!((0.0..=1.0).contains(&r));
         }
 
         handle.join().unwrap();

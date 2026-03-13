@@ -1389,7 +1389,7 @@ mod tests {
             synth.process(&[], &[], &mut buf);
 
             let mut crossings = 0;
-            for i in 1..frames as u32 {
+            for i in 1..frames {
                 if buf.get(i - 1, 0) * buf.get(i, 0) < 0.0 {
                     crossings += 1;
                 }

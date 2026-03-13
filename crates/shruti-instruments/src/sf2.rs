@@ -668,6 +668,7 @@ mod test_helpers {
     }
 
     /// shdr record (46 bytes).
+    #[allow(clippy::too_many_arguments)]
     pub fn make_shdr(
         name: &str,
         start: u32,
@@ -704,6 +705,7 @@ mod test_helpers {
     }
 
     /// Build a minimal valid SF2 with one preset, one instrument, one sample.
+    #[allow(clippy::too_many_arguments)]
     pub fn build_minimal_sf2(
         preset_name: &str,
         inst_name: &str,

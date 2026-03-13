@@ -104,6 +104,7 @@ impl Compressor {
     }
 }
 
+#[cfg(test)]
 fn linear_to_db(linear: f32) -> f32 {
     if linear < 1e-10 {
         -200.0
