@@ -24,7 +24,7 @@ impl Default for TrackId {
 }
 
 /// The kind of track.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TrackKind {
     /// Audio track with regions on the timeline.
     Audio,
@@ -41,17 +41,110 @@ pub enum TrackKind {
         #[serde(default)]
         instrument_type: Option<String>,
     },
+    /// Drum machine track with pad-based sequencing.
+    DrumMachine {
+        /// Kit name loaded on this track.
+        #[serde(default)]
+        kit_name: Option<String>,
+        /// Number of pads (default 16).
+        #[serde(default = "default_pad_count")]
+        pad_count: u8,
+    },
+    /// Sampler track — hosts a sampler instrument with zones/multisamples.
+    Sampler {
+        /// Preset/multisample name loaded on this track.
+        #[serde(default)]
+        preset_name: Option<String>,
+        /// Number of zones configured.
+        #[serde(default)]
+        zone_count: usize,
+    },
+    /// AI player track — generates or accompanies using an AI model.
+    AiPlayer {
+        /// Model name/ID for the AI player.
+        #[serde(default)]
+        model_name: Option<String>,
+        /// Style preset (e.g. "jazz_piano", "fingerstyle_guitar").
+        #[serde(default)]
+        style: Option<String>,
+        /// Creativity level 0.0 (conservative) to 1.0 (experimental).
+        #[serde(default = "default_creativity")]
+        creativity: f32,
+    },
+}
+
+/// Default creativity level for AI player tracks.
+fn default_creativity() -> f32 {
+    0.5
+}
+
+impl PartialEq for TrackKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (TrackKind::Audio, TrackKind::Audio)
+            | (TrackKind::Bus, TrackKind::Bus)
+            | (TrackKind::Midi, TrackKind::Midi)
+            | (TrackKind::Master, TrackKind::Master) => true,
+            (
+                TrackKind::Instrument { instrument_type: a },
+                TrackKind::Instrument { instrument_type: b },
+            ) => a == b,
+            (
+                TrackKind::DrumMachine {
+                    kit_name: a_kit,
+                    pad_count: a_pads,
+                },
+                TrackKind::DrumMachine {
+                    kit_name: b_kit,
+                    pad_count: b_pads,
+                },
+            ) => a_kit == b_kit && a_pads == b_pads,
+            (
+                TrackKind::Sampler {
+                    preset_name: a_preset,
+                    zone_count: a_zones,
+                },
+                TrackKind::Sampler {
+                    preset_name: b_preset,
+                    zone_count: b_zones,
+                },
+            ) => a_preset == b_preset && a_zones == b_zones,
+            (
+                TrackKind::AiPlayer {
+                    model_name: a_model,
+                    style: a_style,
+                    creativity: a_cr,
+                },
+                TrackKind::AiPlayer {
+                    model_name: b_model,
+                    style: b_style,
+                    creativity: b_cr,
+                },
+            ) => a_model == b_model && a_style == b_style && a_cr.to_bits() == b_cr.to_bits(),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for TrackKind {}
+
+/// Default pad count for drum machine tracks.
+fn default_pad_count() -> u8 {
+    16
 }
 
 impl TrackKind {
     /// Unicode icon character for this track kind.
     pub fn icon(&self) -> &'static str {
         match self {
-            TrackKind::Audio => "\u{1F3B5}",             // musical note
-            TrackKind::Bus => "\u{1F500}",               // shuffle (routing)
-            TrackKind::Midi => "\u{1F3B9}",              // musical keyboard
-            TrackKind::Master => "\u{1F50A}",            // speaker high volume
-            TrackKind::Instrument { .. } => "\u{1F3B8}", // guitar (instrument)
+            TrackKind::Audio => "\u{1F3B5}",              // musical note
+            TrackKind::Bus => "\u{1F500}",                // shuffle (routing)
+            TrackKind::Midi => "\u{1F3B9}",               // musical keyboard
+            TrackKind::Master => "\u{1F50A}",             // speaker high volume
+            TrackKind::Instrument { .. } => "\u{1F3B8}",  // guitar (instrument)
+            TrackKind::DrumMachine { .. } => "\u{1F941}", // drum
+            TrackKind::Sampler { .. } => "\u{1F4BF}",     // optical disc (sample)
+            TrackKind::AiPlayer { .. } => "\u{1F916}",    // robot
         }
     }
 
@@ -63,6 +156,9 @@ impl TrackKind {
             TrackKind::Midi => [52, 168, 83],               // green
             TrackKind::Master => [234, 67, 53],             // red
             TrackKind::Instrument { .. } => [171, 71, 188], // purple
+            TrackKind::DrumMachine { .. } => [255, 152, 0], // orange
+            TrackKind::Sampler { .. } => [0, 150, 136],     // teal
+            TrackKind::AiPlayer { .. } => [103, 58, 183],   // deep purple
         }
     }
 
@@ -74,6 +170,9 @@ impl TrackKind {
             TrackKind::Midi => "MIDI",
             TrackKind::Master => "Master",
             TrackKind::Instrument { .. } => "Instrument",
+            TrackKind::DrumMachine { .. } => "Drum Machine",
+            TrackKind::Sampler { .. } => "Sampler",
+            TrackKind::AiPlayer { .. } => "AI Player",
         }
     }
 }
@@ -276,6 +375,83 @@ impl Track {
             id: TrackId::new(),
             name: name.into(),
             kind: TrackKind::Instrument { instrument_type },
+            regions: Vec::new(),
+            gain: 1.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            armed: false,
+            channels: 2,
+            sends: Vec::new(),
+            automation: Vec::new(),
+            midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
+            color: None,
+            routing: OutputRouting::default(),
+        }
+    }
+
+    pub fn new_drum_machine(name: impl Into<String>, kit_name: Option<String>) -> Self {
+        Self {
+            id: TrackId::new(),
+            name: name.into(),
+            kind: TrackKind::DrumMachine {
+                kit_name,
+                pad_count: default_pad_count(),
+            },
+            regions: Vec::new(),
+            gain: 1.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            armed: false,
+            channels: 2,
+            sends: Vec::new(),
+            automation: Vec::new(),
+            midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
+            color: None,
+            routing: OutputRouting::default(),
+        }
+    }
+
+    pub fn new_sampler(name: impl Into<String>, preset_name: Option<String>) -> Self {
+        Self {
+            id: TrackId::new(),
+            name: name.into(),
+            kind: TrackKind::Sampler {
+                preset_name,
+                zone_count: 0,
+            },
+            regions: Vec::new(),
+            gain: 1.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            armed: false,
+            channels: 2,
+            sends: Vec::new(),
+            automation: Vec::new(),
+            midi_clips: Vec::new(),
+            instrument_params: Vec::new(),
+            color: None,
+            routing: OutputRouting::default(),
+        }
+    }
+
+    pub fn new_ai_player(
+        name: impl Into<String>,
+        model_name: Option<String>,
+        style: Option<String>,
+    ) -> Self {
+        Self {
+            id: TrackId::new(),
+            name: name.into(),
+            kind: TrackKind::AiPlayer {
+                model_name,
+                style,
+                creativity: default_creativity(),
+            },
             regions: Vec::new(),
             gain: 1.0,
             pan: 0.0,
@@ -574,6 +750,19 @@ mod tests {
             TrackKind::Instrument {
                 instrument_type: None,
             },
+            TrackKind::DrumMachine {
+                kit_name: None,
+                pad_count: 16,
+            },
+            TrackKind::Sampler {
+                preset_name: None,
+                zone_count: 0,
+            },
+            TrackKind::AiPlayer {
+                model_name: None,
+                style: None,
+                creativity: 0.5,
+            },
         ];
         let icons: Vec<&str> = kinds.iter().map(|k| k.icon()).collect();
         // All icons should be unique
@@ -595,6 +784,19 @@ mod tests {
             TrackKind::Master,
             TrackKind::Instrument {
                 instrument_type: None,
+            },
+            TrackKind::DrumMachine {
+                kit_name: None,
+                pad_count: 16,
+            },
+            TrackKind::Sampler {
+                preset_name: None,
+                zone_count: 0,
+            },
+            TrackKind::AiPlayer {
+                model_name: None,
+                style: None,
+                creativity: 0.5,
             },
         ];
         let colors: Vec<[u8; 3]> = kinds.iter().map(|k| k.default_color()).collect();
@@ -620,6 +822,138 @@ mod tests {
             .label(),
             "Instrument"
         );
+        assert_eq!(
+            TrackKind::Sampler {
+                preset_name: None,
+                zone_count: 0
+            }
+            .label(),
+            "Sampler"
+        );
+        assert_eq!(
+            TrackKind::DrumMachine {
+                kit_name: None,
+                pad_count: 16
+            }
+            .label(),
+            "Drum Machine"
+        );
+    }
+
+    // ── DrumMachine track tests ─────────────────────────────────────
+
+    #[test]
+    fn drum_machine_track_creation() {
+        let track = Track::new_drum_machine("808 Kit", Some("TR-808".to_string()));
+        assert_eq!(track.name, "808 Kit");
+        assert_eq!(
+            track.kind,
+            TrackKind::DrumMachine {
+                kit_name: Some("TR-808".to_string()),
+                pad_count: 16,
+            }
+        );
+        assert!(track.regions.is_empty());
+        assert!(track.midi_clips.is_empty());
+    }
+
+    #[test]
+    fn drum_machine_default_values() {
+        let track = Track::new_drum_machine("Drums", None);
+        match &track.kind {
+            TrackKind::DrumMachine {
+                kit_name,
+                pad_count,
+            } => {
+                assert_eq!(*kit_name, None);
+                assert_eq!(*pad_count, 16);
+            }
+            other => panic!("expected DrumMachine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn drum_machine_icon_color_label() {
+        let kind = TrackKind::DrumMachine {
+            kit_name: None,
+            pad_count: 16,
+        };
+        assert_eq!(kind.icon(), "\u{1F941}");
+        assert_eq!(kind.default_color(), [255, 152, 0]);
+        assert_eq!(kind.label(), "Drum Machine");
+    }
+
+    #[test]
+    fn drum_machine_serde_roundtrip() {
+        let track = Track::new_drum_machine("Kit", Some("Trap Kit".to_string()));
+        let json = serde_json::to_string(&track).unwrap();
+        let restored: Track = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.kind, track.kind);
+        assert_eq!(restored.name, "Kit");
+    }
+
+    #[test]
+    fn drum_machine_serde_backward_compat() {
+        let json = r#"{"DrumMachine":{}}"#;
+        let kind: TrackKind = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            kind,
+            TrackKind::DrumMachine {
+                kit_name: None,
+                pad_count: 16
+            }
+        );
+    }
+
+    #[test]
+    fn drum_machine_display_color_with_override() {
+        let mut track = Track::new_drum_machine("Drums", None);
+        assert_eq!(track.display_color(), [255, 152, 0]);
+        track.color = Some([10, 20, 30]);
+        assert_eq!(track.display_color(), [10, 20, 30]);
+    }
+
+    #[test]
+    fn drum_machine_template_capture() {
+        let mut track = Track::new_drum_machine("808", Some("TR-808".to_string()));
+        track.gain = 0.8;
+        track.color = Some([255, 100, 0]);
+        let tmpl = TrackTemplate::from_track(&track, "808 Template");
+        assert_eq!(tmpl.name, "808 Template");
+        assert_eq!(
+            tmpl.kind,
+            TrackKind::DrumMachine {
+                kit_name: Some("TR-808".to_string()),
+                pad_count: 16,
+            }
+        );
+        assert!((tmpl.gain - 0.8).abs() < f32::EPSILON);
+        assert_eq!(tmpl.color, Some([255, 100, 0]));
+        let new_track = tmpl.create_track("New 808");
+        assert_eq!(new_track.name, "New 808");
+        assert_eq!(new_track.kind, tmpl.kind);
+        assert_ne!(new_track.id, track.id);
+    }
+
+    #[test]
+    fn drum_machine_icon_distinct_from_all() {
+        let dm_kind = TrackKind::DrumMachine {
+            kit_name: None,
+            pad_count: 16,
+        };
+        let others = [
+            TrackKind::Audio,
+            TrackKind::Bus,
+            TrackKind::Midi,
+            TrackKind::Master,
+            TrackKind::Instrument {
+                instrument_type: None,
+            },
+        ];
+        for other in &others {
+            assert_ne!(dm_kind.icon(), other.icon());
+            assert_ne!(dm_kind.default_color(), other.default_color());
+        }
     }
 
     #[test]
@@ -715,5 +1049,282 @@ mod tests {
     fn template_load_error() {
         let result = TrackTemplate::load(Path::new("/nonexistent/template.json"));
         assert!(result.is_err());
+    }
+
+    // ── Sampler track tests ────────────────────────────────────────
+
+    #[test]
+    fn sampler_track_creation() {
+        let track = Track::new_sampler("Pad Sampler", Some("Grand Piano".to_string()));
+        assert_eq!(track.name, "Pad Sampler");
+        assert_eq!(
+            track.kind,
+            TrackKind::Sampler {
+                preset_name: Some("Grand Piano".to_string()),
+                zone_count: 0,
+            }
+        );
+        assert!(track.regions.is_empty());
+        assert!(track.midi_clips.is_empty());
+    }
+
+    #[test]
+    fn sampler_track_defaults() {
+        let track = Track::new_sampler("Empty Sampler", None);
+        assert_eq!(
+            track.kind,
+            TrackKind::Sampler {
+                preset_name: None,
+                zone_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn sampler_track_icon() {
+        let kind = TrackKind::Sampler {
+            preset_name: None,
+            zone_count: 0,
+        };
+        assert_eq!(kind.icon(), "\u{1F4BF}");
+    }
+
+    #[test]
+    fn sampler_track_color() {
+        let kind = TrackKind::Sampler {
+            preset_name: None,
+            zone_count: 0,
+        };
+        assert_eq!(kind.default_color(), [0, 150, 136]);
+    }
+
+    #[test]
+    fn sampler_track_label() {
+        let kind = TrackKind::Sampler {
+            preset_name: None,
+            zone_count: 0,
+        };
+        assert_eq!(kind.label(), "Sampler");
+    }
+
+    #[test]
+    fn sampler_track_serde_roundtrip() {
+        let track = Track::new_sampler("Sampler", Some("Orchestra Hit".to_string()));
+        let json = serde_json::to_string(&track).unwrap();
+        let restored: Track = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.kind, track.kind);
+        assert_eq!(restored.name, "Sampler");
+    }
+
+    #[test]
+    fn sampler_track_serde_backward_compat() {
+        // Deserialize JSON without preset_name and zone_count — defaults should apply
+        let json = r#"{"Sampler":{}}"#;
+        let kind: TrackKind = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            kind,
+            TrackKind::Sampler {
+                preset_name: None,
+                zone_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn sampler_track_display_color_with_override() {
+        let mut track = Track::new_sampler("Sampler", None);
+        // Default color is teal
+        assert_eq!(track.display_color(), [0, 150, 136]);
+        // Override color
+        track.color = Some([200, 100, 50]);
+        assert_eq!(track.display_color(), [200, 100, 50]);
+    }
+
+    #[test]
+    fn sampler_track_template_capture() {
+        let mut track = Track::new_sampler("My Sampler", Some("Strings".to_string()));
+        track.gain = 0.8;
+        track.pan = 0.3;
+        track.color = Some([10, 20, 30]);
+
+        let tmpl = TrackTemplate::from_track(&track, "Sampler Template");
+        assert_eq!(tmpl.name, "Sampler Template");
+        assert_eq!(
+            tmpl.kind,
+            TrackKind::Sampler {
+                preset_name: Some("Strings".to_string()),
+                zone_count: 0,
+            }
+        );
+        assert!((tmpl.gain - 0.8).abs() < f32::EPSILON);
+        assert!((tmpl.pan - 0.3).abs() < f32::EPSILON);
+        assert_eq!(tmpl.color, Some([10, 20, 30]));
+
+        // Create a new track from the template
+        let new_track = tmpl.create_track("New Sampler");
+        assert_eq!(new_track.name, "New Sampler");
+        assert_eq!(new_track.kind, tmpl.kind);
+        assert_ne!(new_track.id, track.id);
+    }
+
+    // ── AI Player track tests ────────────────────────────────────────
+
+    #[test]
+    fn ai_player_track_creation() {
+        let track = Track::new_ai_player(
+            "Jazz Pianist",
+            Some("gpt-music-v2".to_string()),
+            Some("jazz_piano".to_string()),
+        );
+        assert_eq!(track.name, "Jazz Pianist");
+        assert_eq!(
+            track.kind,
+            TrackKind::AiPlayer {
+                model_name: Some("gpt-music-v2".to_string()),
+                style: Some("jazz_piano".to_string()),
+                creativity: 0.5,
+            }
+        );
+        assert!(track.regions.is_empty());
+        assert!(track.midi_clips.is_empty());
+    }
+
+    #[test]
+    fn ai_player_track_defaults() {
+        let track = Track::new_ai_player("AI", None, None);
+        match &track.kind {
+            TrackKind::AiPlayer {
+                model_name,
+                style,
+                creativity,
+            } => {
+                assert!(model_name.is_none());
+                assert!(style.is_none());
+                assert!((*creativity - 0.5).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected AiPlayer kind"),
+        }
+    }
+
+    #[test]
+    fn ai_player_icon_color_label() {
+        let kind = TrackKind::AiPlayer {
+            model_name: None,
+            style: None,
+            creativity: 0.5,
+        };
+        assert_eq!(kind.icon(), "\u{1F916}");
+        assert_eq!(kind.default_color(), [103, 58, 183]);
+        assert_eq!(kind.label(), "AI Player");
+    }
+
+    #[test]
+    fn ai_player_serde_roundtrip() {
+        let track = Track::new_ai_player(
+            "AI Lead",
+            Some("model-v3".to_string()),
+            Some("fingerstyle_guitar".to_string()),
+        );
+        let json = serde_json::to_string(&track).unwrap();
+        let restored: Track = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.kind, track.kind);
+        assert_eq!(restored.name, "AI Lead");
+    }
+
+    #[test]
+    fn ai_player_serde_backward_compat() {
+        // Simulate JSON without optional fields — serde(default) should fill them in.
+        let json = r#"{"AiPlayer":{}}"#;
+        let kind: TrackKind = serde_json::from_str(json).unwrap();
+        match kind {
+            TrackKind::AiPlayer {
+                model_name,
+                style,
+                creativity,
+            } => {
+                assert!(model_name.is_none());
+                assert!(style.is_none());
+                assert!((creativity - 0.5).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected AiPlayer"),
+        }
+    }
+
+    #[test]
+    fn ai_player_display_color_with_override() {
+        let mut track = Track::new_ai_player("AI", None, None);
+        // Default color
+        assert_eq!(track.display_color(), [103, 58, 183]);
+        // Override
+        track.color = Some([255, 128, 0]);
+        assert_eq!(track.display_color(), [255, 128, 0]);
+    }
+
+    #[test]
+    fn ai_player_template_capture() {
+        let mut track = Track::new_ai_player(
+            "AI Jazz",
+            Some("jazz-model".to_string()),
+            Some("bebop".to_string()),
+        );
+        track.gain = 0.8;
+        track.pan = 0.3;
+
+        let tmpl = TrackTemplate::from_track(&track, "Jazz AI Template");
+        assert_eq!(tmpl.name, "Jazz AI Template");
+        assert_eq!(
+            tmpl.kind,
+            TrackKind::AiPlayer {
+                model_name: Some("jazz-model".to_string()),
+                style: Some("bebop".to_string()),
+                creativity: 0.5,
+            }
+        );
+        assert!((tmpl.gain - 0.8).abs() < f32::EPSILON);
+
+        // Round-trip through template
+        let new_track = tmpl.create_track("New Jazz AI");
+        assert_eq!(new_track.name, "New Jazz AI");
+        assert_eq!(new_track.kind, tmpl.kind);
+    }
+
+    #[test]
+    fn ai_player_icon_color_distinct_from_others() {
+        let ai = TrackKind::AiPlayer {
+            model_name: None,
+            style: None,
+            creativity: 0.5,
+        };
+        let others = [
+            TrackKind::Audio,
+            TrackKind::Bus,
+            TrackKind::Midi,
+            TrackKind::Master,
+            TrackKind::Instrument {
+                instrument_type: None,
+            },
+            TrackKind::DrumMachine {
+                kit_name: None,
+                pad_count: 16,
+            },
+            TrackKind::Sampler {
+                preset_name: None,
+                zone_count: 0,
+            },
+        ];
+        for other in &others {
+            assert_ne!(
+                ai.icon(),
+                other.icon(),
+                "AI Player icon should differ from {:?}",
+                other
+            );
+            assert_ne!(
+                ai.default_color(),
+                other.default_color(),
+                "AI Player color should differ from {:?}",
+                other
+            );
+        }
     }
 }

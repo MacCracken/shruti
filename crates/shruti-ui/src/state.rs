@@ -51,6 +51,8 @@ pub enum ViewMode {
     Arrangement,
     Mixer,
     Settings,
+    InstrumentEditor,
+    PianoRoll,
 }
 
 /// All mutable UI state bridging the session/engine to the views.

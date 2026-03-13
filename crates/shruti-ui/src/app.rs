@@ -6,7 +6,9 @@ use crate::input::{Action, ShortcutRegistry, default_keymap};
 use crate::state::{UiState, ViewMode};
 use crate::theme::{Theme, apply_theme};
 use crate::views::settings::DeviceCache;
-use crate::views::{arrangement, browser, mixer, settings, transport};
+use crate::views::{
+    arrangement, browser, instrument_panel, mixer, piano_roll, settings, transport,
+};
 
 /// The main Shruti application.
 pub struct ShrutiApp {
@@ -400,6 +402,21 @@ impl eframe::App for ShrutiApp {
                 {
                     self.state.view_mode = ViewMode::Settings;
                 }
+                if ui
+                    .selectable_label(
+                        self.state.view_mode == ViewMode::InstrumentEditor,
+                        "Instruments",
+                    )
+                    .clicked()
+                {
+                    self.state.view_mode = ViewMode::InstrumentEditor;
+                }
+                if ui
+                    .selectable_label(self.state.view_mode == ViewMode::PianoRoll, "Piano Roll")
+                    .clicked()
+                {
+                    self.state.view_mode = ViewMode::PianoRoll;
+                }
 
                 ui.separator();
 
@@ -421,6 +438,12 @@ impl eframe::App for ShrutiApp {
                 }
                 ViewMode::Settings => {
                     settings::settings_view(ui, &mut self.state, &colors, &mut self.device_cache);
+                }
+                ViewMode::InstrumentEditor => {
+                    instrument_panel::instrument_panel_view(ui, &mut self.state, &colors);
+                }
+                ViewMode::PianoRoll => {
+                    piano_roll::piano_roll_view(ui, &mut self.state, &colors);
                 }
             }
         });

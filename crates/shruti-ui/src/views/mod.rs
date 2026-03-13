@@ -1,5 +1,10 @@
 pub mod arrangement;
 pub mod browser;
+pub mod drum_grid;
+pub mod instrument_panel;
 pub mod mixer;
+pub mod piano_roll;
+pub mod sampler_editor;
 pub mod settings;
+pub mod synth_editor;
 pub mod transport;

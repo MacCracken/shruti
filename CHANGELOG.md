@@ -286,6 +286,23 @@ Format: CalVer (YYYY.M.D-N).
 - `EditCommand::SetTrackOutput` and `SetSidechainInput` with full undo/redo
 - Routing tests: basic routing, loop detection, sidechain assignment, chain walking
 
+### Instrument UI (8E)
+- **Instrument rack panel**: `instrument_panel_view()` — detects instrument track kind, renders track header with kind-specific info, generic parameter knob grid (4 per row), preset placeholder
+- **Synth editor**: `synth_editor_view()` — collapsible sections for Oscillators (3 osc with enable/waveform/detune/level, hard sync, ring mod, FM), Amplitude Envelope (ADSR + volume), Filter (cutoff/resonance/mode selector), Filter Envelope (ADSR + depth), dual LFOs (rate/depth/target/shape)
+- **Drum machine grid**: `drum_grid_view()` — 4×4 pad grid with GM drum names, selected pad controls (pitch/gain/pan/decay knobs), 16-step sequencer with toggle buttons, pattern bank selector (A/B/C/D), swing knob
+- **Sampler editor**: `sampler_editor_view()` — keyboard zone map (128-key visualization with colored zone rectangles), zone controls (root key, key/vel range sliders, gain, loop mode), waveform drop zone placeholder, global controls
+- **Piano roll**: `piano_roll_view()` — 128-note scrollable grid with piano key labels, instrument-aware display (GM drum names for DrumMachine tracks, key range highlighting for Instrument/Sampler), velocity-based note opacity, beat/bar grid
+- `ViewMode::InstrumentEditor` and `ViewMode::PianoRoll` added to view switcher
+- 71 new UI tests (19 instrument panel, 16 synth editor, 9 drum grid, 14 sampler editor, 13 piano roll)
+
+### Track Types (8F.2, 8F.3, 8F.4)
+- `TrackKind::DrumMachine { kit_name, pad_count }` — drum icon, orange default color, `Session::add_drum_machine_track()`
+- `TrackKind::Sampler { preset_name, zone_count }` — disc icon, teal default color, `Session::add_sampler_track()`
+- `TrackKind::AiPlayer { model_name, style, creativity }` — robot icon, deep purple default color, `Session::add_ai_player_track()`
+- Manual `PartialEq` impl for `TrackKind` to handle `f32` creativity field (bitwise equality)
+- All variants backward-compatible via `#[serde(default)]`
+- 28 new tests (9 per track type + updated distinctness tests)
+
 ### Multi-Oscillator Expansion (8B+.6)
 - 3 oscillators per voice with independent waveform, detune (cents), and level
 - Osc2/Osc3 enable toggles with backward-compatible defaults (disabled)
@@ -341,7 +358,7 @@ Format: CalVer (YYYY.M.D-N).
 - Step sequencer tests: timing accuracy, swing calculation, probability distribution, BPM sync
 - Sample playback tests: pitch mapping, loop points, velocity layers, one-shot vs gated, drum machine playback
 - MIDI integration tests: end-to-end MIDI clip → instrument → audio for synth, drum machine, sampler
-- 1037 total tests across workspace
+- 1136 total tests across workspace
 
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)

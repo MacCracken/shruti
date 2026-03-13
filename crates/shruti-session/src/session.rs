@@ -112,6 +112,61 @@ impl Session {
         id
     }
 
+    /// Add a new drum machine track, returning its ID.
+    pub fn add_drum_machine_track(
+        &mut self,
+        name: impl Into<String>,
+        kit_name: Option<String>,
+    ) -> TrackId {
+        let track = Track::new_drum_machine(name, kit_name);
+        let id = track.id;
+        let master_idx = self
+            .tracks
+            .iter()
+            .position(|t| t.kind == TrackKind::Master)
+            .unwrap_or(self.tracks.len());
+        self.tracks.insert(master_idx, track);
+        self.dirty = true;
+        id
+    }
+
+    /// Add a new sampler track, returning its ID.
+    pub fn add_sampler_track(
+        &mut self,
+        name: impl Into<String>,
+        preset_name: Option<String>,
+    ) -> TrackId {
+        let track = Track::new_sampler(name, preset_name);
+        let id = track.id;
+        let master_idx = self
+            .tracks
+            .iter()
+            .position(|t| t.kind == TrackKind::Master)
+            .unwrap_or(self.tracks.len());
+        self.tracks.insert(master_idx, track);
+        self.dirty = true;
+        id
+    }
+
+    /// Add a new AI player track, returning its ID.
+    pub fn add_ai_player_track(
+        &mut self,
+        name: impl Into<String>,
+        model_name: Option<String>,
+        style: Option<String>,
+    ) -> TrackId {
+        let track = Track::new_ai_player(name, model_name, style);
+        let id = track.id;
+        let master_idx = self
+            .tracks
+            .iter()
+            .position(|t| t.kind == TrackKind::Master)
+            .unwrap_or(self.tracks.len());
+        self.tracks.insert(master_idx, track);
+        self.dirty = true;
+        id
+    }
+
     /// Get instrument tracks.
     pub fn instrument_tracks(&self) -> Vec<&Track> {
         self.tracks
@@ -1400,5 +1455,65 @@ mod tests {
         let track = restored.track(audio_id).unwrap();
         assert_eq!(track.routing.output, Some(bus_id));
         assert_eq!(track.routing.sidechain_input, Some(vocal));
+    }
+
+    #[test]
+    fn test_add_sampler_track_inserts_before_master() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_sampler_track("Pad Sampler", Some("Grand Piano".to_string()));
+        assert_eq!(session.track_count(), 2); // sampler + master
+        let track = session.track(id).unwrap();
+        assert_eq!(track.name, "Pad Sampler");
+        assert_eq!(
+            track.kind,
+            TrackKind::Sampler {
+                preset_name: Some("Grand Piano".to_string()),
+                zone_count: 0,
+            }
+        );
+        // Master is still last
+        assert_eq!(session.tracks.last().unwrap().kind, TrackKind::Master);
+    }
+
+    #[test]
+    fn test_add_ai_player_track_inserts_before_master() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_ai_player_track(
+            "Jazz AI",
+            Some("jazz-model".to_string()),
+            Some("bebop".to_string()),
+        );
+        assert_eq!(session.track_count(), 2); // ai player + master
+        let track = session.track(id).unwrap();
+        assert_eq!(track.name, "Jazz AI");
+        assert_eq!(
+            track.kind,
+            TrackKind::AiPlayer {
+                model_name: Some("jazz-model".to_string()),
+                style: Some("bebop".to_string()),
+                creativity: 0.5,
+            }
+        );
+        // Master is still last
+        assert_eq!(session.tracks.last().unwrap().kind, TrackKind::Master);
+    }
+
+    #[test]
+    fn test_add_drum_machine_track() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_drum_machine_track("808 Drums", Some("TR-808".to_string()));
+        assert_eq!(session.track_count(), 2); // drum machine + master
+        let track = session.track(id).unwrap();
+        assert_eq!(track.name, "808 Drums");
+        assert_eq!(
+            track.kind,
+            TrackKind::DrumMachine {
+                kit_name: Some("TR-808".to_string()),
+                pad_count: 16,
+            }
+        );
+        // Master is still last
+        assert_eq!(session.tracks.last().unwrap().kind, TrackKind::Master);
+        assert!(session.dirty);
     }
 }

@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.12 | **Last Updated**: 2026-03-12
+> **Version**: 2026.3.13 | **Last Updated**: 2026-03-13
 > **Status**: Phases 1–7D, 8A–8G complete — MVP v1 + instruments + full AGNOS integration + audit fixes
-> **Tests**: 1037 passing (172 dsp, 55 engine, 339 instruments, 205 session, 19 plugin, 126 ai, 121 ui), 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1136 passing (172 dsp, 55 engine, 339 instruments, 233 session, 19 plugin, 126 ai, 192 ui), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -33,35 +33,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
----
-
-## Post-MVP: MIDI 2.0
-
-**Goal:** Full MIDI 2.0 (UMP) support per the MIDI Association specification.
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Universal MIDI Packet (UMP) | Medium | 32/64/96/128-bit message types, message type routing |
-| 2 | MIDI-CI (Capability Inquiry) | Medium | Profile negotiation, property exchange between devices |
-| 3 | Per-note controllers | Medium | Per-note pitch bend, pressure, CC — higher resolution than MIDI 1.0 |
-| 4 | 32-bit velocity & CC resolution | Small | Upgrade from 7-bit (0-127) to 32-bit resolution |
-| 5 | Property exchange | Medium | JSON-based device/plugin property queries |
-| 6 | MIDI 2.0 device I/O | Large | Platform MIDI 2.0 drivers (ALSA sequencer, CoreMIDI, WinRT MIDI) |
-| 7 | Backward compatibility | Small | Transparent MIDI 1.0 ↔ 2.0 translation layer |
-
----
-
 ## Phase 8: Built-in Instruments
 
 **Goal:** Native virtual instruments — synths, drum machines, samplers — so Shruti is a complete production environment without requiring third-party plugins.
-
-### Live Looped Recording
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Loop-aware overdub recording | Medium | When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks |
-| 2 | Take/layer management | Medium | Stack, mute, solo, delete individual takes per track per loop pass |
-| 3 | Comp editing | Large | Select best sections across takes to build a composite region |
 
 ### 8A — Instrument Engine (Complete)
 
@@ -81,21 +55,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 2 | Modulation matrix | Done | 8 sources (LFO1/2, AmpEnv, FilterEnv, Velocity, Aftertouch, ModWheel, PitchBend) → 8 destinations, 16 routings, bipolar amounts |
 | 3 | Effects per instrument | Done | EffectChain with 5 types (Chorus, Delay, Reverb, Distortion, FilterDrive), integrated into SubtractiveSynth, DrumMachine, Sampler |
 | 4 | Oscillator anti-aliasing | Done | PolyBLEP for alias-free saw/square at all frequencies |
+| 5 | Multi-oscillator expansion | Done | 3 oscillators per voice with independent waveform/detune/level, hard sync, ring modulation, oscillator FM (osc1→osc2 cross-mod), 16 tests |
 
-### 8B+ — Post-MVP Synthesizers
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | FM synth | Large | 4–6 operator FM, algorithm selection (classic DX7-style: 32 algorithms), ratio/detune/feedback per operator, FM matrix routing, velocity→operator level scaling |
-| 2 | Additive synth | Large | 64–256 harmonic partials with individual amplitude envelopes, spectral editing (draw/morph), resynthesis from audio (FFT→partials), real-time partial manipulation |
-| 3 | Wavetable synth | Large | Wavetable loading (.wav frames, single-cycle), wavetable morphing (smooth interpolation between frames), position modulation via LFO/envelope, built-in factory tables (analog, digital, vocal, organic) |
-| 4 | Physical modeling synth | Large | Karplus-Strong string model, waveguide resonators (plucked/bowed/struck), exciter types (noise burst, impulse, bow), body resonance modeling, material parameters (brightness, decay, stiffness) |
-| 5 | Granular synth | Large | Grain cloud engine (position, density, size, pitch, spread), real-time granulation of loaded samples, freeze/scatter/spray modes, per-grain envelope (Gaussian/trapezoid), stereo grain panning |
-| 6 | Multi-oscillator expansion | Done | 3 oscillators per voice with independent waveform/detune/level, hard sync, ring modulation, oscillator FM (osc1→osc2 cross-mod), 16 tests |
-| 7 | Unison & voice stacking | Medium | Per-oscillator unison voices (up to 8), spread (detune + stereo width), sub-oscillator (-1/-2 octave), supersaw-style detuned stacks |
-| 8 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
-
-### 8C — Drum Machine
+### 8C — Drum Machine (Complete)
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -106,26 +68,25 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 5 | Sample layering | Done | Velocity layers per pad (up to 8), round-robin/random selection, fallback to main samples |
 | 6 | Per-pad effects | Done | PadEffects with one-pole LPF, tanh drive, reverb/delay send levels per pad |
 
-### 8D — Sampler
+### 8D — Sampler (Complete)
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | 1 | Multi-sample engine | Done | Key zones + velocity zones, root key, pitch ratio, 16-voice polyphony, linear interpolation |
 | 2 | Sample editing | Done | In-place trim, loop points (forward/ping-pong/one-shot), fade in/out, normalize, reverse, peak/RMS analysis |
-| 3 | Time-stretching | Large | Granular or phase-vocoder based pitch-independent time stretch; real-time quality |
-| 4 | Slice mode | Done | Energy-based onset detection, auto-slice by transients, `slice_to_zones()` maps slices to MIDI keys (REX-style) |
-| 5 | Sample format support | Done | WAV, FLAC, AIFF, OGG/Vorbis via symphonia; SUPPORTED_EXTENSIONS, is_supported_extension() |
-| 6 | SFZ/SF2 import | Done | SFZ text parser (global/group/region, opcode inheritance, note names) + SF2 binary RIFF parser (preset→instrument→sample zones, PCM extraction), 28 tests |
+| 3 | Slice mode | Done | Energy-based onset detection, auto-slice by transients, `slice_to_zones()` maps slices to MIDI keys (REX-style) |
+| 4 | Sample format support | Done | WAV, FLAC, AIFF, OGG/Vorbis via symphonia; SUPPORTED_EXTENSIONS, is_supported_extension() |
+| 5 | SFZ/SF2 import | Done | SFZ text parser (global/group/region, opcode inheritance, note names) + SF2 binary RIFF parser (preset→instrument→sample zones, PCM extraction), 28 tests |
 
 ### 8E — Instrument UI
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Instrument rack panel | Medium | Dockable egui panel: instrument selector, parameter knobs/sliders, preset browser |
-| 2 | Synth editor | Large | Visual oscillator, filter, envelope, LFO editors with real-time waveform preview |
-| 3 | Drum machine grid | Medium | 16-pad grid view with step sequencer, pattern selector, per-pad waveform display |
-| 4 | Sampler editor | Medium | Waveform view with loop points, zone editor (key/velocity matrix), drag-and-drop sample loading |
-| 5 | Piano roll integration | Medium | Per-instrument piano roll respects key ranges, drum names on rows for drum tracks |
+| 1 | Instrument rack panel | Done | Dockable egui panel: instrument selector, parameter knobs grid, preset placeholder, all 4 instrument track kinds |
+| 2 | Synth editor | Done | Visual osc (3-osc with enable/detune/level), filter (mode/cutoff/res), ADSR envelopes, dual LFO, FM/sync/ring mod controls |
+| 3 | Drum machine grid | Done | 4×4 pad grid with GM drum names, per-pad knobs (pitch/gain/pan/decay), 16-step sequencer, pattern bank selector |
+| 4 | Sampler editor | Done | Zone map (128-key keyboard visualization), zone controls (key/vel range, loop mode), waveform placeholder |
+| 5 | Piano roll integration | Done | 128-note grid with piano keys, instrument-aware labels (GM drums for DrumMachine), velocity opacity, key range highlighting |
 | 6 | Parameter automation | Done | InstrumentParam target variant, label(), instrument_targets() helper |
 
 ### 8F — Track Type Organization
@@ -133,15 +94,15 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | 1 | `TrackKind::Instrument` | Done | New track kind with instrument_type field, `Session::add_instrument_track()`, instrument_params per track |
-| 2 | `TrackKind::DrumMachine` | Medium | Specialized instrument track: drum pad layout, step sequencer, pattern-based workflow |
-| 3 | `TrackKind::Sampler` | Medium | Specialized instrument track: multi-sample zones, slice mode, time-stretch |
-| 4 | `TrackKind::AiPlayer` | Medium | AI-controlled instrument track: model selection, style/creativity params (see Phase 9) |
+| 2 | `TrackKind::DrumMachine` | Done | Kit name, pad count (default 16), drum icon, orange color, `add_drum_machine_track()`, 9 tests |
+| 3 | `TrackKind::Sampler` | Done | Preset name, zone count, disc icon, teal color, `add_sampler_track()`, 9 tests |
+| 4 | `TrackKind::AiPlayer` | Done | Model name, style, creativity (0–1), robot icon, deep purple color, `add_ai_player_track()`, 9 tests |
 | 5 | Track kind icons & colors | Done | Unicode icons, RGB default colors, labels per TrackKind; Track::color override with display_color() |
 | 6 | Track templates | Done | TrackTemplate: save/load track config (kind, gain, pan, channels, instrument params, color) as JSON |
 | 7 | Track groups / folders | Done | Collapsible track groups with undo/redo, arrangement + mixer UI integration |
 | 8 | Output routing matrix | Done | Any track → any bus/master; sidechain routing for compressor keying; loop detection via chain walking |
 
-### 8G — Instrument Testing
+### 8G — Instrument Testing (Complete)
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -154,7 +115,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 7 | Step sequencer tests | Done | Timing accuracy, swing calculation, probability distribution, pattern chaining, BPM sync |
 | 8 | Instrument ↔ MIDI integration | Done | End-to-end: MIDI clip → instrument → audio output for synth, drum machine, sampler |
 
-### 16A — Shruti HTTP Server (AGNOS Integration Blocker)
+### 16A — Shruti HTTP Server (Complete)
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -162,11 +123,53 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Post-MVP: AI Instruments & Players
+## Post-MVP
+
+### Synthesizers
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | FM synth | Large | 4–6 operator FM, algorithm selection (classic DX7-style: 32 algorithms), ratio/detune/feedback per operator, FM matrix routing, velocity→operator level scaling |
+| 2 | Additive synth | Large | 64–256 harmonic partials with individual amplitude envelopes, spectral editing (draw/morph), resynthesis from audio (FFT→partials), real-time partial manipulation |
+| 3 | Wavetable synth | Large | Wavetable loading (.wav frames, single-cycle), wavetable morphing (smooth interpolation between frames), position modulation via LFO/envelope, built-in factory tables (analog, digital, vocal, organic) |
+| 4 | Physical modeling synth | Large | Karplus-Strong string model, waveguide resonators (plucked/bowed/struck), exciter types (noise burst, impulse, bow), body resonance modeling, material parameters (brightness, decay, stiffness) |
+| 5 | Granular synth | Large | Grain cloud engine (position, density, size, pitch, spread), real-time granulation of loaded samples, freeze/scatter/spray modes, per-grain envelope (Gaussian/trapezoid), stereo grain panning |
+| 6 | Unison & voice stacking | Medium | Per-oscillator unison voices (up to 8), spread (detune + stereo width), sub-oscillator (-1/-2 octave), supersaw-style detuned stacks |
+| 7 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
+
+### Sampler
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Time-stretching | Large | Granular or phase-vocoder based pitch-independent time stretch; real-time quality |
+
+### Live Looped Recording
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Loop-aware overdub recording | Medium | When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks |
+| 2 | Take/layer management | Medium | Stack, mute, solo, delete individual takes per track per loop pass |
+| 3 | Comp editing | Large | Select best sections across takes to build a composite region |
+
+### MIDI 2.0
+
+**Goal:** Full MIDI 2.0 (UMP) support per the MIDI Association specification.
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Universal MIDI Packet (UMP) | Medium | 32/64/96/128-bit message types, message type routing |
+| 2 | MIDI-CI (Capability Inquiry) | Medium | Profile negotiation, property exchange between devices |
+| 3 | Per-note controllers | Medium | Per-note pitch bend, pressure, CC — higher resolution than MIDI 1.0 |
+| 4 | 32-bit velocity & CC resolution | Small | Upgrade from 7-bit (0-127) to 32-bit resolution |
+| 5 | Property exchange | Medium | JSON-based device/plugin property queries |
+| 6 | MIDI 2.0 device I/O | Large | Platform MIDI 2.0 drivers (ALSA sequencer, CoreMIDI, WinRT MIDI) |
+| 7 | Backward compatibility | Small | Transparent MIDI 1.0 ↔ 2.0 translation layer |
+
+### AI Instruments & Players (Phase 9)
 
 **Goal:** AI-driven virtual instruments that can perform, improvise, and accompany — powered by fine-grained music LLMs running locally on AGNOS. Builds on Phase 8's `InstrumentNode` trait and instrument engine.
 
-### 9A — Music LLM Integration
+#### 9A — Music LLM Integration
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -177,7 +180,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 5 | Inference scheduling | Medium | Non-blocking inference on background thread; lookahead buffer so generation stays ahead of playback |
 | 6 | Temperature / creativity controls | Small | Per-player controls: temperature, top-k, repetition penalty, style adherence |
 
-### 9B — AI Player Agents
+#### 9B — AI Player Agents
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -189,7 +192,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 6 | Arrangement-aware generation | Large | AI reads full session context (all tracks, structure markers, mix levels) to make musically coherent decisions |
 | 7 | Human-in-the-loop feedback | Medium | Accept/reject/regenerate individual phrases; RL-style feedback loop to refine player behavior per session |
 
-### 9C — AI Player UI & UX
+#### 9C — AI Player UI & UX
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -200,7 +203,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 5 | Model training UI | Large | In-app fine-tuning: feed MIDI files as training data, configure epochs/lr, monitor loss, export model |
 | 6 | A/B comparison | Small | Generate multiple takes, audition side-by-side, pick or blend |
 
-### 9D — AI Testing & Validation
+#### 9D — AI Testing & Validation
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
@@ -331,12 +334,6 @@ Items from 6-round code audit. All CRITICAL/HIGH issues fixed. Remaining MEDIUM/
 
 ---
 
-## MVP v1 Release
-
-Phases 1–6 complete. Phase 7 and MIDI 2.0 follow as post-MVP milestones.
-
----
-
 ## Test Coverage Roadmap (59% → 80%)
 
 **Current:** 723 tests, 59.4% line coverage (2956/4973 lines, excluding vendor).
@@ -364,11 +361,4 @@ Phases 1–6 complete. Phase 7 and MIDI 2.0 follow as post-MVP milestones.
 | **T3: UI data logic** | 75% | +250 | app.rs action dispatch (extract pure functions from `handle_action`), state.rs transitions, theme/style.rs (test struct construction not rendering), shortcuts.rs | Extract testable logic from egui callbacks; test state machines |
 | **T4: UI widget math** | 80% | +250 | fader dB↔linear conversion, knob angle math, meter peak decay, timeline_ruler grid calculation, waveform zoom level selection | Test pure computation functions; skip egui `Ui` painting code |
 
-### Strategy Notes
-
-- **UI code (841 lines, 22%)** is the biggest gap but hardest to test. Most is egui `Ui` painting code that can't be unit tested without a headless egui context. Focus on extracting and testing the *math and state* behind widgets, not the rendering.
-- **shruti-plugin host.rs** needs a `MockPluginInstance` implementing `PluginInstance` to test load/unload/save_state/load_state flows without real shared libraries.
-- **cpal_backend** (94 lines, 53%) can be tested by implementing `AudioHost` and `AudioStream` traits on mock structs that capture callback invocations.
-- **Diminishing returns** start around 85%: remaining uncovered lines are mostly error branches in I/O code, platform-specific conditionals, and egui draw calls that are impractical to unit test. Integration/screenshot testing would be needed beyond 80%.
-
-*Last Updated: 2026-03-11 — 7-round audit complete, coverage push complete*
+*Last Updated: 2026-03-13*
