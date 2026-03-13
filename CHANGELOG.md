@@ -202,6 +202,16 @@ Format: CalVer (YYYY.M.D-N).
 - `shruti-session`: 131→137 tests (+6) — SessionError Display/source/From impls, RecordingConfig
 - Added `tarpaulin.toml` to exclude vendor code from coverage metrics
 
+### Track Grouping
+- `TrackGroup` with `TrackGroupId`, name, ordered member list, collapsible state
+- `Session` group methods: `add_group()`, `remove_group()`, `add_track_to_group()`, `remove_track_from_group()`, `rename_group()`, `toggle_group_collapsed()`, `track_group()` lookup
+- Master track cannot be added to groups; removing a track auto-cleans group membership
+- 6 new `EditCommand` variants with full undo/redo: `CreateGroup`, `RemoveGroup`, `AddTrackToGroup`, `RemoveTrackFromGroup`, `RenameGroup`, `ToggleGroupCollapsed`
+- Arrangement view: collapsible group headers with arrow indicator and member count
+- Mixer view: group divider strips with collapse toggle
+- Serializable with `#[serde(default)]` for backward-compatible session loading
+- 19 new tests: TrackGroup CRUD, serde roundtrip, session group operations, undo/redo for all 6 group commands
+
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)
 - GitHub Actions: Release (Linux amd64/arm64, macOS x86/arm, Windows)

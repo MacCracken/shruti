@@ -70,6 +70,14 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 **Goal:** Native virtual instruments — synths, drum machines, samplers — so Shruti is a complete production environment without requiring third-party plugins.
 
+### Live Looped Recording
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Loop-aware overdub recording | Medium | When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks |
+| 2 | Take/layer management | Medium | Stack, mute, solo, delete individual takes per track per loop pass |
+| 3 | Comp editing | Large | Select best sections across takes to build a composite region |
+
 ### 8A — Instrument Engine (Complete)
 
 | # | Item | Effort | Notes |
@@ -145,7 +153,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 4 | `TrackKind::AiPlayer` | Medium | AI-controlled instrument track: model selection, style/creativity params (see Phase 9) |
 | 5 | Track kind icons & colors | Small | Distinct icons and default colors per track kind in headers and mixer strips |
 | 6 | Track templates | Small | Save/load track configurations (kind + instrument + effects chain + routing) as reusable templates |
-| 7 | Track groups / folders | Medium | Collapsible track folders, group solo/mute, shared bus routing |
+| 7 | Track groups / folders | Done | Collapsible track groups with undo/redo, arrangement + mixer UI integration |
 | 8 | Output routing matrix | Medium | Any track → any bus/master; sidechain routing for compressor keying |
 
 ### 8G — Instrument Testing

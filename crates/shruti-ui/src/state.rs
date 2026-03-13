@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use shruti_session::undo::UndoManager;
-use shruti_session::{Region, RegionId, Session};
+use shruti_session::{Region, RegionId, Session, TrackGroupId};
 
 use crate::views::browser::BrowserTab;
 
@@ -88,6 +90,9 @@ pub struct UiState {
 
     /// Clipboard for cut/copy/paste of regions.
     pub clipboard_region: Option<Region>,
+
+    /// Set of collapsed track group IDs (mirrors group.collapsed for fast lookup).
+    pub collapsed_groups: HashSet<TrackGroupId>,
 }
 
 impl UiState {
@@ -111,6 +116,7 @@ impl UiState {
             theme_applied: false,
             undo: UndoManager::default(),
             clipboard_region: None,
+            collapsed_groups: HashSet::new(),
         }
     }
 }

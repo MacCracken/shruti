@@ -14,7 +14,68 @@ pub fn mixer_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
             ui.horizontal(|ui| {
                 let track_count = state.session.tracks.len();
 
+                // Build hidden tracks set from collapsed groups
+                let mut hidden_tracks = std::collections::HashSet::new();
+                let mut rendered_group_headers = std::collections::HashSet::new();
+                for group in &state.session.groups {
+                    if group.collapsed {
+                        for &tid in &group.tracks {
+                            hidden_tracks.insert(tid);
+                        }
+                    }
+                }
+
                 for track_idx in 0..track_count {
+                    let track_id = state.session.tracks[track_idx].id;
+
+                    // Show group label before first member
+                    if let Some(group) = state.session.track_group(track_id) {
+                        let gid = group.id;
+                        if !rendered_group_headers.contains(&gid) {
+                            rendered_group_headers.insert(gid);
+                            let group_name = group.name.clone();
+                            let collapsed = group.collapsed;
+                            let gid_copy = gid;
+
+                            // Group divider strip
+                            ui.vertical(|ui| {
+                                ui.set_width(24.0);
+                                let arrow = if collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(arrow)
+                                                .size(10.0)
+                                                .color(colors.text_secondary()),
+                                        )
+                                        .fill(colors.surface())
+                                        .min_size(egui::vec2(20.0, 14.0)),
+                                    )
+                                    .clicked()
+                                    && let Some(g) = state.session.group_mut(gid_copy)
+                                {
+                                    g.collapsed = !g.collapsed;
+                                    if g.collapsed {
+                                        state.collapsed_groups.insert(gid_copy);
+                                    } else {
+                                        state.collapsed_groups.remove(&gid_copy);
+                                    }
+                                }
+                                // Vertical group name
+                                ui.label(
+                                    egui::RichText::new(&group_name)
+                                        .size(9.0)
+                                        .color(colors.text_secondary()),
+                                );
+                            });
+                            ui.separator();
+                        }
+                    }
+
+                    if hidden_tracks.contains(&track_id) {
+                        continue;
+                    }
+
                     channel_strip(ui, state, track_idx, colors);
 
                     // Separator between strips

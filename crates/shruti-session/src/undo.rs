@@ -251,6 +251,35 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
                 *val = *new_value;
             }
         }
+        EditCommand::CreateGroup {
+            group_id,
+            name,
+            group,
+        } => {
+            let mut new_group = crate::track::TrackGroup::new(name.clone());
+            new_group.id = *group_id;
+            session.groups.push(new_group.clone());
+            *group = Some(new_group);
+        }
+        EditCommand::RemoveGroup { group_id, group } => {
+            if let Some(pos) = session.groups.iter().position(|g| g.id == *group_id) {
+                *group = Some(session.groups.remove(pos));
+            }
+        }
+        EditCommand::AddTrackToGroup { group_id, track_id } => {
+            session.add_track_to_group(*group_id, *track_id);
+        }
+        EditCommand::RemoveTrackFromGroup { group_id, track_id } => {
+            session.remove_track_from_group(*group_id, *track_id);
+        }
+        EditCommand::RenameGroup {
+            group_id, new_name, ..
+        } => {
+            session.rename_group(*group_id, new_name.clone());
+        }
+        EditCommand::ToggleGroupCollapsed { group_id } => {
+            session.toggle_group_collapsed(*group_id);
+        }
         EditCommand::Compound { commands } => {
             for sub in commands.iter_mut() {
                 apply_command(sub, session);
@@ -435,6 +464,32 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
             {
                 *val = *old_value;
             }
+        }
+        EditCommand::CreateGroup { group_id, .. } => {
+            // Undo create = remove
+            session.remove_group(*group_id);
+        }
+        EditCommand::RemoveGroup { group, .. } => {
+            // Undo remove = re-insert
+            if let Some(g) = group {
+                session.groups.push(g.clone());
+            }
+        }
+        EditCommand::AddTrackToGroup { group_id, track_id } => {
+            // Undo add = remove
+            session.remove_track_from_group(*group_id, *track_id);
+        }
+        EditCommand::RemoveTrackFromGroup { group_id, track_id } => {
+            // Undo remove = add
+            session.add_track_to_group(*group_id, *track_id);
+        }
+        EditCommand::RenameGroup {
+            group_id, old_name, ..
+        } => {
+            session.rename_group(*group_id, old_name.clone());
+        }
+        EditCommand::ToggleGroupCollapsed { group_id } => {
+            session.toggle_group_collapsed(*group_id);
         }
         EditCommand::Compound { commands } => {
             for sub in commands.iter().rev() {
@@ -1414,5 +1469,148 @@ mod tests {
         // Region removed
         assert!(session.track(track_id).unwrap().region(region_id).is_none());
         assert_eq!(session.track(track_id).unwrap().regions.len(), 0);
+    }
+
+    // ---------------------------------------------------------------
+    // Track group undo/redo
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_create_group_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let mut um = UndoManager::new(100);
+
+        let gid = crate::track::TrackGroupId::new();
+        um.execute(
+            EditCommand::CreateGroup {
+                group_id: gid,
+                name: "Drums".to_string(),
+                group: None,
+            },
+            &mut session,
+        );
+        assert_eq!(session.groups.len(), 1);
+        assert_eq!(session.group(gid).unwrap().name, "Drums");
+
+        um.undo(&mut session);
+        assert!(session.groups.is_empty());
+
+        um.redo(&mut session);
+        assert_eq!(session.groups.len(), 1);
+        assert_eq!(session.group(gid).unwrap().name, "Drums");
+    }
+
+    #[test]
+    fn test_remove_group_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let mut um = UndoManager::new(100);
+
+        let gid = session.add_group("Vocals");
+        let t1 = session.add_audio_track("Lead");
+        session.add_track_to_group(gid, t1);
+
+        um.execute(
+            EditCommand::RemoveGroup {
+                group_id: gid,
+                group: None,
+            },
+            &mut session,
+        );
+        assert!(session.groups.is_empty());
+
+        um.undo(&mut session);
+        assert_eq!(session.groups.len(), 1);
+        assert_eq!(session.group(gid).unwrap().tracks.len(), 1);
+
+        um.redo(&mut session);
+        assert!(session.groups.is_empty());
+    }
+
+    #[test]
+    fn test_add_track_to_group_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let mut um = UndoManager::new(100);
+
+        let gid = session.add_group("FX");
+        let t1 = session.add_audio_track("Reverb");
+
+        um.execute(
+            EditCommand::AddTrackToGroup {
+                group_id: gid,
+                track_id: t1,
+            },
+            &mut session,
+        );
+        assert_eq!(session.group(gid).unwrap().tracks.len(), 1);
+
+        um.undo(&mut session);
+        assert!(session.group(gid).unwrap().tracks.is_empty());
+
+        um.redo(&mut session);
+        assert_eq!(session.group(gid).unwrap().tracks.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_track_from_group_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let mut um = UndoManager::new(100);
+
+        let gid = session.add_group("Drums");
+        let t1 = session.add_audio_track("Kick");
+        session.add_track_to_group(gid, t1);
+
+        um.execute(
+            EditCommand::RemoveTrackFromGroup {
+                group_id: gid,
+                track_id: t1,
+            },
+            &mut session,
+        );
+        assert!(session.group(gid).unwrap().tracks.is_empty());
+
+        um.undo(&mut session);
+        assert_eq!(session.group(gid).unwrap().tracks.len(), 1);
+    }
+
+    #[test]
+    fn test_rename_group_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let mut um = UndoManager::new(100);
+
+        let gid = session.add_group("Old");
+
+        um.execute(
+            EditCommand::RenameGroup {
+                group_id: gid,
+                old_name: "Old".to_string(),
+                new_name: "New".to_string(),
+            },
+            &mut session,
+        );
+        assert_eq!(session.group(gid).unwrap().name, "New");
+
+        um.undo(&mut session);
+        assert_eq!(session.group(gid).unwrap().name, "Old");
+
+        um.redo(&mut session);
+        assert_eq!(session.group(gid).unwrap().name, "New");
+    }
+
+    #[test]
+    fn test_toggle_group_collapsed_undo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let mut um = UndoManager::new(100);
+
+        let gid = session.add_group("G");
+        assert!(!session.group(gid).unwrap().collapsed);
+
+        um.execute(
+            EditCommand::ToggleGroupCollapsed { group_id: gid },
+            &mut session,
+        );
+        assert!(session.group(gid).unwrap().collapsed);
+
+        um.undo(&mut session);
+        assert!(!session.group(gid).unwrap().collapsed);
     }
 }

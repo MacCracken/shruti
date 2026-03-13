@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::region::{Region, RegionId};
-use crate::track::TrackId;
+use crate::track::{TrackGroup, TrackGroupId, TrackId};
 
 /// An editing command that can be applied and undone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +105,37 @@ pub enum EditCommand {
         old_value: f32,
         new_value: f32,
     },
+    /// Create a new track group.
+    CreateGroup {
+        group_id: TrackGroupId,
+        name: String,
+        /// Stored for undo (the full group after creation).
+        group: Option<TrackGroup>,
+    },
+    /// Remove a track group.
+    RemoveGroup {
+        group_id: TrackGroupId,
+        /// Stored for undo (the removed group with its members).
+        group: Option<TrackGroup>,
+    },
+    /// Add a track to a group.
+    AddTrackToGroup {
+        group_id: TrackGroupId,
+        track_id: TrackId,
+    },
+    /// Remove a track from a group.
+    RemoveTrackFromGroup {
+        group_id: TrackGroupId,
+        track_id: TrackId,
+    },
+    /// Rename a track group.
+    RenameGroup {
+        group_id: TrackGroupId,
+        old_name: String,
+        new_name: String,
+    },
+    /// Toggle a group's collapsed state.
+    ToggleGroupCollapsed { group_id: TrackGroupId },
     /// Compound command (multiple edits as one undoable action).
     Compound { commands: Vec<EditCommand> },
 }

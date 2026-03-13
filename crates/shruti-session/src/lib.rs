@@ -24,6 +24,6 @@ pub use preferences::{Preferences, RecordingConfig};
 pub use region::{Region, RegionId};
 pub use session::Session;
 pub use timeline::Timeline;
-pub use track::{Send, SendPosition, Track, TrackId, TrackKind};
+pub use track::{Send, SendPosition, Track, TrackGroup, TrackGroupId, TrackId, TrackKind};
 pub use transport::{Transport, TransportState};
 pub use undo::UndoManager;

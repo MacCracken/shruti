@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio_pool::AudioPool;
 use crate::timeline::Timeline;
-use crate::track::{Send, SendPosition, Track, TrackId, TrackKind};
+use crate::track::{Send, SendPosition, Track, TrackGroup, TrackGroupId, TrackId, TrackKind};
 use crate::transport::Transport;
 
 /// A session is the top-level project container.
@@ -15,6 +15,9 @@ pub struct Session {
     #[serde(default)]
     pub audio_device_name: Option<String>,
     pub tracks: Vec<Track>,
+    /// Track groups for organizational purposes.
+    #[serde(default)]
+    pub groups: Vec<TrackGroup>,
     pub transport: Transport,
     /// Whether the session has unsaved changes.
     #[serde(skip)]
@@ -35,6 +38,7 @@ impl Session {
             buffer_size,
             audio_device_name: None,
             tracks: Vec::new(),
+            groups: Vec::new(),
             transport: Transport::new(sample_rate),
             dirty: false,
             audio_pool: AudioPool::new(),
@@ -116,10 +120,15 @@ impl Session {
     }
 
     /// Remove a track by ID. Cannot remove the master bus.
+    /// Also removes the track from any group it belongs to.
     pub fn remove_track(&mut self, id: TrackId) -> Option<Track> {
         let pos = self.tracks.iter().position(|t| t.id == id)?;
         if self.tracks[pos].kind == TrackKind::Master {
             return None;
+        }
+        // Remove from any group
+        for group in &mut self.groups {
+            group.remove_track(id);
         }
         self.dirty = true;
         Some(self.tracks.remove(pos))
@@ -237,6 +246,96 @@ impl Session {
             return true;
         }
         false
+    }
+
+    // ---------------------------------------------------------------
+    // Track groups
+    // ---------------------------------------------------------------
+
+    /// Create a new track group, returning its ID.
+    pub fn add_group(&mut self, name: impl Into<String>) -> TrackGroupId {
+        let group = TrackGroup::new(name);
+        let id = group.id;
+        self.groups.push(group);
+        self.dirty = true;
+        id
+    }
+
+    /// Remove a track group by ID, returning it if found.
+    pub fn remove_group(&mut self, id: TrackGroupId) -> Option<TrackGroup> {
+        if let Some(pos) = self.groups.iter().position(|g| g.id == id) {
+            self.dirty = true;
+            Some(self.groups.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// Get a group by ID.
+    pub fn group(&self, id: TrackGroupId) -> Option<&TrackGroup> {
+        self.groups.iter().find(|g| g.id == id)
+    }
+
+    /// Get a mutable group by ID.
+    pub fn group_mut(&mut self, id: TrackGroupId) -> Option<&mut TrackGroup> {
+        self.groups.iter_mut().find(|g| g.id == id)
+    }
+
+    /// Add a track to a group. Returns false if group not found or track already in group.
+    pub fn add_track_to_group(&mut self, group_id: TrackGroupId, track_id: TrackId) -> bool {
+        // Verify the track exists and is not master
+        let track_exists = self
+            .tracks
+            .iter()
+            .any(|t| t.id == track_id && t.kind != TrackKind::Master);
+        if !track_exists {
+            return false;
+        }
+        if let Some(group) = self.groups.iter_mut().find(|g| g.id == group_id)
+            && group.add_track(track_id)
+        {
+            self.dirty = true;
+            return true;
+        }
+        false
+    }
+
+    /// Remove a track from a group.
+    pub fn remove_track_from_group(&mut self, group_id: TrackGroupId, track_id: TrackId) -> bool {
+        if let Some(group) = self.groups.iter_mut().find(|g| g.id == group_id)
+            && group.remove_track(track_id)
+        {
+            self.dirty = true;
+            return true;
+        }
+        false
+    }
+
+    /// Find which group a track belongs to, if any.
+    pub fn track_group(&self, track_id: TrackId) -> Option<&TrackGroup> {
+        self.groups.iter().find(|g| g.contains(track_id))
+    }
+
+    /// Rename a group.
+    pub fn rename_group(&mut self, id: TrackGroupId, name: impl Into<String>) -> bool {
+        if let Some(group) = self.groups.iter_mut().find(|g| g.id == id) {
+            group.name = name.into();
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Toggle a group's collapsed state.
+    pub fn toggle_group_collapsed(&mut self, id: TrackGroupId) -> bool {
+        if let Some(group) = self.groups.iter_mut().find(|g| g.id == id) {
+            group.collapsed = !group.collapsed;
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
     }
 
     /// Total number of tracks (including master).
@@ -673,5 +772,215 @@ mod tests {
         assert_eq!(track.sends[1].target, bus2);
         assert!((track.sends[0].level - 0.5).abs() < f32::EPSILON);
         assert!((track.sends[1].level - 0.3).abs() < f32::EPSILON);
+    }
+
+    // ---------------------------------------------------------------
+    // Track groups
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_add_and_remove_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let gid = session.add_group("Drums");
+        assert_eq!(session.groups.len(), 1);
+        assert_eq!(session.group(gid).unwrap().name, "Drums");
+
+        let removed = session.remove_group(gid).unwrap();
+        assert_eq!(removed.name, "Drums");
+        assert!(session.groups.is_empty());
+    }
+
+    #[test]
+    fn test_remove_nonexistent_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bogus = crate::track::TrackGroupId::new();
+        assert!(session.remove_group(bogus).is_none());
+    }
+
+    #[test]
+    fn test_add_track_to_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Kick");
+        let t2 = session.add_audio_track("Snare");
+        let gid = session.add_group("Drums");
+
+        assert!(session.add_track_to_group(gid, t1));
+        assert!(session.add_track_to_group(gid, t2));
+        assert_eq!(session.group(gid).unwrap().tracks.len(), 2);
+
+        // Duplicate add fails
+        assert!(!session.add_track_to_group(gid, t1));
+    }
+
+    #[test]
+    fn test_cannot_add_master_to_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let gid = session.add_group("Main");
+        let master_id = session.master().unwrap().id;
+        assert!(!session.add_track_to_group(gid, master_id));
+    }
+
+    #[test]
+    fn test_remove_track_from_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Guitar");
+        let gid = session.add_group("Strings");
+        session.add_track_to_group(gid, t1);
+
+        assert!(session.remove_track_from_group(gid, t1));
+        assert!(session.group(gid).unwrap().tracks.is_empty());
+
+        // Remove non-member fails
+        assert!(!session.remove_track_from_group(gid, t1));
+    }
+
+    #[test]
+    fn test_track_group_lookup() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Kick");
+        let t2 = session.add_audio_track("Guitar");
+        let gid = session.add_group("Drums");
+        session.add_track_to_group(gid, t1);
+
+        assert_eq!(session.track_group(t1).unwrap().id, gid);
+        assert!(session.track_group(t2).is_none());
+    }
+
+    #[test]
+    fn test_remove_track_cleans_up_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Kick");
+        let gid = session.add_group("Drums");
+        session.add_track_to_group(gid, t1);
+
+        session.remove_track(t1);
+        assert!(session.group(gid).unwrap().tracks.is_empty());
+    }
+
+    #[test]
+    fn test_rename_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let gid = session.add_group("Old Name");
+        assert!(session.rename_group(gid, "New Name"));
+        assert_eq!(session.group(gid).unwrap().name, "New Name");
+    }
+
+    #[test]
+    fn test_toggle_group_collapsed() {
+        let mut session = Session::new("Test", 48000, 256);
+        let gid = session.add_group("FX");
+        assert!(!session.group(gid).unwrap().collapsed);
+
+        assert!(session.toggle_group_collapsed(gid));
+        assert!(session.group(gid).unwrap().collapsed);
+
+        assert!(session.toggle_group_collapsed(gid));
+        assert!(!session.group(gid).unwrap().collapsed);
+    }
+
+    #[test]
+    fn test_group_dirty_flag() {
+        let mut session = Session::new("Test", 48000, 256);
+        session.dirty = false;
+        session.add_group("G");
+        assert!(session.dirty);
+    }
+
+    #[test]
+    fn test_add_track_to_nonexistent_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Guitar");
+        let bogus = crate::track::TrackGroupId::new();
+        assert!(!session.add_track_to_group(bogus, t1));
+    }
+
+    #[test]
+    fn test_add_nonexistent_track_to_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let gid = session.add_group("G");
+        let bogus = TrackId::new();
+        assert!(!session.add_track_to_group(gid, bogus));
+    }
+
+    #[test]
+    fn test_remove_track_from_nonexistent_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Guitar");
+        let bogus = crate::track::TrackGroupId::new();
+        assert!(!session.remove_track_from_group(bogus, t1));
+    }
+
+    #[test]
+    fn test_multiple_groups_isolation() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Kick");
+        let t2 = session.add_audio_track("Guitar");
+        let g1 = session.add_group("Drums");
+        let g2 = session.add_group("Strings");
+        session.add_track_to_group(g1, t1);
+        session.add_track_to_group(g2, t2);
+
+        assert_eq!(session.track_group(t1).unwrap().id, g1);
+        assert_eq!(session.track_group(t2).unwrap().id, g2);
+
+        // Removing from wrong group fails
+        assert!(!session.remove_track_from_group(g1, t2));
+        assert!(!session.remove_track_from_group(g2, t1));
+    }
+
+    #[test]
+    fn test_rename_nonexistent_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bogus = crate::track::TrackGroupId::new();
+        assert!(!session.rename_group(bogus, "Nope"));
+    }
+
+    #[test]
+    fn test_toggle_collapsed_nonexistent_group() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bogus = crate::track::TrackGroupId::new();
+        assert!(!session.toggle_group_collapsed(bogus));
+    }
+
+    #[test]
+    fn test_group_mut_accessor() {
+        let mut session = Session::new("Test", 48000, 256);
+        let gid = session.add_group("Original");
+        session.group_mut(gid).unwrap().name = "Modified".into();
+        assert_eq!(session.group(gid).unwrap().name, "Modified");
+
+        let bogus = crate::track::TrackGroupId::new();
+        assert!(session.group_mut(bogus).is_none());
+    }
+
+    #[test]
+    fn test_session_with_groups_serde_roundtrip() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Kick");
+        let t2 = session.add_audio_track("Snare");
+        let gid = session.add_group("Drums");
+        session.add_track_to_group(gid, t1);
+        session.add_track_to_group(gid, t2);
+        session.group_mut(gid).unwrap().collapsed = true;
+
+        let json = serde_json::to_string(&session).unwrap();
+        let restored: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.groups.len(), 1);
+        assert_eq!(restored.groups[0].name, "Drums");
+        assert_eq!(restored.groups[0].tracks.len(), 2);
+        assert!(restored.groups[0].collapsed);
+    }
+
+    #[test]
+    fn test_session_without_groups_deserializes() {
+        // Serialize a session, strip the "groups" field, then deserialize.
+        // This simulates loading an old session file that predates track groups.
+        let session = Session::new("Old", 48000, 256);
+        let mut json = serde_json::to_string(&session).unwrap();
+        // Remove the groups field from the JSON
+        json = json.replace(r#","groups":[]"#, "");
+        let restored: Session = serde_json::from_str(&json).unwrap();
+        assert!(restored.groups.is_empty());
+        assert_eq!(restored.name, "Old");
     }
 }

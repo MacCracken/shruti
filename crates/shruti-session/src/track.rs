@@ -61,6 +61,69 @@ pub struct Send {
     pub enabled: bool,
 }
 
+/// Unique identifier for a track group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TrackGroupId(pub Uuid);
+
+impl TrackGroupId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for TrackGroupId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A named group of tracks for organizational purposes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackGroup {
+    pub id: TrackGroupId,
+    pub name: String,
+    /// Ordered list of member track IDs.
+    pub tracks: Vec<TrackId>,
+    /// Whether the group is collapsed in the UI.
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
+impl TrackGroup {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            id: TrackGroupId::new(),
+            name: name.into(),
+            tracks: Vec::new(),
+            collapsed: false,
+        }
+    }
+
+    /// Add a track to this group if not already present.
+    pub fn add_track(&mut self, track_id: TrackId) -> bool {
+        if self.tracks.contains(&track_id) {
+            return false;
+        }
+        self.tracks.push(track_id);
+        true
+    }
+
+    /// Remove a track from this group.
+    pub fn remove_track(&mut self, track_id: TrackId) -> bool {
+        if let Some(pos) = self.tracks.iter().position(|&id| id == track_id) {
+            self.tracks.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a track is in this group.
+    pub fn contains(&self, track_id: TrackId) -> bool {
+        self.tracks.contains(&track_id)
+    }
+}
+
 /// A track in the session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
@@ -314,5 +377,51 @@ mod tests {
         assert_eq!(track.midi_clips.len(), 1);
         assert_eq!(track.midi_clips[0].notes.len(), 2);
         assert_eq!(track.midi_clips[0].control_changes.len(), 1);
+    }
+
+    #[test]
+    fn test_track_group_creation() {
+        let group = TrackGroup::new("Drums");
+        assert_eq!(group.name, "Drums");
+        assert!(group.tracks.is_empty());
+        assert!(!group.collapsed);
+    }
+
+    #[test]
+    fn test_track_group_add_remove() {
+        let mut group = TrackGroup::new("Vocals");
+        let t1 = TrackId::new();
+        let t2 = TrackId::new();
+
+        assert!(group.add_track(t1));
+        assert!(group.add_track(t2));
+        assert_eq!(group.tracks.len(), 2);
+
+        // Duplicate add returns false
+        assert!(!group.add_track(t1));
+        assert_eq!(group.tracks.len(), 2);
+
+        assert!(group.contains(t1));
+        assert!(group.contains(t2));
+
+        assert!(group.remove_track(t1));
+        assert!(!group.contains(t1));
+        assert_eq!(group.tracks.len(), 1);
+
+        // Remove non-member returns false
+        assert!(!group.remove_track(t1));
+    }
+
+    #[test]
+    fn test_track_group_serde_roundtrip() {
+        let mut group = TrackGroup::new("FX");
+        group.add_track(TrackId::new());
+        group.collapsed = true;
+        let json = serde_json::to_string(&group).unwrap();
+        let restored: TrackGroup = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.id, group.id);
+        assert_eq!(restored.name, "FX");
+        assert_eq!(restored.tracks.len(), 1);
+        assert!(restored.collapsed);
     }
 }

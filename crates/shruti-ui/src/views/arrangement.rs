@@ -7,6 +7,8 @@ use crate::state::{ArrangementDrag, UiState};
 use crate::theme::ThemeColors;
 use crate::widgets::{automation_lane, region_clip, timeline_ruler, track_header, waveform};
 
+const GROUP_HEADER_HEIGHT: f32 = 24.0;
+
 const TRACK_HEADER_WIDTH: f32 = 160.0;
 const TRACK_HEIGHT: f32 = 60.0;
 const RULER_HEIGHT: f32 = 24.0;
@@ -97,7 +99,75 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
         .show(&mut content_ui, |ui| {
             let track_count = state.session.tracks.len();
 
+            // Build a set of track IDs that are hidden (in collapsed groups)
+            let mut hidden_tracks = std::collections::HashSet::new();
+            let mut rendered_group_headers = std::collections::HashSet::new();
+            for group in &state.session.groups {
+                if group.collapsed {
+                    for &tid in &group.tracks {
+                        hidden_tracks.insert(tid);
+                    }
+                }
+            }
+
             for track_idx in 0..track_count {
+                let track_id = state.session.tracks[track_idx].id;
+
+                // If this track belongs to a group, render the group header before first member
+                if let Some(group) = state.session.track_group(track_id) {
+                    let gid = group.id;
+                    if !rendered_group_headers.contains(&gid) {
+                        rendered_group_headers.insert(gid);
+                        let group_name = group.name.clone();
+                        let collapsed = group.collapsed;
+                        let member_count = group.tracks.len();
+
+                        // Draw group header row
+                        ui.horizontal(|ui| {
+                            let (rect, resp) = ui.allocate_exact_size(
+                                vec2(
+                                    TRACK_HEADER_WIDTH + ui.available_width(),
+                                    GROUP_HEADER_HEIGHT,
+                                ),
+                                egui::Sense::click(),
+                            );
+                            if ui.is_rect_visible(rect) {
+                                let painter = ui.painter_at(rect);
+                                painter.rect_filled(rect, 0.0, colors.surface());
+                                painter.line_segment(
+                                    [rect.left_bottom(), rect.right_bottom()],
+                                    Stroke::new(0.5, colors.separator()),
+                                );
+
+                                let arrow = if collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                let label = format!("{} {} ({})", arrow, group_name, member_count);
+                                painter.text(
+                                    pos2(rect.left() + 8.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    label,
+                                    egui::FontId::new(11.0, egui::FontFamily::Proportional),
+                                    colors.text_primary(),
+                                );
+                            }
+                            if resp.clicked() {
+                                // Toggle collapsed
+                                if let Some(g) = state.session.group_mut(gid) {
+                                    g.collapsed = !g.collapsed;
+                                    if g.collapsed {
+                                        state.collapsed_groups.insert(gid);
+                                    } else {
+                                        state.collapsed_groups.remove(&gid);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+
+                // Skip tracks in collapsed groups
+                if hidden_tracks.contains(&track_id) {
+                    continue;
+                }
                 ui.horizontal(|ui| {
                     // Track header
                     let track = &state.session.tracks[track_idx];
