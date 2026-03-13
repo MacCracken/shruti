@@ -244,4 +244,190 @@ mod tests {
         assert_eq!(env.state, EnvelopeState::Idle);
         assert_eq!(env.level, 0.0);
     }
+
+    /// Helper: count samples until envelope leaves a given state.
+    fn samples_in_state(env: &mut Envelope, target_state: EnvelopeState, max: usize) -> usize {
+        let mut count = 0;
+        while env.state == target_state && count < max {
+            env.tick();
+            count += 1;
+        }
+        count
+    }
+
+    /// Helper: convert samples to milliseconds.
+    fn samples_to_ms(samples: usize, sample_rate: f32) -> f32 {
+        samples as f32 / sample_rate * 1000.0
+    }
+
+    #[test]
+    fn attack_timing_44100() {
+        let attack_s = 0.050; // 50ms
+        let sr = 44100.0;
+        let params = AdsrParams {
+            attack: attack_s,
+            decay: 0.001,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, sr);
+        env.trigger();
+        let samples = samples_in_state(&mut env, EnvelopeState::Attack, 100000);
+        let ms = samples_to_ms(samples, sr);
+        let expected_ms = attack_s * 1000.0;
+        assert!(
+            (ms - expected_ms).abs() < 1.0,
+            "attack at 44100: expected {expected_ms}ms, got {ms}ms"
+        );
+    }
+
+    #[test]
+    fn attack_timing_48000() {
+        let attack_s = 0.050;
+        let sr = 48000.0;
+        let params = AdsrParams {
+            attack: attack_s,
+            decay: 0.001,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, sr);
+        env.trigger();
+        let samples = samples_in_state(&mut env, EnvelopeState::Attack, 100000);
+        let ms = samples_to_ms(samples, sr);
+        let expected_ms = attack_s * 1000.0;
+        assert!(
+            (ms - expected_ms).abs() < 1.0,
+            "attack at 48000: expected {expected_ms}ms, got {ms}ms"
+        );
+    }
+
+    #[test]
+    fn attack_timing_96000() {
+        let attack_s = 0.050;
+        let sr = 96000.0;
+        let params = AdsrParams {
+            attack: attack_s,
+            decay: 0.001,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, sr);
+        env.trigger();
+        let samples = samples_in_state(&mut env, EnvelopeState::Attack, 100000);
+        let ms = samples_to_ms(samples, sr);
+        let expected_ms = attack_s * 1000.0;
+        assert!(
+            (ms - expected_ms).abs() < 1.0,
+            "attack at 96000: expected {expected_ms}ms, got {ms}ms"
+        );
+    }
+
+    #[test]
+    fn decay_timing_accuracy() {
+        let decay_s = 0.100; // 100ms
+        let sr = 48000.0;
+        let params = AdsrParams {
+            attack: 0.001,
+            decay: decay_s,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, sr);
+        env.trigger();
+        // Run through attack first
+        samples_in_state(&mut env, EnvelopeState::Attack, 100000);
+        // Now measure decay
+        let samples = samples_in_state(&mut env, EnvelopeState::Decay, 100000);
+        let ms = samples_to_ms(samples, sr);
+        let expected_ms = decay_s * 1000.0;
+        assert!(
+            (ms - expected_ms).abs() < 1.0,
+            "decay: expected {expected_ms}ms, got {ms}ms"
+        );
+    }
+
+    #[test]
+    fn release_timing_accuracy() {
+        let release_s = 0.200; // 200ms
+        let sr = 48000.0;
+        let params = AdsrParams {
+            attack: 0.001,
+            decay: 0.001,
+            sustain: 0.5,
+            release: release_s,
+        };
+        let mut env = Envelope::new(params, sr);
+        env.trigger();
+        // Run through attack + decay to sustain
+        for _ in 0..1000 {
+            env.tick();
+        }
+        assert_eq!(env.state, EnvelopeState::Sustain);
+        env.release();
+        let samples = samples_in_state(&mut env, EnvelopeState::Release, 100000);
+        let ms = samples_to_ms(samples, sr);
+        let expected_ms = release_s * 1000.0;
+        assert!(
+            (ms - expected_ms).abs() < 1.0,
+            "release: expected {expected_ms}ms, got {ms}ms"
+        );
+    }
+
+    #[test]
+    fn short_attack_timing() {
+        // Very short attack: 1ms
+        let attack_s = 0.001;
+        let sr = 48000.0;
+        let params = AdsrParams {
+            attack: attack_s,
+            decay: 0.01,
+            sustain: 0.5,
+            release: 0.01,
+        };
+        let mut env = Envelope::new(params, sr);
+        env.trigger();
+        let samples = samples_in_state(&mut env, EnvelopeState::Attack, 100000);
+        let ms = samples_to_ms(samples, sr);
+        let expected_ms = attack_s * 1000.0;
+        assert!(
+            (ms - expected_ms).abs() < 1.0,
+            "1ms attack: expected {expected_ms}ms, got {ms}ms"
+        );
+    }
+
+    #[test]
+    fn sample_rate_change_adjusts_timing() {
+        let attack_s = 0.050;
+        let params = AdsrParams {
+            attack: attack_s,
+            decay: 0.01,
+            sustain: 0.5,
+            release: 0.01,
+        };
+
+        // At 44100
+        let mut env1 = Envelope::new(params.clone(), 44100.0);
+        env1.trigger();
+        let samples1 = samples_in_state(&mut env1, EnvelopeState::Attack, 100000);
+
+        // At 96000
+        let mut env2 = Envelope::new(params, 96000.0);
+        env2.trigger();
+        let samples2 = samples_in_state(&mut env2, EnvelopeState::Attack, 100000);
+
+        // Higher sample rate should need more samples for same time
+        assert!(
+            samples2 > samples1,
+            "96kHz should need more samples than 44.1kHz: {samples2} vs {samples1}"
+        );
+
+        // But the time should be the same (within 1ms)
+        let ms1 = samples_to_ms(samples1, 44100.0);
+        let ms2 = samples_to_ms(samples2, 96000.0);
+        assert!(
+            (ms1 - ms2).abs() < 1.0,
+            "timing should match across sample rates: {ms1}ms vs {ms2}ms"
+        );
+    }
 }

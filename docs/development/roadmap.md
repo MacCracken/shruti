@@ -94,7 +94,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 |---|------|--------|-------|
 | 1 | Subtractive synth | Done | PolyBLEP oscillator, dual ADSR (amp + filter), SVF filter (LP/HP/BP/Notch), dual LFO (6 shapes × 4 targets), 23 params, 16-voice polyphony |
 | 2 | Modulation matrix | Medium | Assignable mod sources (LFO, envelope, velocity, aftertouch, mod wheel) → any parameter; per-voice and global |
-| 3 | Effects per instrument | Small | Built-in chorus, distortion, filter drive — reuse existing DSP crate effects where possible |
+| 3 | Effects per instrument | Done | EffectChain with 5 types (Chorus, Delay, Reverb, Distortion, FilterDrive), integrated into SubtractiveSynth, DrumMachine, Sampler |
 | 4 | Oscillator anti-aliasing | Done | PolyBLEP for alias-free saw/square at all frequencies |
 
 ### 8B+ — Post-MVP Synthesizers
@@ -117,9 +117,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 1 | Drum pad engine | Done | 16-pad sample player, one-shot/looped, pitch/gain/pan/decay, GM drum map (note 36+), velocity sensitivity |
 | 2 | Step sequencer | Done | 16/32/64-step grid per pad, swing, per-step probability, accent, BPM-synced |
 | 3 | Pattern system | Medium | Pattern banks (A/B/C/D × 16), pattern chaining, song mode (pattern sequence on timeline) |
-| 4 | Kit management | Small | Drum kits as preset bundles (samples + tuning + FX); import/export, factory kits |
+| 4 | Kit management | Done | DrumKit preset: 16-pad config snapshot with save/load JSON, sample_path references, from_drum_machine/apply_to |
 | 5 | Sample layering | Medium | Velocity layers per pad (up to 8 layers), round-robin, random variation |
-| 6 | Per-pad effects | Small | Filter, drive, send to reverb/delay per individual pad |
+| 6 | Per-pad effects | Done | PadEffects with one-pole LPF, tanh drive, reverb/delay send levels per pad |
 
 ### 8D — Sampler
 
@@ -129,7 +129,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 2 | Sample editing | Medium | In-place trim, loop points (forward/ping-pong/one-shot), fade, normalize |
 | 3 | Time-stretching | Large | Granular or phase-vocoder based pitch-independent time stretch; real-time quality |
 | 4 | Slice mode | Medium | Auto-slice by transients, map slices to MIDI keys (REX-style) |
-| 5 | Sample format support | Small | WAV, FLAC, AIFF, OGG import; leverage existing shruti-dsp I/O |
+| 5 | Sample format support | Done | WAV, FLAC, AIFF, OGG/Vorbis via symphonia; SUPPORTED_EXTENSIONS, is_supported_extension() |
 | 6 | SFZ/SF2 import | Medium | Load SoundFont and SFZ instrument definitions for instant playability |
 
 ### 8E — Instrument UI
@@ -141,7 +141,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 3 | Drum machine grid | Medium | 16-pad grid view with step sequencer, pattern selector, per-pad waveform display |
 | 4 | Sampler editor | Medium | Waveform view with loop points, zone editor (key/velocity matrix), drag-and-drop sample loading |
 | 5 | Piano roll integration | Medium | Per-instrument piano roll respects key ranges, drum names on rows for drum tracks |
-| 6 | Parameter automation | Small | All instrument parameters exposed as automation targets in arrangement view |
+| 6 | Parameter automation | Done | InstrumentParam target variant, label(), instrument_targets() helper |
 
 ### 8F — Track Type Organization
 
@@ -151,8 +151,8 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 2 | `TrackKind::DrumMachine` | Medium | Specialized instrument track: drum pad layout, step sequencer, pattern-based workflow |
 | 3 | `TrackKind::Sampler` | Medium | Specialized instrument track: multi-sample zones, slice mode, time-stretch |
 | 4 | `TrackKind::AiPlayer` | Medium | AI-controlled instrument track: model selection, style/creativity params (see Phase 9) |
-| 5 | Track kind icons & colors | Small | Distinct icons and default colors per track kind in headers and mixer strips |
-| 6 | Track templates | Small | Save/load track configurations (kind + instrument + effects chain + routing) as reusable templates |
+| 5 | Track kind icons & colors | Done | Unicode icons, RGB default colors, labels per TrackKind; Track::color override with display_color() |
+| 6 | Track templates | Done | TrackTemplate: save/load track config (kind, gain, pan, channels, instrument params, color) as JSON |
 | 7 | Track groups / folders | Done | Collapsible track groups with undo/redo, arrangement + mixer UI integration |
 | 8 | Output routing matrix | Medium | Any track → any bus/master; sidechain routing for compressor keying |
 
@@ -162,9 +162,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 |---|------|--------|-------|
 | 1 | Oscillator accuracy tests | Medium | Frequency accuracy, aliasing measurements, DC offset checks across full MIDI range |
 | 2 | Filter response tests | Medium | Verify cutoff, resonance, slope against expected frequency response curves |
-| 3 | Envelope timing tests | Small | Attack/decay/release timing accuracy within ±1ms at various sample rates |
+| 3 | Envelope timing tests | Done | Attack/decay/release ±1ms at 44100/48000/96000 Hz, sample rate change consistency |
 | 4 | Polyphony stress tests | Medium | Max voices, voice stealing correctness, no clicks/pops on voice allocation |
-| 5 | Preset roundtrip tests | Small | Save/load every factory preset, verify identical output |
+| 5 | Preset roundtrip tests | Done | Synth (with audio verify), DrumMachine, Sampler preset roundtrips + cross-instrument JSON |
 | 6 | Sample playback tests | Medium | Correct pitch mapping, loop points, velocity layer selection, one-shot vs gated |
 | 7 | Step sequencer tests | Medium | Timing accuracy, swing calculation, probability distribution, pattern chaining |
 | 8 | Instrument ↔ MIDI integration | Medium | End-to-end: MIDI clip → instrument → audio output verification |

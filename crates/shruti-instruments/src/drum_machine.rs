@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use shruti_dsp::AudioBuffer;
 use shruti_session::midi::{ControlChange, NoteEvent};
 
+use crate::effect_chain::EffectChain;
 use crate::instrument::{InstrumentInfo, InstrumentNode, InstrumentParam};
 
 pub const NUM_PADS: usize = 16;
@@ -10,6 +11,63 @@ pub const NUM_PADS: usize = 16;
 pub enum PlayMode {
     OneShot,
     Looped,
+}
+
+/// Per-pad effect settings.
+#[derive(Debug, Clone)]
+pub struct PadEffects {
+    /// Filter cutoff (0.0–1.0, where 1.0 = fully open / no filtering).
+    pub filter_cutoff: f32,
+    /// Drive amount (1.0 = clean, higher = more saturation).
+    pub drive: f32,
+    /// Send level to reverb bus (0.0–1.0).
+    pub reverb_send: f32,
+    /// Send level to delay bus (0.0–1.0).
+    pub delay_send: f32,
+    /// One-pole filter state (per channel: left, right).
+    filter_state: [f32; 2],
+}
+
+impl Default for PadEffects {
+    fn default() -> Self {
+        Self {
+            filter_cutoff: 1.0,
+            drive: 1.0,
+            reverb_send: 0.0,
+            delay_send: 0.0,
+            filter_state: [0.0; 2],
+        }
+    }
+}
+
+impl PadEffects {
+    /// Process a stereo sample pair through filter and drive.
+    pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
+        let (mut l, mut r) = (left, right);
+
+        // One-pole lowpass filter (cutoff < 1.0 enables filtering)
+        if self.filter_cutoff < 1.0 {
+            // Map cutoff 0..1 to coefficient: 0 = fully filtered, 1 = open
+            let coeff = self.filter_cutoff.clamp(0.0, 1.0);
+            self.filter_state[0] += coeff * (l - self.filter_state[0]);
+            self.filter_state[1] += coeff * (r - self.filter_state[1]);
+            l = self.filter_state[0];
+            r = self.filter_state[1];
+        }
+
+        // Tanh soft-clip drive (drive > 1.0 adds saturation)
+        if self.drive > 1.0 {
+            l = (l * self.drive).tanh();
+            r = (r * self.drive).tanh();
+        }
+
+        (l, r)
+    }
+
+    /// Reset filter state.
+    pub fn reset(&mut self) {
+        self.filter_state = [0.0; 2];
+    }
 }
 
 /// A single drum pad with a sample buffer and settings.
@@ -23,6 +81,8 @@ pub struct DrumPad {
     pub decay: f32,
     pub play_mode: PlayMode,
     pub midi_note: u8,
+    /// Per-pad effects (filter, drive, sends).
+    pub effects: PadEffects,
     play_pos: f64,
     playing: bool,
     velocity: f32,
@@ -41,6 +101,7 @@ impl DrumPad {
             decay: 0.0,
             play_mode: PlayMode::OneShot,
             midi_note,
+            effects: PadEffects::default(),
             play_pos: 0.0,
             playing: false,
             velocity: 0.0,
@@ -136,7 +197,10 @@ impl DrumPad {
         let left_gain = angle.cos();
         let right_gain = angle.sin();
 
-        (out * left_gain, out * right_gain)
+        let (l, r) = (out * left_gain, out * right_gain);
+
+        // Apply per-pad effects (filter + drive)
+        self.effects.process(l, r)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -169,6 +233,8 @@ pub struct DrumMachine {
     params: Vec<InstrumentParam>,
     pub pads: Vec<DrumPad>,
     sample_rate: f32,
+    /// Per-instrument effect chain.
+    pub effect_chain: EffectChain,
 }
 
 impl DrumMachine {
@@ -191,38 +257,23 @@ impl DrumMachine {
             params,
             pads,
             sample_rate,
+            effect_chain: EffectChain::new(),
         }
     }
 
     fn find_pad_by_note(&self, note: u8) -> Option<usize> {
         self.pads.iter().position(|p| p.midi_note == note)
     }
-}
 
-impl InstrumentNode for DrumMachine {
-    fn info(&self) -> &InstrumentInfo {
-        &self.info
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
-    }
-
-    fn process(
-        &mut self,
-        note_events: &[NoteEvent],
-        _control_changes: &[ControlChange],
-        output: &mut AudioBuffer,
-    ) {
+    /// Render pads into output buffer (adds to existing content).
+    fn render_pads(&mut self, note_events: &[NoteEvent], output: &mut AudioBuffer) {
         let frames = output.frames();
         let volume = self.params[0].value;
 
-        // Process note events at the start of the block
         for event in note_events {
             self.note_on(event.note, event.velocity, event.channel);
         }
 
-        // Render each frame
         for frame in 0..frames {
             let mut left = 0.0_f32;
             let mut right = 0.0_f32;
@@ -247,6 +298,36 @@ impl InstrumentNode for DrumMachine {
                 let cur = output.get(frame, 0);
                 output.set(frame, 0, cur + (left + right) * 0.5);
             }
+        }
+    }
+}
+
+impl InstrumentNode for DrumMachine {
+    fn info(&self) -> &InstrumentInfo {
+        &self.info
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+        self.effect_chain.set_sample_rate(sample_rate);
+    }
+
+    fn process(
+        &mut self,
+        note_events: &[NoteEvent],
+        _control_changes: &[ControlChange],
+        output: &mut AudioBuffer,
+    ) {
+        let has_active_effects = self.effect_chain.effects().iter().any(|e| e.enabled);
+
+        if has_active_effects {
+            let mut chain = std::mem::take(&mut self.effect_chain);
+            chain.process_with(output, |buf| {
+                self.render_pads(note_events, buf);
+            });
+            self.effect_chain = chain;
+        } else {
+            self.render_pads(note_events, output);
         }
     }
 
@@ -276,6 +357,7 @@ impl InstrumentNode for DrumMachine {
         for pad in &mut self.pads {
             pad.stop();
         }
+        self.effect_chain.reset();
     }
 
     fn active_voices(&self) -> usize {
@@ -542,5 +624,99 @@ mod tests {
 
         dm.reset();
         assert_eq!(dm.active_voices(), 0);
+    }
+
+    #[test]
+    fn pad_effects_default_is_clean() {
+        let effects = PadEffects::default();
+        assert_eq!(effects.filter_cutoff, 1.0);
+        assert_eq!(effects.drive, 1.0);
+        assert_eq!(effects.reverb_send, 0.0);
+        assert_eq!(effects.delay_send, 0.0);
+    }
+
+    #[test]
+    fn pad_effects_passthrough_when_clean() {
+        let mut effects = PadEffects::default();
+        let (l, r) = effects.process(0.5, -0.3);
+        assert!((l - 0.5).abs() < 1e-6);
+        assert!((r - (-0.3)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pad_effects_filter_attenuates() {
+        let mut effects = PadEffects::default();
+        effects.filter_cutoff = 0.05; // very low cutoff
+
+        // Feed an alternating signal (high frequency content) — filter should smooth it
+        let mut sum_filtered = 0.0_f32;
+        let mut sum_dry = 0.0_f32;
+        for i in 0..100 {
+            let input = if i % 2 == 0 { 1.0 } else { -1.0 };
+            let (l, _) = effects.process(input, 0.0);
+            sum_filtered += l.abs();
+            sum_dry += input.abs();
+        }
+        // Filtered signal should have less total energy than dry
+        assert!(
+            sum_filtered < sum_dry * 0.5,
+            "low cutoff filter should attenuate high-freq content: filtered={sum_filtered}, dry={sum_dry}"
+        );
+    }
+
+    #[test]
+    fn pad_effects_drive_saturates() {
+        let mut effects = PadEffects::default();
+        effects.drive = 5.0;
+
+        let (l, _) = effects.process(0.8, 0.0);
+        // tanh(0.8 * 5.0) = tanh(4.0) ≈ 0.9993
+        assert!(
+            l > 0.99,
+            "high drive should saturate signal near 1.0, got {l}"
+        );
+
+        // Soft signal should be less affected
+        let (l_soft, _) = effects.process(0.1, 0.0);
+        // tanh(0.1 * 5.0) = tanh(0.5) ≈ 0.462
+        assert!(
+            (l_soft - 0.1).abs() > 0.01,
+            "drive should change the signal shape"
+        );
+    }
+
+    #[test]
+    fn pad_with_filter_produces_different_output() {
+        let mut pad_clean = DrumPad::new("Clean", 36);
+        pad_clean.load_sample(vec![1.0; 100], 44100);
+        pad_clean.decay = 0.0;
+        pad_clean.trigger(127);
+
+        let mut pad_filtered = DrumPad::new("Filtered", 36);
+        pad_filtered.load_sample(vec![1.0; 100], 44100);
+        pad_filtered.decay = 0.0;
+        pad_filtered.effects.filter_cutoff = 0.1;
+        pad_filtered.trigger(127);
+
+        let (clean_l, _) = pad_clean.tick();
+        let (filt_l, _) = pad_filtered.tick();
+
+        // First sample through a low-cutoff filter should be quieter
+        assert!(
+            filt_l.abs() < clean_l.abs(),
+            "filtered pad should be quieter on first sample: clean={clean_l}, filtered={filt_l}"
+        );
+    }
+
+    #[test]
+    fn pad_effects_reset_clears_filter_state() {
+        let mut effects = PadEffects::default();
+        effects.filter_cutoff = 0.5;
+        effects.process(1.0, 1.0);
+        assert!(effects.filter_state[0] != 0.0);
+
+        effects.reset();
+        assert_eq!(effects.filter_state[0], 0.0);
+        assert_eq!(effects.filter_state[1], 0.0);
     }
 }

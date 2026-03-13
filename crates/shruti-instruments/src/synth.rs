@@ -1,6 +1,7 @@
 use shruti_dsp::AudioBuffer;
 use shruti_session::midi::{ControlChange, NoteEvent};
 
+use crate::effect_chain::EffectChain;
 use crate::envelope::{AdsrParams, Envelope};
 use crate::filter::{Filter, FilterMode};
 use crate::instrument::{InstrumentInfo, InstrumentNode, InstrumentParam};
@@ -30,6 +31,8 @@ pub struct SubtractiveSynth {
     lfo1: Lfo,
     lfo2: Lfo,
     sample_rate: f32,
+    /// Per-instrument effect chain (chorus, delay, reverb, distortion, filter drive).
+    pub effect_chain: EffectChain,
 }
 
 // Parameter indices
@@ -140,6 +143,7 @@ impl SubtractiveSynth {
             lfo1,
             lfo2,
             sample_rate,
+            effect_chain: EffectChain::new(),
         }
     }
 
@@ -202,35 +206,9 @@ impl SubtractiveSynth {
     }
 }
 
-impl InstrumentNode for SubtractiveSynth {
-    fn info(&self) -> &InstrumentInfo {
-        &self.info
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
-        for osc in &mut self.oscillators {
-            osc.set_sample_rate(sample_rate as f64);
-        }
-        for env in &mut self.envelopes {
-            env.set_sample_rate(sample_rate);
-        }
-        for env in &mut self.filter_envelopes {
-            env.set_sample_rate(sample_rate);
-        }
-        for filt in &mut self.filters {
-            filt.set_sample_rate(sample_rate);
-        }
-        self.lfo1.set_sample_rate(sample_rate);
-        self.lfo2.set_sample_rate(sample_rate);
-    }
-
-    fn process(
-        &mut self,
-        note_events: &[NoteEvent],
-        _control_changes: &[ControlChange],
-        output: &mut AudioBuffer,
-    ) {
+impl SubtractiveSynth {
+    /// Render all active voices into the output buffer (adds to existing content).
+    fn render_voices(&mut self, note_events: &[NoteEvent], output: &mut AudioBuffer) {
         let frames = output.frames() as usize;
         let channels = output.channels();
         let volume = self.params[PARAM_VOLUME].value;
@@ -270,7 +248,6 @@ impl InstrumentNode for SubtractiveSynth {
         }
 
         // Pre-compute per-frame LFO values into stack-allocated buffer.
-        // Max buffer size for audio is typically 1024-4096 frames; 8192 is generous.
         const MAX_LFO_FRAMES: usize = 8192;
         let clamped_frames = frames.min(MAX_LFO_FRAMES);
         let mut lfo1_values = [0.0f32; MAX_LFO_FRAMES];
@@ -352,6 +329,51 @@ impl InstrumentNode for SubtractiveSynth {
 
         self.voice_manager.tick_age();
     }
+}
+
+impl InstrumentNode for SubtractiveSynth {
+    fn info(&self) -> &InstrumentInfo {
+        &self.info
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+        for osc in &mut self.oscillators {
+            osc.set_sample_rate(sample_rate as f64);
+        }
+        for env in &mut self.envelopes {
+            env.set_sample_rate(sample_rate);
+        }
+        for env in &mut self.filter_envelopes {
+            env.set_sample_rate(sample_rate);
+        }
+        for filt in &mut self.filters {
+            filt.set_sample_rate(sample_rate);
+        }
+        self.lfo1.set_sample_rate(sample_rate);
+        self.lfo2.set_sample_rate(sample_rate);
+        self.effect_chain.set_sample_rate(sample_rate);
+    }
+
+    fn process(
+        &mut self,
+        note_events: &[NoteEvent],
+        _control_changes: &[ControlChange],
+        output: &mut AudioBuffer,
+    ) {
+        let has_active_effects = self.effect_chain.effects().iter().any(|e| e.enabled);
+
+        if has_active_effects {
+            // Temporarily take the effect chain to avoid borrow conflict
+            let mut chain = std::mem::take(&mut self.effect_chain);
+            chain.process_with(output, |buf| {
+                self.render_voices(note_events, buf);
+            });
+            self.effect_chain = chain;
+        } else {
+            self.render_voices(note_events, output);
+        }
+    }
 
     fn note_on(&mut self, note: u8, velocity: u8, channel: u8) {
         if let Some(idx) = self.voice_manager.note_on(note, velocity, channel) {
@@ -394,6 +416,7 @@ impl InstrumentNode for SubtractiveSynth {
         }
         self.lfo1.reset();
         self.lfo2.reset();
+        self.effect_chain.reset();
     }
 
     fn active_voices(&self) -> usize {

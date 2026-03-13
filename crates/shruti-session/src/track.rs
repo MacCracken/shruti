@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -39,6 +41,41 @@ pub enum TrackKind {
         #[serde(default)]
         instrument_type: Option<String>,
     },
+}
+
+impl TrackKind {
+    /// Unicode icon character for this track kind.
+    pub fn icon(&self) -> &'static str {
+        match self {
+            TrackKind::Audio => "\u{1F3B5}",             // musical note
+            TrackKind::Bus => "\u{1F500}",               // shuffle (routing)
+            TrackKind::Midi => "\u{1F3B9}",              // musical keyboard
+            TrackKind::Master => "\u{1F50A}",            // speaker high volume
+            TrackKind::Instrument { .. } => "\u{1F3B8}", // guitar (instrument)
+        }
+    }
+
+    /// Default RGB color for this track kind.
+    pub fn default_color(&self) -> [u8; 3] {
+        match self {
+            TrackKind::Audio => [66, 133, 244],             // blue
+            TrackKind::Bus => [251, 188, 4],                // amber
+            TrackKind::Midi => [52, 168, 83],               // green
+            TrackKind::Master => [234, 67, 53],             // red
+            TrackKind::Instrument { .. } => [171, 71, 188], // purple
+        }
+    }
+
+    /// Short label for this track kind.
+    pub fn label(&self) -> &'static str {
+        match self {
+            TrackKind::Audio => "Audio",
+            TrackKind::Bus => "Bus",
+            TrackKind::Midi => "MIDI",
+            TrackKind::Master => "Master",
+            TrackKind::Instrument { .. } => "Instrument",
+        }
+    }
 }
 
 /// Pre/post fader send position.
@@ -153,6 +190,9 @@ pub struct Track {
     /// Instrument parameter values for Instrument tracks (indexed by param position).
     #[serde(default)]
     pub instrument_params: Vec<f32>,
+    /// Custom track color override (RGB). If `None`, uses `TrackKind::default_color()`.
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
 }
 
 impl Track {
@@ -172,6 +212,7 @@ impl Track {
             automation: Vec::new(),
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
+            color: None,
         }
     }
 
@@ -191,6 +232,7 @@ impl Track {
             automation: Vec::new(),
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
+            color: None,
         }
     }
 
@@ -210,6 +252,7 @@ impl Track {
             automation: Vec::new(),
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
+            color: None,
         }
     }
 
@@ -229,6 +272,7 @@ impl Track {
             automation: Vec::new(),
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
+            color: None,
         }
     }
 
@@ -248,7 +292,13 @@ impl Track {
             automation: Vec::new(),
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
+            color: None,
         }
+    }
+
+    /// Returns the track's display color: custom override or kind default.
+    pub fn display_color(&self) -> [u8; 3] {
+        self.color.unwrap_or_else(|| self.kind.default_color())
     }
 
     /// Add a region to this track.
@@ -281,6 +331,77 @@ impl Track {
             .iter()
             .filter(|r| !r.muted && r.timeline_pos < end && r.end_pos() > start)
             .collect()
+    }
+}
+
+/// A reusable track configuration template (kind + settings, no content).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackTemplate {
+    /// Template name.
+    pub name: String,
+    /// Track kind.
+    pub kind: TrackKind,
+    /// Default gain.
+    pub gain: f32,
+    /// Default pan.
+    pub pan: f32,
+    /// Number of channels.
+    pub channels: u16,
+    /// Instrument parameter defaults.
+    #[serde(default)]
+    pub instrument_params: Vec<f32>,
+    /// Custom color override.
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+}
+
+impl TrackTemplate {
+    /// Create a template from an existing track (captures settings, not content).
+    pub fn from_track(track: &Track, template_name: &str) -> Self {
+        Self {
+            name: template_name.to_string(),
+            kind: track.kind.clone(),
+            gain: track.gain,
+            pan: track.pan,
+            channels: track.channels,
+            instrument_params: track.instrument_params.clone(),
+            color: track.color,
+        }
+    }
+
+    /// Create a new track from this template.
+    pub fn create_track(&self, track_name: &str) -> Track {
+        Track {
+            id: TrackId::new(),
+            name: track_name.to_string(),
+            kind: self.kind.clone(),
+            regions: Vec::new(),
+            gain: self.gain,
+            pan: self.pan,
+            muted: false,
+            solo: false,
+            armed: false,
+            channels: self.channels,
+            sends: Vec::new(),
+            automation: Vec::new(),
+            midi_clips: Vec::new(),
+            instrument_params: self.instrument_params.clone(),
+            color: self.color,
+        }
+    }
+
+    /// Save the template as JSON.
+    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    /// Load a template from JSON.
+    pub fn load(path: &Path) -> Result<Self, std::io::Error> {
+        let data = std::fs::read_to_string(path)?;
+        serde_json::from_str(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -423,5 +544,158 @@ mod tests {
         assert_eq!(restored.name, "FX");
         assert_eq!(restored.tracks.len(), 1);
         assert!(restored.collapsed);
+    }
+
+    #[test]
+    fn track_kind_icons_are_distinct() {
+        let kinds = [
+            TrackKind::Audio,
+            TrackKind::Bus,
+            TrackKind::Midi,
+            TrackKind::Master,
+            TrackKind::Instrument {
+                instrument_type: None,
+            },
+        ];
+        let icons: Vec<&str> = kinds.iter().map(|k| k.icon()).collect();
+        // All icons should be unique
+        for (i, a) in icons.iter().enumerate() {
+            for (j, b) in icons.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "icons should be unique");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn track_kind_colors_are_distinct() {
+        let kinds = [
+            TrackKind::Audio,
+            TrackKind::Bus,
+            TrackKind::Midi,
+            TrackKind::Master,
+            TrackKind::Instrument {
+                instrument_type: None,
+            },
+        ];
+        let colors: Vec<[u8; 3]> = kinds.iter().map(|k| k.default_color()).collect();
+        for (i, a) in colors.iter().enumerate() {
+            for (j, b) in colors.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "colors should be unique");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn track_kind_labels() {
+        assert_eq!(TrackKind::Audio.label(), "Audio");
+        assert_eq!(TrackKind::Bus.label(), "Bus");
+        assert_eq!(TrackKind::Midi.label(), "MIDI");
+        assert_eq!(TrackKind::Master.label(), "Master");
+        assert_eq!(
+            TrackKind::Instrument {
+                instrument_type: None
+            }
+            .label(),
+            "Instrument"
+        );
+    }
+
+    #[test]
+    fn track_display_color_uses_default() {
+        let track = Track::new_audio("Test");
+        assert_eq!(track.display_color(), TrackKind::Audio.default_color());
+    }
+
+    #[test]
+    fn track_display_color_uses_override() {
+        let mut track = Track::new_audio("Test");
+        track.color = Some([255, 0, 128]);
+        assert_eq!(track.display_color(), [255, 0, 128]);
+    }
+
+    #[test]
+    fn track_color_serde_backward_compat() {
+        // Serialize a track, strip the color field, and verify deserialization defaults to None
+        let track = Track::new_audio("Test");
+        let json = serde_json::to_string(&track).unwrap();
+        let without_color = json.replace(",\"color\":null", "");
+        let restored: Track = serde_json::from_str(&without_color).unwrap();
+        assert!(restored.color.is_none());
+    }
+
+    #[test]
+    fn template_from_track_captures_settings() {
+        let mut track = Track::new_instrument("Synth Lead", Some("SubtractiveSynth".to_string()));
+        track.gain = 0.7;
+        track.pan = -0.2;
+        track.instrument_params = vec![0.5, 0.3, 0.8];
+        track.color = Some([100, 200, 50]);
+
+        let tmpl = TrackTemplate::from_track(&track, "Lead Template");
+        assert_eq!(tmpl.name, "Lead Template");
+        assert_eq!(
+            tmpl.kind,
+            TrackKind::Instrument {
+                instrument_type: Some("SubtractiveSynth".to_string())
+            }
+        );
+        assert!((tmpl.gain - 0.7).abs() < f32::EPSILON);
+        assert!((tmpl.pan - (-0.2)).abs() < f32::EPSILON);
+        assert_eq!(tmpl.instrument_params, vec![0.5, 0.3, 0.8]);
+        assert_eq!(tmpl.color, Some([100, 200, 50]));
+    }
+
+    #[test]
+    fn template_creates_new_track() {
+        let track = Track::new_audio("Original");
+        let tmpl = TrackTemplate::from_track(&track, "Audio Template");
+
+        let new_track = tmpl.create_track("New Audio");
+        assert_eq!(new_track.name, "New Audio");
+        assert_eq!(new_track.kind, TrackKind::Audio);
+        assert_ne!(new_track.id, track.id); // New track gets a new ID
+        assert!(new_track.regions.is_empty());
+        assert!(new_track.midi_clips.is_empty());
+    }
+
+    #[test]
+    fn template_serde_roundtrip() {
+        let track = Track::new_midi("MIDI Keys");
+        let tmpl = TrackTemplate::from_track(&track, "Keys Template");
+
+        let json = serde_json::to_string(&tmpl).unwrap();
+        let loaded: TrackTemplate = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.name, "Keys Template");
+        assert_eq!(loaded.kind, TrackKind::Midi);
+    }
+
+    #[test]
+    fn template_file_save_load() {
+        let track = Track::new_bus("FX Bus");
+        let tmpl = TrackTemplate::from_track(&track, "FX Bus Template");
+
+        let dir = std::env::temp_dir().join("shruti_template_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fx_bus.json");
+
+        tmpl.save(&path).unwrap();
+        let loaded = TrackTemplate::load(&path).unwrap();
+
+        assert_eq!(loaded.name, "FX Bus Template");
+        assert_eq!(loaded.kind, TrackKind::Bus);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn template_load_error() {
+        let result = TrackTemplate::load(Path::new("/nonexistent/template.json"));
+        assert!(result.is_err());
     }
 }

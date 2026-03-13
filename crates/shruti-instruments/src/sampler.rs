@@ -1,6 +1,7 @@
 use shruti_dsp::AudioBuffer;
 use shruti_session::midi::{ControlChange, NoteEvent};
 
+use crate::effect_chain::EffectChain;
 use crate::envelope::{AdsrParams, Envelope};
 use crate::instrument::{InstrumentInfo, InstrumentNode, InstrumentParam};
 use serde::{Deserialize, Serialize};
@@ -107,6 +108,8 @@ pub struct Sampler {
     voices: Vec<SamplerVoice>,
     max_voices: usize,
     sample_rate: f32,
+    /// Per-instrument effect chain.
+    pub effect_chain: EffectChain,
 }
 
 impl Sampler {
@@ -137,6 +140,7 @@ impl Sampler {
             voices,
             max_voices: MAX_VOICES,
             sample_rate,
+            effect_chain: EffectChain::new(),
         }
     }
 
@@ -172,55 +176,16 @@ impl Sampler {
         if self.max_voices > 0 { Some(0) } else { None }
     }
 
-    /// Read a sample from a zone with linear interpolation.
-    fn read_sample(zone: &SampleZone, pos: f64) -> f32 {
-        let len = zone.samples.len();
-        if len == 0 {
-            return 0.0;
-        }
-        let idx = pos.floor() as usize;
-        if idx >= len {
-            return 0.0;
-        }
-        let frac = (pos - pos.floor()) as f32;
-        let s0 = zone.samples[idx];
-        let s1 = if idx + 1 < len {
-            zone.samples[idx + 1]
-        } else {
-            s0
-        };
-        s0 * (1.0 - frac) + s1 * frac
-    }
-}
-
-impl InstrumentNode for Sampler {
-    fn info(&self) -> &InstrumentInfo {
-        &self.info
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
-        for voice in &mut self.voices {
-            voice.envelope.set_sample_rate(sample_rate);
-        }
-    }
-
-    fn process(
-        &mut self,
-        note_events: &[NoteEvent],
-        _control_changes: &[ControlChange],
-        output: &mut AudioBuffer,
-    ) {
+    /// Render all active voices into the output buffer (adds to existing content).
+    fn render_voices(&mut self, note_events: &[NoteEvent], output: &mut AudioBuffer) {
         let frames = output.frames() as usize;
         let channels = output.channels();
         let volume = self.params[PARAM_VOLUME].value;
 
-        // Process note events at the start of the block
         for event in note_events {
             self.note_on(event.note, event.velocity, event.channel);
         }
 
-        // Render each active voice
         for i in 0..self.max_voices {
             if !self.voices[i].active {
                 continue;
@@ -251,13 +216,11 @@ impl InstrumentNode for Sampler {
                     output.set(frame as u32, ch, current + out);
                 }
 
-                // Advance play position
                 let zone = &self.zones[zone_index];
                 match zone.loop_mode {
                     LoopMode::NoLoop => {
                         self.voices[i].play_pos += pitch_ratio;
                         if self.voices[i].play_pos >= zone.samples.len() as f64 {
-                            // Sample finished, trigger release if not already releasing
                             self.voices[i].active = false;
                             break;
                         }
@@ -289,6 +252,53 @@ impl InstrumentNode for Sampler {
                 }
             }
         }
+    }
+
+    /// Read a sample from a zone with linear interpolation.
+    fn read_sample(zone: &SampleZone, pos: f64) -> f32 {
+        let len = zone.samples.len();
+        if len == 0 {
+            return 0.0;
+        }
+        let idx = pos.floor() as usize;
+        if idx >= len {
+            return 0.0;
+        }
+        let frac = (pos - pos.floor()) as f32;
+        let s0 = zone.samples[idx];
+        let s1 = if idx + 1 < len {
+            zone.samples[idx + 1]
+        } else {
+            s0
+        };
+        s0 * (1.0 - frac) + s1 * frac
+    }
+}
+
+impl InstrumentNode for Sampler {
+    fn info(&self) -> &InstrumentInfo {
+        &self.info
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+        for voice in &mut self.voices {
+            voice.envelope.set_sample_rate(sample_rate);
+        }
+        self.effect_chain.set_sample_rate(sample_rate);
+    }
+
+    fn process(
+        &mut self,
+        note_events: &[NoteEvent],
+        _control_changes: &[ControlChange],
+        output: &mut AudioBuffer,
+    ) {
+        let mut chain = std::mem::take(&mut self.effect_chain);
+        chain.process_with(output, |buf| {
+            self.render_voices(note_events, buf);
+        });
+        self.effect_chain = chain;
     }
 
     fn note_on(&mut self, note: u8, velocity: u8, channel: u8) {
@@ -341,6 +351,7 @@ impl InstrumentNode for Sampler {
             voice.active = false;
             voice.envelope.reset();
         }
+        self.effect_chain.reset();
     }
 
     fn active_voices(&self) -> usize {

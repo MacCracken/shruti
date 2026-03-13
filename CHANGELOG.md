@@ -202,6 +202,60 @@ Format: CalVer (YYYY.M.D-N).
 - `shruti-session`: 131→137 tests (+6) — SessionError Display/source/From impls, RecordingConfig
 - Added `tarpaulin.toml` to exclude vendor code from coverage metrics
 
+### Instrument Testing
+- Envelope timing accuracy tests: attack, decay, release within ±1ms at 44100/48000/96000 Hz
+- Sample rate change test: verifies timing consistency across different rates
+- Preset roundtrip tests: SubtractiveSynth (with audio output verification), DrumMachine, Sampler
+- Cross-instrument JSON preset roundtrip test for all 3 instrument types
+- 12 new tests total (8 envelope timing + 4 preset roundtrip)
+
+### Parameter Automation Exposure
+- `AutomationTarget::InstrumentParam { param_index }` — all instrument parameters now automatable
+- `AutomationTarget::label()` — human-readable display label for any target
+- `AutomationTarget::instrument_targets(param_count)` — generates full target list for an instrument track
+- 4 tests: instrument param automation, target list generation, labels, serde roundtrip
+
+### Track Templates
+- `TrackTemplate`: reusable track configuration (kind, gain, pan, channels, instrument params, color)
+- `from_track()` captures settings without content; `create_track()` instantiates with new ID
+- File save/load as JSON (`save()` / `load()`)
+- 5 tests: capture settings, create track, serde roundtrip, file I/O, error handling
+
+### Track Kind Icons & Colors
+- `TrackKind::icon()` — distinct Unicode icon per kind (Audio, Bus, MIDI, Master, Instrument)
+- `TrackKind::default_color()` — unique RGB default color per kind (blue, amber, green, red, purple)
+- `TrackKind::label()` — short text label per kind
+- `Track::color` field with `#[serde(default)]` for user-customizable color override
+- `Track::display_color()` — returns custom color or kind default
+- 6 tests: distinct icons, distinct colors, labels, default color, override color, backward compat serde
+
+### Sample Format Support
+- AIFF and OGG/Vorbis import via symphonia feature flags (`aiff`, `ogg`, `vorbis`)
+- `SUPPORTED_EXTENSIONS` constant and `is_supported_extension()` helper
+- `read_audio_file()` now supports WAV, FLAC, AIFF, OGG
+- 4 reader tests: extension validation, WAV roundtrip, nonexistent file, invalid data
+
+### Per-Pad Effects
+- `PadEffects` per drum pad: one-pole LPF (cutoff 0–1), tanh drive saturation, reverb/delay send levels
+- Integrated into `DrumPad::tick()` — filter and drive applied post-pan
+- Saved/loaded in `DrumKitPad` with `#[serde(default)]` for backward compatibility
+- 6 tests: default values, passthrough, filter attenuation, drive saturation, pad integration, reset
+
+### Kit Management
+- `DrumKit` preset: captures all 16 pad configurations (name, pitch, gain, pan, decay, play_mode, midi_note) as JSON
+- `DrumKitPad` with `from_pad()` / `apply_to()` for individual pad snapshot/restore
+- `DrumKit::from_drum_machine()` / `apply_to()` for full kit capture and restore
+- Optional `sample_path` per pad for sample file references on reload
+- File save/load (`save()` / `load()`) with JSON serialization
+- 8 tests: capture, restore, partial kit, serde roundtrip, file I/O, error handling, sample paths
+
+### Per-Instrument Effects
+- `EffectChain` with scratch buffer and `process_with()` closure-based API for borrow-safe processing
+- 5 effect types: Chorus (modulated delay line), Delay (reuses `shruti_dsp`), Reverb (reuses `shruti_dsp`), Distortion (tanh soft clipping), FilterDrive (tanh saturation + one-pole LPF)
+- `InstrumentEffect` with enable/disable, dry/wet mix, per-type internal state
+- Integrated into all 3 instruments: `SubtractiveSynth`, `DrumMachine`, `Sampler` via `std::mem::take` pattern
+- 13 effect chain tests: creation, add/remove, passthrough, disabled effects, each effect type, dry/wet mix, sample rate changes, reset
+
 ### Track Grouping
 - `TrackGroup` with `TrackGroupId`, name, ordered member list, collapsible state
 - `Session` group methods: `add_group()`, `remove_group()`, `add_track_to_group()`, `remove_track_from_group()`, `rename_group()`, `toggle_group_collapsed()`, `track_group()` lookup

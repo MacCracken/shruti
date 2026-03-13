@@ -171,6 +171,117 @@ mod tests {
     }
 
     #[test]
+    fn synth_preset_roundtrip_identical_output() {
+        use shruti_dsp::AudioBuffer;
+
+        let synth = SubtractiveSynth::new(48000.0);
+        let preset = InstrumentPreset::from_instrument(&synth, "Synth Default");
+
+        // Apply to a fresh synth and verify all params match
+        let mut synth2 = SubtractiveSynth::new(48000.0);
+        // Modify some params first to ensure apply actually changes them
+        synth2.params_mut()[0].set(0.1); // Volume
+        preset.apply_to(&mut synth2);
+
+        for (orig, restored) in synth.params().iter().zip(synth2.params().iter()) {
+            assert_eq!(orig.name, restored.name);
+            assert!(
+                (orig.value - restored.value).abs() < f32::EPSILON,
+                "param {} mismatch: {} vs {}",
+                orig.name,
+                orig.value,
+                restored.value,
+            );
+        }
+
+        // Verify both produce identical audio with same input
+        synth2.note_on(60, 100, 0);
+        let mut synth3 = SubtractiveSynth::new(48000.0);
+        preset.apply_to(&mut synth3);
+        synth3.note_on(60, 100, 0);
+
+        let mut buf2 = AudioBuffer::new(2, 256);
+        let mut buf3 = AudioBuffer::new(2, 256);
+        synth2.process(&[], &[], &mut buf2);
+        synth3.process(&[], &[], &mut buf3);
+
+        for f in 0..256 {
+            for ch in 0..2 {
+                assert!(
+                    (buf2.get(f, ch) - buf3.get(f, ch)).abs() < 1e-6,
+                    "output mismatch at frame {f} ch {ch}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn drum_machine_preset_roundtrip() {
+        use crate::drum_machine::DrumMachine;
+
+        let dm = DrumMachine::new(48000.0);
+        let preset = InstrumentPreset::from_instrument(&dm, "DM Default");
+
+        let mut dm2 = DrumMachine::new(48000.0);
+        preset.apply_to(&mut dm2);
+
+        for (orig, restored) in dm.params().iter().zip(dm2.params().iter()) {
+            assert_eq!(orig.name, restored.name);
+            assert!(
+                (orig.value - restored.value).abs() < f32::EPSILON,
+                "param {} mismatch",
+                orig.name,
+            );
+        }
+    }
+
+    #[test]
+    fn sampler_preset_roundtrip() {
+        use crate::sampler::Sampler;
+
+        let sampler = Sampler::new(48000.0);
+        let preset = InstrumentPreset::from_instrument(&sampler, "Sampler Default");
+
+        let mut sampler2 = Sampler::new(48000.0);
+        // Modify a param
+        sampler2.params_mut()[0].set(0.2);
+        preset.apply_to(&mut sampler2);
+
+        for (orig, restored) in sampler.params().iter().zip(sampler2.params().iter()) {
+            assert_eq!(orig.name, restored.name);
+            assert!(
+                (orig.value - restored.value).abs() < f32::EPSILON,
+                "param {} mismatch",
+                orig.name,
+            );
+        }
+    }
+
+    #[test]
+    fn preset_json_roundtrip_all_instruments() {
+        use crate::drum_machine::DrumMachine;
+        use crate::sampler::Sampler;
+
+        let instruments: Vec<Box<dyn InstrumentNode>> = vec![
+            Box::new(SubtractiveSynth::new(48000.0)),
+            Box::new(DrumMachine::new(48000.0)),
+            Box::new(Sampler::new(48000.0)),
+        ];
+
+        for inst in &instruments {
+            let preset = InstrumentPreset::from_instrument(inst.as_ref(), "Test");
+            let json = serde_json::to_string(&preset).unwrap();
+            let loaded: InstrumentPreset = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(loaded.params.len(), preset.params.len());
+            for (a, b) in loaded.params.iter().zip(preset.params.iter()) {
+                assert_eq!(a.name, b.name);
+                assert!((a.value - b.value).abs() < f32::EPSILON);
+            }
+        }
+    }
+
+    #[test]
     fn preset_values_are_clamped_on_apply() {
         let mut synth = SubtractiveSynth::new(48000.0);
         let mut preset = InstrumentPreset::from_instrument(&synth, "Clamp");

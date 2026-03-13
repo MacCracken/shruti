@@ -11,6 +11,35 @@ pub enum AutomationTarget {
     PluginParam { slot: usize, param_id: u32 },
     /// Send level by send index.
     SendLevel { send_index: usize },
+    /// Instrument parameter by index (maps to `InstrumentParam` position).
+    InstrumentParam { param_index: usize },
+}
+
+impl AutomationTarget {
+    /// Returns a display label for this target.
+    pub fn label(&self) -> String {
+        match self {
+            AutomationTarget::TrackGain => "Volume".to_string(),
+            AutomationTarget::TrackPan => "Pan".to_string(),
+            AutomationTarget::PluginParam { slot, param_id } => {
+                format!("Plugin {slot} Param {param_id}")
+            }
+            AutomationTarget::SendLevel { send_index } => format!("Send {}", send_index + 1),
+            AutomationTarget::InstrumentParam { param_index } => {
+                format!("Instrument Param {param_index}")
+            }
+        }
+    }
+
+    /// Returns all standard automation targets for an instrument track
+    /// with the given number of parameters.
+    pub fn instrument_targets(param_count: usize) -> Vec<AutomationTarget> {
+        let mut targets = vec![AutomationTarget::TrackGain, AutomationTarget::TrackPan];
+        for i in 0..param_count {
+            targets.push(AutomationTarget::InstrumentParam { param_index: i });
+        }
+        targets
+    }
 }
 
 /// Interpolation curve between two automation points.
@@ -414,5 +443,64 @@ mod tests {
 
         let none = lane.points_in_range(301, 400);
         assert_eq!(none.len(), 0);
+    }
+
+    #[test]
+    fn instrument_param_target_works() {
+        let target = AutomationTarget::InstrumentParam { param_index: 3 };
+        let mut lane = AutomationLane::new(target.clone());
+        lane.add_point(AutomationPoint {
+            position: 0,
+            value: 0.0,
+            curve: CurveType::Linear,
+        });
+        lane.add_point(AutomationPoint {
+            position: 100,
+            value: 1.0,
+            curve: CurveType::Linear,
+        });
+        assert!((lane.value_at(50).unwrap() - 0.5).abs() < 0.01);
+        assert_eq!(
+            lane.target,
+            AutomationTarget::InstrumentParam { param_index: 3 }
+        );
+    }
+
+    #[test]
+    fn instrument_targets_list() {
+        let targets = AutomationTarget::instrument_targets(5);
+        assert_eq!(targets.len(), 7); // gain + pan + 5 params
+        assert_eq!(targets[0], AutomationTarget::TrackGain);
+        assert_eq!(targets[1], AutomationTarget::TrackPan);
+        assert_eq!(
+            targets[2],
+            AutomationTarget::InstrumentParam { param_index: 0 }
+        );
+        assert_eq!(
+            targets[6],
+            AutomationTarget::InstrumentParam { param_index: 4 }
+        );
+    }
+
+    #[test]
+    fn target_labels() {
+        assert_eq!(AutomationTarget::TrackGain.label(), "Volume");
+        assert_eq!(AutomationTarget::TrackPan.label(), "Pan");
+        assert_eq!(
+            AutomationTarget::InstrumentParam { param_index: 2 }.label(),
+            "Instrument Param 2"
+        );
+        assert_eq!(
+            AutomationTarget::SendLevel { send_index: 0 }.label(),
+            "Send 1"
+        );
+    }
+
+    #[test]
+    fn instrument_param_target_serde_roundtrip() {
+        let target = AutomationTarget::InstrumentParam { param_index: 7 };
+        let json = serde_json::to_string(&target).unwrap();
+        let restored: AutomationTarget = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, target);
     }
 }

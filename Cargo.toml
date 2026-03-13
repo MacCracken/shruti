@@ -13,7 +13,7 @@ members = [
 [workspace.dependencies]
 cpal = "0.15"
 rtrb = "0.3"
-symphonia = { version = "0.5", features = ["wav", "flac", "pcm", "adpcm"] }
+symphonia = { version = "0.5", features = ["wav", "flac", "pcm", "adpcm", "aiff", "ogg", "vorbis"] }
 hound = "3.5"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,6 +1,8 @@
 //! Built-in virtual instruments for Shruti.
 
+pub mod drum_kit;
 pub mod drum_machine;
+pub mod effect_chain;
 pub mod envelope;
 pub mod filter;
 pub mod instrument;
@@ -13,7 +15,9 @@ pub mod step_sequencer;
 pub mod synth;
 pub mod voice;
 
-pub use drum_machine::{DrumMachine, DrumPad, NUM_PADS, PlayMode};
+pub use drum_kit::{DrumKit, DrumKitPad};
+pub use drum_machine::{DrumMachine, DrumPad, NUM_PADS, PadEffects, PlayMode};
+pub use effect_chain::{EffectChain, InstrumentEffect, InstrumentEffectType};
 pub use envelope::{AdsrParams, Envelope, EnvelopeState};
 pub use filter::{Filter, FilterMode};
 pub use instrument::{InstrumentInfo, InstrumentNode, InstrumentParam};
