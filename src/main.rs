@@ -17,6 +17,12 @@ enum Commands {
     Version,
     /// List audio devices
     Devices,
+    /// Start the HTTP API server for AGNOS integration
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value = "8050")]
+        port: u16,
+    },
     /// Launch the GUI (default)
     Gui {
         /// Session file to open
@@ -69,6 +75,15 @@ fn main() {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             }
+        }
+        Some(Commands::Serve { port }) => {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            rt.block_on(async {
+                if let Err(e) = shruti_ai::serve::run_server(port).await {
+                    eprintln!("Server error: {e}");
+                    std::process::exit(1);
+                }
+            });
         }
         None => {
             // Default: launch GUI with new session

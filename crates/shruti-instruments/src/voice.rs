@@ -269,4 +269,138 @@ mod tests {
         assert_eq!(idx, Some(0));
         assert_eq!(vm.voices[0].note, 64);
     }
+
+    // --- Polyphony stress tests ---
+
+    #[test]
+    fn max_voices_allocation() {
+        let max = 16;
+        let mut vm = VoiceManager::new(max, VoiceStealMode::Oldest);
+        for i in 0..max {
+            let idx = vm.note_on(40 + i as u8, 100, 0);
+            assert!(idx.is_some(), "voice {i} should be allocated");
+        }
+        assert_eq!(vm.active_count(), max);
+        // All voice slots should be active
+        for voice in &vm.voices {
+            assert!(voice.is_active());
+        }
+    }
+
+    #[test]
+    fn voice_stealing_oldest_full() {
+        let max = 16;
+        let mut vm = VoiceManager::new(max, VoiceStealMode::Oldest);
+        // Fill all voices, ticking age between each to establish ordering
+        for i in 0..max {
+            vm.note_on(40 + i as u8, 100, 0);
+            vm.tick_age();
+        }
+        // Voice 0 is the oldest (age = 16), voice 15 is newest (age = 1)
+        let oldest_note = vm.voices[0].note;
+        assert_eq!(oldest_note, 40);
+        // Allocate one more — should steal voice 0 (oldest)
+        let idx = vm.note_on(90, 127, 0);
+        assert_eq!(idx, Some(0));
+        assert_eq!(vm.voices[0].note, 90);
+        assert_eq!(vm.active_count(), max);
+    }
+
+    #[test]
+    fn voice_stealing_quietest() {
+        let max = 4;
+        let mut vm = VoiceManager::new(max, VoiceStealMode::Quietest);
+        // Fill all voices
+        for i in 0..max {
+            vm.note_on(60 + i as u8, 100, 0);
+        }
+        // Manually set envelope levels so voice 2 is quietest
+        vm.voices[0].envelope_level = 0.8;
+        vm.voices[1].envelope_level = 0.6;
+        vm.voices[2].envelope_level = 0.1; // quietest
+        vm.voices[3].envelope_level = 0.5;
+        // Allocate one more — should steal voice 2 (quietest)
+        let idx = vm.note_on(80, 127, 0);
+        assert_eq!(idx, Some(2));
+        assert_eq!(vm.voices[2].note, 80);
+        assert_eq!(vm.active_count(), max);
+    }
+
+    #[test]
+    fn all_voices_active_stress() {
+        let max = 16;
+        let mut vm = VoiceManager::new(max, VoiceStealMode::Oldest);
+        // Trigger all max voices
+        for i in 0..max {
+            vm.note_on(40 + i as u8, 100, 0);
+        }
+        // Process multiple tick_age cycles (simulating audio blocks)
+        for _ in 0..100 {
+            vm.tick_age();
+        }
+        assert_eq!(vm.active_count(), max);
+        // Verify all voice state is consistent: finite values, no NaN/inf
+        for voice in &vm.voices {
+            assert!(voice.is_active());
+            assert!(voice.phase.is_finite());
+            assert!(voice.envelope_level.is_finite());
+            assert!(!voice.envelope_level.is_nan());
+            assert!(voice.frequency().is_finite());
+            assert!(voice.frequency() > 0.0);
+        }
+    }
+
+    #[test]
+    fn rapid_note_on_off() {
+        let max = 8;
+        let mut vm = VoiceManager::new(max, VoiceStealMode::Oldest);
+        // Rapidly trigger and release many notes
+        for cycle in 0..200 {
+            let note = 30 + (cycle % 88) as u8;
+            vm.note_on(note, 100, 0);
+            vm.tick_age();
+            // Release every other note immediately
+            if cycle % 2 == 0 {
+                vm.note_off(note, 0);
+            }
+            // Free releasing voices periodically
+            if cycle % 5 == 0 {
+                for i in 0..max {
+                    if vm.voices[i].state == VoiceState::Releasing {
+                        vm.free_voice(i);
+                    }
+                }
+            }
+            assert!(
+                vm.active_count() <= max,
+                "voice count {} exceeded max {} at cycle {}",
+                vm.active_count(),
+                max,
+                cycle
+            );
+        }
+    }
+
+    #[test]
+    fn voice_reuse_after_release() {
+        let max = 2;
+        let mut vm = VoiceManager::new(max, VoiceStealMode::None);
+        // Allocate both slots
+        let idx0 = vm.note_on(60, 100, 0);
+        let idx1 = vm.note_on(64, 100, 0);
+        assert_eq!(idx0, Some(0));
+        assert_eq!(idx1, Some(1));
+        // With steal_mode=None, a third note should be rejected
+        assert_eq!(vm.note_on(67, 100, 0), None);
+        // Release and free voice 0 (simulating envelope finish)
+        vm.note_off(60, 0);
+        assert_eq!(vm.voices[0].state, VoiceState::Releasing);
+        vm.free_voice(0);
+        assert!(vm.voices[0].is_idle());
+        // Now the slot should be reusable
+        let idx_reused = vm.note_on(67, 100, 0);
+        assert_eq!(idx_reused, Some(0));
+        assert_eq!(vm.voices[0].note, 67);
+        assert_eq!(vm.active_count(), 2);
+    }
 }

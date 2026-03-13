@@ -266,6 +266,63 @@ Format: CalVer (YYYY.M.D-N).
 - Serializable with `#[serde(default)]` for backward-compatible session loading
 - 19 new tests: TrackGroup CRUD, serde roundtrip, session group operations, undo/redo for all 6 group commands
 
+### Sample Layering (8C.5)
+- `SampleLayer` struct with velocity range matching and per-layer sample data
+- `LayerSelection` enum: RoundRobin (deterministic cycling) or Random
+- `DrumPad` layer support: `add_layer()`, `remove_layer()`, `clear_layers()`
+- Velocity-based layer selection with fallback to main samples when no layer matches
+- Active layer samples used in `tick()` for seamless layer/main switching
+- 7 tests: velocity selection, fallback, round-robin cycling, random selection, add/remove/clear, matches
+
+### Sample Editing (8D.2)
+- `SampleZone` editing methods: `trim()`, `set_loop_points()`, `clear_loop_points()`, `fade_in()`, `fade_out()`, `normalize()`, `reverse()`
+- Analysis: `peak()`, `rms()`, `len()`, `is_empty()` for sample inspection
+- 15 tests covering all editing operations
+
+### Output Routing Matrix (8F.8)
+- `OutputRouting` struct with `output: Option<TrackId>` and `sidechain_input: Option<TrackId>`
+- `Session::set_track_output()`, `set_sidechain_input()`, `track_output_chain()`
+- `would_create_routing_loop()` — prevents routing loops via chain walking
+- `EditCommand::SetTrackOutput` and `SetSidechainInput` with full undo/redo
+- Routing tests: basic routing, loop detection, sidechain assignment, chain walking
+
+### Pattern System (8C.3)
+- `PatternBank` enum (A/B/C/D), `Pattern` struct with 64 total patterns (4 banks × 16)
+- `PatternChain` for song mode pattern sequencing
+- `StepSequencer` extended: `select_pattern()`, `copy_pattern()`, `set_chain()`, `next_pattern_in_chain()`
+- 16 pattern tests + 20 timing tests
+
+### Slice Mode (8D.4)
+- `SlicePoint` struct with position, name, and zone reference
+- Energy-based onset detection: 1024-sample window, 512-sample hop, minimum 2048-sample gap
+- `auto_slice_by_transients()` for automatic sample slicing
+- `slice_to_zones()` maps slices to MIDI keys (REX-style)
+- 7 slice tests
+
+### Modulation Matrix (8B.2)
+- `ModSource` enum (8 sources: LFO1/2, AmpEnv, FilterEnv, Velocity, Aftertouch, ModWheel, PitchBend)
+- `ModDestination` enum (8 destinations: Pitch, Cutoff, Resonance, Volume, Pan, FilterEnvDepth, LfoRate, LfoDepth)
+- `ModRouting` with source, destination, bipolar amount (-1..1), enable toggle
+- `ModMatrix` with max 16 routings and `evaluate()` method
+- `ModSourceValues` input and `ModOutput` result structs
+- 14 modulation matrix tests
+
+### HTTP Server (16A)
+- `shruti serve --port 8050` CLI subcommand for AGNOS integration
+- axum HTTP server wrapping `AgentApi` with shared `Arc<Mutex>` state
+- 8 endpoints: `/health`, `/api/session`, `/api/tracks`, `/api/transport`, `/api/export`, `/api/mixer`, `/api/analysis`, `/api/mcp`
+- Permissive CORS layer for cross-origin agent access
+- 16 async tests
+
+### Instrument Testing (8G)
+- Oscillator accuracy tests: frequency accuracy within ±1Hz across waveforms, DC offset checks, amplitude consistency
+- Filter response tests: cutoff accuracy, resonance boost, mode switching (LP/HP/BP/Notch), slope verification
+- Polyphony stress tests: max voice allocation, voice stealing modes (oldest/quietest/lowest), under load
+- Step sequencer tests: timing accuracy, swing calculation, probability distribution, BPM sync
+- Sample playback tests: pitch mapping, loop points, velocity layers, one-shot vs gated, drum machine playback
+- MIDI integration tests: end-to-end MIDI clip → instrument → audio for synth, drum machine, sampler
+- 993 total tests across workspace
+
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)
 - GitHub Actions: Release (Linux amd64/arm64, macOS x86/arm, Windows)

@@ -179,4 +179,261 @@ mod tests {
         // Both should be valid samples (this test just validates detune doesn't panic)
         assert!(detuned.abs() <= 1.0 && normal.abs() <= 1.0);
     }
+
+    // ── Helper: generate N samples and return the buffer ──────────────
+    fn generate_samples(
+        waveform: Waveform,
+        frequency: f64,
+        sample_rate: f64,
+        num_samples: usize,
+    ) -> Vec<f32> {
+        let mut osc = Oscillator::new(waveform, sample_rate);
+        let mut phase = 0.0f64;
+        let mut buf = Vec::with_capacity(num_samples);
+        for _ in 0..num_samples {
+            buf.push(osc.sample(phase, frequency));
+            phase = Oscillator::advance_phase(phase, frequency, sample_rate);
+        }
+        buf
+    }
+
+    // ── Helper: estimate fundamental frequency via zero-crossing rate ─
+    fn estimate_frequency_zero_crossings(buf: &[f32], sample_rate: f64) -> f64 {
+        let mut crossings = 0usize;
+        for i in 1..buf.len() {
+            if (buf[i - 1] >= 0.0 && buf[i] < 0.0) || (buf[i - 1] < 0.0 && buf[i] >= 0.0) {
+                crossings += 1;
+            }
+        }
+        // Each full cycle has 2 zero crossings
+        let duration_secs = buf.len() as f64 / sample_rate;
+        crossings as f64 / (2.0 * duration_secs)
+    }
+
+    // ================================================================
+    // 1. Frequency accuracy tests
+    // ================================================================
+
+    #[test]
+    fn frequency_accuracy_sine() {
+        let sample_rate = 48000.0;
+        let test_freqs = [(440.0, "A4"), (130.81, "C3"), (523.25, "C5")];
+        for (freq, note) in &test_freqs {
+            let buf = generate_samples(Waveform::Sine, *freq, sample_rate, sample_rate as usize);
+            let measured = estimate_frequency_zero_crossings(&buf, sample_rate);
+            assert!(
+                (measured - freq).abs() < 1.0,
+                "Sine {note}: expected {freq} Hz, measured {measured} Hz",
+            );
+        }
+    }
+
+    #[test]
+    fn frequency_accuracy_saw() {
+        let sample_rate = 48000.0;
+        let test_freqs = [(440.0, "A4"), (130.81, "C3"), (523.25, "C5")];
+        for (freq, note) in &test_freqs {
+            let buf = generate_samples(Waveform::Saw, *freq, sample_rate, sample_rate as usize);
+            let measured = estimate_frequency_zero_crossings(&buf, sample_rate);
+            assert!(
+                (measured - freq).abs() < 1.0,
+                "Saw {note}: expected {freq} Hz, measured {measured} Hz",
+            );
+        }
+    }
+
+    #[test]
+    fn frequency_accuracy_square() {
+        let sample_rate = 48000.0;
+        let test_freqs = [(440.0, "A4"), (130.81, "C3"), (523.25, "C5")];
+        for (freq, note) in &test_freqs {
+            let buf = generate_samples(Waveform::Square, *freq, sample_rate, sample_rate as usize);
+            let measured = estimate_frequency_zero_crossings(&buf, sample_rate);
+            assert!(
+                (measured - freq).abs() < 1.0,
+                "Square {note}: expected {freq} Hz, measured {measured} Hz",
+            );
+        }
+    }
+
+    #[test]
+    fn frequency_accuracy_triangle() {
+        let sample_rate = 48000.0;
+        let test_freqs = [(440.0, "A4"), (130.81, "C3"), (523.25, "C5")];
+        for (freq, note) in &test_freqs {
+            let buf =
+                generate_samples(Waveform::Triangle, *freq, sample_rate, sample_rate as usize);
+            let measured = estimate_frequency_zero_crossings(&buf, sample_rate);
+            assert!(
+                (measured - freq).abs() < 1.0,
+                "Triangle {note}: expected {freq} Hz, measured {measured} Hz",
+            );
+        }
+    }
+
+    // ================================================================
+    // 2. DC offset tests
+    // ================================================================
+
+    #[test]
+    fn dc_offset_sine() {
+        let sample_rate = 48000.0f64;
+        // Generate exactly whole cycles to avoid partial-cycle bias
+        let num_cycles = 100;
+        let freq = 440.0f64;
+        let samples_per_cycle = (sample_rate / freq).round() as usize;
+        let total = samples_per_cycle * num_cycles;
+        let buf = generate_samples(Waveform::Sine, freq, sample_rate, total);
+        let dc: f64 = buf.iter().map(|s| *s as f64).sum::<f64>() / buf.len() as f64;
+        assert!(dc.abs() < 0.01, "Sine DC offset should be < 0.01, got {dc}",);
+    }
+
+    #[test]
+    fn dc_offset_saw() {
+        let sample_rate = 48000.0f64;
+        let num_cycles = 100;
+        let freq = 440.0f64;
+        let samples_per_cycle = (sample_rate / freq).round() as usize;
+        let total = samples_per_cycle * num_cycles;
+        let buf = generate_samples(Waveform::Saw, freq, sample_rate, total);
+        let dc: f64 = buf.iter().map(|s| *s as f64).sum::<f64>() / buf.len() as f64;
+        assert!(dc.abs() < 0.01, "Saw DC offset should be < 0.01, got {dc}",);
+    }
+
+    #[test]
+    fn dc_offset_square() {
+        let sample_rate = 48000.0f64;
+        let num_cycles = 100;
+        let freq = 440.0f64;
+        let samples_per_cycle = (sample_rate / freq).round() as usize;
+        let total = samples_per_cycle * num_cycles;
+        let buf = generate_samples(Waveform::Square, freq, sample_rate, total);
+        let dc: f64 = buf.iter().map(|s| *s as f64).sum::<f64>() / buf.len() as f64;
+        assert!(
+            dc.abs() < 0.01,
+            "Square DC offset should be < 0.01, got {dc}",
+        );
+    }
+
+    #[test]
+    fn dc_offset_triangle() {
+        let sample_rate = 48000.0f64;
+        let num_cycles = 100;
+        let freq = 440.0f64;
+        let samples_per_cycle = (sample_rate / freq).round() as usize;
+        let total = samples_per_cycle * num_cycles;
+        let buf = generate_samples(Waveform::Triangle, freq, sample_rate, total);
+        let dc: f64 = buf.iter().map(|s| *s as f64).sum::<f64>() / buf.len() as f64;
+        assert!(
+            dc.abs() < 0.01,
+            "Triangle DC offset should be < 0.01, got {dc}",
+        );
+    }
+
+    // ================================================================
+    // 3. Output range tests
+    // ================================================================
+
+    #[test]
+    fn output_range_all_waveforms() {
+        let sample_rate = 48000.0;
+        let waveforms = [
+            Waveform::Sine,
+            Waveform::Saw,
+            Waveform::Square,
+            Waveform::Triangle,
+            Waveform::Noise,
+        ];
+        for wf in &waveforms {
+            let buf = generate_samples(*wf, 440.0, sample_rate, 48000);
+            for (i, s) in buf.iter().enumerate() {
+                assert!(
+                    *s >= -1.0 && *s <= 1.0,
+                    "{wf:?} sample {i} out of [-1.0, 1.0] range: {s}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn output_range_extreme_frequencies() {
+        let sample_rate = 48000.0;
+        // Test at very low and moderately high frequencies
+        let freqs = [20.0, 100.0, 1000.0, 5000.0, 10000.0];
+        let waveforms = [
+            Waveform::Sine,
+            Waveform::Saw,
+            Waveform::Square,
+            Waveform::Triangle,
+        ];
+        for wf in &waveforms {
+            for freq in &freqs {
+                let buf = generate_samples(*wf, *freq, sample_rate, 4800);
+                for s in &buf {
+                    assert!(
+                        *s >= -1.0 && *s <= 1.0,
+                        "{wf:?} at {freq} Hz out of range: {s}",
+                    );
+                }
+            }
+        }
+    }
+
+    // ================================================================
+    // 4. Noise non-periodicity (autocorrelation) test
+    // ================================================================
+
+    #[test]
+    fn noise_low_autocorrelation() {
+        let sample_rate = 48000.0;
+        let buf = generate_samples(Waveform::Noise, 440.0, sample_rate, 4096);
+
+        // Compute mean
+        let mean: f64 = buf.iter().map(|s| *s as f64).sum::<f64>() / buf.len() as f64;
+
+        // Compute variance (autocorrelation at lag 0)
+        let variance: f64 = buf
+            .iter()
+            .map(|s| {
+                let d = *s as f64 - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / buf.len() as f64;
+        assert!(variance > 0.01, "Noise variance too low: {variance}");
+
+        // Compute normalized autocorrelation at several lags
+        // For truly random noise, autocorrelation at lag > 0 should be near zero.
+        let test_lags = [1, 2, 5, 10, 50, 100];
+        for lag in &test_lags {
+            let mut ac = 0.0f64;
+            for i in 0..(buf.len() - lag) {
+                ac += (buf[i] as f64 - mean) * (buf[i + lag] as f64 - mean);
+            }
+            ac /= (buf.len() - lag) as f64;
+            let normalized = ac / variance;
+            assert!(
+                normalized.abs() < 0.1,
+                "Noise autocorrelation at lag {lag} too high: {normalized} (should be near 0)",
+            );
+        }
+    }
+
+    #[test]
+    fn noise_has_spread_distribution() {
+        let sample_rate = 48000.0;
+        let buf = generate_samples(Waveform::Noise, 440.0, sample_rate, 10000);
+        // Check that noise actually spans a reasonable range
+        let min = buf.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max = buf.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!(max - min > 1.0, "Noise range too narrow: [{min}, {max}]",);
+        // Check rough uniformity: both positive and negative samples
+        let pos_count = buf.iter().filter(|s| **s > 0.0).count();
+        let neg_count = buf.iter().filter(|s| **s < 0.0).count();
+        let ratio = pos_count as f64 / neg_count as f64;
+        assert!(
+            (0.7..=1.4).contains(&ratio),
+            "Noise pos/neg ratio unbalanced: {ratio} (pos={pos_count}, neg={neg_count})",
+        );
+    }
 }

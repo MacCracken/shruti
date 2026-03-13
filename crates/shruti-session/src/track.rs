@@ -85,6 +85,15 @@ pub enum SendPosition {
     PostFader,
 }
 
+/// Output routing configuration for a track.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OutputRouting {
+    /// Primary output target (a bus or master track ID). If None, routes to master.
+    pub output: Option<TrackId>,
+    /// Optional sidechain source for compressor keying.
+    pub sidechain_input: Option<TrackId>,
+}
+
 /// A send from one track to a bus.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Send {
@@ -193,6 +202,9 @@ pub struct Track {
     /// Custom track color override (RGB). If `None`, uses `TrackKind::default_color()`.
     #[serde(default)]
     pub color: Option<[u8; 3]>,
+    /// Output routing configuration.
+    #[serde(default)]
+    pub routing: OutputRouting,
 }
 
 impl Track {
@@ -213,6 +225,7 @@ impl Track {
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
             color: None,
+            routing: OutputRouting::default(),
         }
     }
 
@@ -233,6 +246,7 @@ impl Track {
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
             color: None,
+            routing: OutputRouting::default(),
         }
     }
 
@@ -253,6 +267,7 @@ impl Track {
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
             color: None,
+            routing: OutputRouting::default(),
         }
     }
 
@@ -273,6 +288,7 @@ impl Track {
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
             color: None,
+            routing: OutputRouting::default(),
         }
     }
 
@@ -293,6 +309,7 @@ impl Track {
             midi_clips: Vec::new(),
             instrument_params: Vec::new(),
             color: None,
+            routing: OutputRouting::default(),
         }
     }
 
@@ -387,6 +404,7 @@ impl TrackTemplate {
             midi_clips: Vec::new(),
             instrument_params: self.instrument_params.clone(),
             color: self.color,
+            routing: OutputRouting::default(),
         }
     }
 

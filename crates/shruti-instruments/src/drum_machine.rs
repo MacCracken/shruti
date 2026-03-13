@@ -70,6 +70,44 @@ impl PadEffects {
     }
 }
 
+/// Selection mode when multiple samples match a velocity range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LayerSelection {
+    /// Cycle through samples in order.
+    RoundRobin,
+    /// Pick a random sample each trigger.
+    Random,
+}
+
+/// A velocity-mapped sample layer for a drum pad.
+#[derive(Debug, Clone)]
+pub struct SampleLayer {
+    /// Sample data.
+    pub samples: Vec<f32>,
+    /// Sample rate of this layer.
+    pub sample_rate: u32,
+    /// Minimum velocity (0–127) to trigger this layer.
+    pub velocity_low: u8,
+    /// Maximum velocity (0–127) to trigger this layer.
+    pub velocity_high: u8,
+}
+
+impl SampleLayer {
+    pub fn new(samples: Vec<f32>, sample_rate: u32, velocity_low: u8, velocity_high: u8) -> Self {
+        Self {
+            samples,
+            sample_rate,
+            velocity_low,
+            velocity_high,
+        }
+    }
+
+    /// Check if this layer matches the given velocity.
+    pub fn matches(&self, velocity: u8) -> bool {
+        velocity >= self.velocity_low && velocity <= self.velocity_high
+    }
+}
+
 /// A single drum pad with a sample buffer and settings.
 pub struct DrumPad {
     pub name: String,
@@ -83,10 +121,18 @@ pub struct DrumPad {
     pub midi_note: u8,
     /// Per-pad effects (filter, drive, sends).
     pub effects: PadEffects,
+    /// Velocity-mapped sample layers (up to 8). If empty, uses `samples` field.
+    pub layers: Vec<SampleLayer>,
+    /// How to select among multiple matching layers.
+    pub layer_selection: LayerSelection,
+    /// Round-robin counter for layer selection.
+    round_robin_idx: usize,
     play_pos: f64,
     playing: bool,
     velocity: f32,
     envelope: f32,
+    /// Currently active sample data pointer (index into layers, or usize::MAX for main samples).
+    active_layer: usize,
 }
 
 impl DrumPad {
@@ -102,10 +148,14 @@ impl DrumPad {
             play_mode: PlayMode::OneShot,
             midi_note,
             effects: PadEffects::default(),
+            layers: Vec::new(),
+            layer_selection: LayerSelection::RoundRobin,
+            round_robin_idx: 0,
             play_pos: 0.0,
             playing: false,
             velocity: 0.0,
             envelope: 0.0,
+            active_layer: usize::MAX,
         }
     }
 
@@ -119,19 +169,91 @@ impl DrumPad {
         self.playing = true;
         self.velocity = velocity as f32 / 127.0;
         self.envelope = 1.0;
+
+        // Select active layer based on velocity
+        self.active_layer = self.select_layer(velocity);
+    }
+
+    /// Add a velocity-mapped sample layer.
+    pub fn add_layer(&mut self, layer: SampleLayer) {
+        self.layers.push(layer);
+    }
+
+    /// Remove a layer by index.
+    pub fn remove_layer(&mut self, index: usize) -> Option<SampleLayer> {
+        if index < self.layers.len() {
+            Some(self.layers.remove(index))
+        } else {
+            None
+        }
+    }
+
+    /// Remove all layers.
+    pub fn clear_layers(&mut self) {
+        self.layers.clear();
+        self.active_layer = usize::MAX;
+    }
+
+    /// Select a layer index matching the given velocity, or usize::MAX for main samples.
+    fn select_layer(&mut self, velocity: u8) -> usize {
+        if self.layers.is_empty() {
+            return usize::MAX;
+        }
+
+        // Find all layers matching this velocity
+        let matching: Vec<usize> = self
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.matches(velocity))
+            .map(|(i, _)| i)
+            .collect();
+
+        if matching.is_empty() {
+            return usize::MAX; // fall back to main samples
+        }
+
+        if matching.len() == 1 {
+            return matching[0];
+        }
+
+        // Multiple matches — use selection mode
+        match self.layer_selection {
+            LayerSelection::RoundRobin => {
+                let idx = self.round_robin_idx % matching.len();
+                self.round_robin_idx = self.round_robin_idx.wrapping_add(1);
+                matching[idx]
+            }
+            LayerSelection::Random => {
+                // Simple pseudo-random using play_pos bits + round_robin counter
+                let pseudo = self.round_robin_idx.wrapping_mul(2654435761);
+                self.round_robin_idx = self.round_robin_idx.wrapping_add(1);
+                matching[pseudo % matching.len()]
+            }
+        }
     }
 
     pub fn stop(&mut self) {
         self.playing = false;
     }
 
+    /// Get the active sample buffer (layer or main).
+    fn active_samples(&self) -> &[f32] {
+        if self.active_layer < self.layers.len() {
+            &self.layers[self.active_layer].samples
+        } else {
+            &self.samples
+        }
+    }
+
     /// Generate one frame of audio. Returns (left, right) incorporating pan.
     pub fn tick(&mut self) -> (f32, f32) {
-        if !self.playing || self.samples.is_empty() {
+        let samples = self.active_samples();
+        if !self.playing || samples.is_empty() {
             return (0.0, 0.0);
         }
 
-        let len = self.samples.len();
+        let len = samples.len();
         let pos = self.play_pos;
         let idx = pos as usize;
 
@@ -144,7 +266,6 @@ impl DrumPad {
                 }
                 PlayMode::Looped => {
                     self.play_pos %= len as f64;
-                    // Recalculate after wrapping
                     let idx = self.play_pos as usize;
                     if idx >= len {
                         return (0.0, 0.0);
@@ -153,15 +274,16 @@ impl DrumPad {
             }
         }
 
-        // Linear interpolation
+        // Read sample values before mutating self
         let idx = self.play_pos as usize;
         let frac = (self.play_pos - idx as f64) as f32;
-        let s0 = self.samples[idx];
+        let samples = self.active_samples();
+        let s0 = samples[idx];
         let s1 = if idx + 1 < len {
-            self.samples[idx + 1]
+            samples[idx + 1]
         } else {
             match self.play_mode {
-                PlayMode::Looped => self.samples[0],
+                PlayMode::Looped => samples[0],
                 PlayMode::OneShot => 0.0,
             }
         };
@@ -718,5 +840,422 @@ mod tests {
         effects.reset();
         assert_eq!(effects.filter_state[0], 0.0);
         assert_eq!(effects.filter_state[1], 0.0);
+    }
+
+    // --- Sample layering tests ---
+
+    #[test]
+    fn layer_velocity_selection() {
+        let mut pad = DrumPad::new("Kick", 36);
+        // Main sample (fallback)
+        pad.load_sample(vec![0.1; 50], 44100);
+        // Soft layer: velocity 1–63
+        pad.add_layer(SampleLayer::new(vec![0.5; 50], 44100, 1, 63));
+        // Hard layer: velocity 64–127
+        pad.add_layer(SampleLayer::new(vec![1.0; 50], 44100, 64, 127));
+
+        // Trigger with soft velocity
+        pad.trigger(32);
+        assert_eq!(pad.active_layer, 0, "soft velocity should select layer 0");
+        pad.decay = 0.0;
+        let (l, _) = pad.tick();
+        // Layer 0 has samples of 0.5
+        let expected = 0.5 * (32.0 / 127.0);
+        assert!(
+            (l.abs() - expected).abs() < 0.1,
+            "soft layer should produce ~{expected}, got {l}"
+        );
+
+        // Trigger with hard velocity
+        pad.trigger(100);
+        assert_eq!(pad.active_layer, 1, "hard velocity should select layer 1");
+    }
+
+    #[test]
+    fn layer_fallback_to_main_samples() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![0.8; 50], 44100);
+        // Layer only matches velocity 100–127
+        pad.add_layer(SampleLayer::new(vec![1.0; 50], 44100, 100, 127));
+
+        // Trigger with velocity 50 — no layer matches, should use main
+        pad.trigger(50);
+        assert_eq!(
+            pad.active_layer,
+            usize::MAX,
+            "should fall back to main samples"
+        );
+        pad.decay = 0.0;
+        let (l, _) = pad.tick();
+        let expected = 0.8 * (50.0 / 127.0);
+        assert!(
+            (l.abs() - expected).abs() < 0.1,
+            "should use main sample value ~{expected}, got {l}"
+        );
+    }
+
+    #[test]
+    fn layer_round_robin_cycles() {
+        let mut pad = DrumPad::new("Snare", 38);
+        pad.layer_selection = LayerSelection::RoundRobin;
+        // Three layers all matching full velocity range
+        pad.add_layer(SampleLayer::new(vec![0.1; 50], 44100, 0, 127));
+        pad.add_layer(SampleLayer::new(vec![0.2; 50], 44100, 0, 127));
+        pad.add_layer(SampleLayer::new(vec![0.3; 50], 44100, 0, 127));
+
+        let mut selected = Vec::new();
+        for _ in 0..6 {
+            pad.trigger(100);
+            selected.push(pad.active_layer);
+        }
+        // Should cycle: 0, 1, 2, 0, 1, 2
+        assert_eq!(selected, vec![0, 1, 2, 0, 1, 2]);
+    }
+
+    #[test]
+    fn layer_random_selects_valid_layers() {
+        let mut pad = DrumPad::new("HH", 42);
+        pad.layer_selection = LayerSelection::Random;
+        pad.add_layer(SampleLayer::new(vec![0.1; 50], 44100, 0, 127));
+        pad.add_layer(SampleLayer::new(vec![0.2; 50], 44100, 0, 127));
+
+        for _ in 0..20 {
+            pad.trigger(100);
+            assert!(
+                pad.active_layer < 2,
+                "random should pick valid layer index, got {}",
+                pad.active_layer
+            );
+        }
+    }
+
+    #[test]
+    fn layer_no_layers_uses_main() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![0.5; 50], 44100);
+        // No layers added
+        pad.trigger(100);
+        assert_eq!(pad.active_layer, usize::MAX);
+    }
+
+    #[test]
+    fn add_remove_clear_layers() {
+        let mut pad = DrumPad::new("Kick", 36);
+        assert_eq!(pad.layers.len(), 0);
+
+        pad.add_layer(SampleLayer::new(vec![1.0; 10], 44100, 0, 127));
+        pad.add_layer(SampleLayer::new(vec![0.5; 10], 44100, 0, 127));
+        assert_eq!(pad.layers.len(), 2);
+
+        let removed = pad.remove_layer(0);
+        assert!(removed.is_some());
+        assert_eq!(pad.layers.len(), 1);
+
+        assert!(pad.remove_layer(5).is_none()); // out of bounds
+
+        pad.clear_layers();
+        assert_eq!(pad.layers.len(), 0);
+    }
+
+    #[test]
+    fn sample_layer_matches_velocity() {
+        let layer = SampleLayer::new(vec![], 44100, 32, 96);
+        assert!(!layer.matches(0));
+        assert!(!layer.matches(31));
+        assert!(layer.matches(32));
+        assert!(layer.matches(64));
+        assert!(layer.matches(96));
+        assert!(!layer.matches(97));
+        assert!(!layer.matches(127));
+    }
+
+    // ── 8G.6: comprehensive sample playback tests ──────────────────────
+
+    #[test]
+    fn oneshot_completes_and_produces_silence() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![0.8; 30], 44100);
+        pad.play_mode = PlayMode::OneShot;
+        pad.decay = 0.0;
+        pad.trigger(127);
+
+        let mut non_silent_count = 0;
+        for _ in 0..60 {
+            let (l, r) = pad.tick();
+            if l.abs() > 1e-6 || r.abs() > 1e-6 {
+                non_silent_count += 1;
+            }
+        }
+        assert!(
+            !pad.is_playing(),
+            "one-shot should stop after exhausting samples"
+        );
+        assert!(
+            non_silent_count >= 28 && non_silent_count <= 32,
+            "expected ~30 non-silent frames, got {non_silent_count}"
+        );
+    }
+
+    #[test]
+    fn oneshot_retrigger_restarts_from_beginning() {
+        let mut pad = DrumPad::new("Snare", 38);
+        let samples: Vec<f32> = (0..50).map(|i| i as f32 / 50.0).collect();
+        pad.load_sample(samples, 44100);
+        pad.play_mode = PlayMode::OneShot;
+        pad.decay = 0.0;
+        pad.trigger(127);
+
+        for _ in 0..25 {
+            pad.tick();
+        }
+        assert!(pad.is_playing());
+
+        pad.trigger(100);
+        let (l, _) = pad.tick();
+        assert!(
+            l.abs() < 0.05,
+            "retrigger should restart from sample beginning, got {l}"
+        );
+    }
+
+    #[test]
+    fn looped_mode_wraps_and_continues_producing_audio() {
+        let mut pad = DrumPad::new("HiHat", 42);
+        pad.load_sample(vec![0.5; 20], 44100);
+        pad.play_mode = PlayMode::Looped;
+        pad.decay = 0.0;
+        pad.trigger(127);
+
+        let mut total_nonzero = 0;
+        for _ in 0..100 {
+            let (l, _) = pad.tick();
+            if l.abs() > 1e-6 {
+                total_nonzero += 1;
+            }
+        }
+
+        assert!(
+            pad.is_playing(),
+            "looped pad should still be playing after 100 ticks"
+        );
+        assert!(
+            total_nonzero > 90,
+            "looped pad should produce audio for most ticks, got {total_nonzero}/100"
+        );
+    }
+
+    #[test]
+    fn looped_mode_wraps_position_correctly() {
+        let mut pad = DrumPad::new("Loop", 36);
+        let len = 10;
+        let samples: Vec<f32> = (0..len).map(|i| i as f32 / len as f32).collect();
+        pad.load_sample(samples, 44100);
+        pad.play_mode = PlayMode::Looped;
+        pad.decay = 0.0;
+        pad.trigger(127);
+
+        let mut first_cycle = Vec::new();
+        for _ in 0..len {
+            let (l, _) = pad.tick();
+            first_cycle.push(l);
+        }
+
+        let mut second_cycle = Vec::new();
+        for _ in 0..len {
+            let (l, _) = pad.tick();
+            second_cycle.push(l);
+        }
+
+        for i in 1..len {
+            let first_increasing = first_cycle[i] >= first_cycle[i - 1];
+            let second_increasing = second_cycle[i] >= second_cycle[i - 1];
+            assert_eq!(
+                first_increasing, second_increasing,
+                "loop cycle shape should repeat at index {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn looped_mode_note_off_stops_playback() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![0.5; 50], 44100);
+        dm.pads[0].play_mode = PlayMode::Looped;
+
+        dm.note_on(36, 100, 0);
+        assert!(dm.pads[0].is_playing());
+
+        dm.note_off(36, 0);
+        assert!(!dm.pads[0].is_playing(), "note_off should stop looped pad");
+    }
+
+    #[test]
+    fn oneshot_mode_note_off_does_not_stop() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![0.5; 100], 44100);
+        dm.pads[0].play_mode = PlayMode::OneShot;
+
+        dm.note_on(36, 100, 0);
+        assert!(dm.pads[0].is_playing());
+
+        dm.note_off(36, 0);
+        assert!(
+            dm.pads[0].is_playing(),
+            "note_off should NOT stop one-shot pad"
+        );
+    }
+
+    #[test]
+    fn pitch_shifting_half_speed_doubles_playback_time() {
+        let sample_len = 100;
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![0.5; sample_len], 44100);
+        pad.play_mode = PlayMode::OneShot;
+        pad.decay = 0.0;
+        pad.pitch = 0.5;
+
+        pad.trigger(127);
+
+        let mut ticks = 0;
+        while pad.is_playing() {
+            pad.tick();
+            ticks += 1;
+            if ticks > 500 {
+                break;
+            }
+        }
+        assert!(
+            ticks >= 195 && ticks <= 205,
+            "pitch=0.5 should ~double playback time, got {ticks} ticks for {sample_len} samples"
+        );
+    }
+
+    #[test]
+    fn pitch_shifting_changes_output_frequency() {
+        let sample_len = 200;
+        let sine: Vec<f32> = (0..sample_len)
+            .map(|i| (2.0 * std::f32::consts::PI * 4.0 * i as f32 / sample_len as f32).sin())
+            .collect();
+
+        let mut pad_normal = DrumPad::new("Normal", 36);
+        pad_normal.load_sample(sine.clone(), 44100);
+        pad_normal.decay = 0.0;
+        pad_normal.pitch = 1.0;
+        pad_normal.trigger(127);
+
+        let mut crossings_normal = 0u32;
+        let mut prev = 0.0_f32;
+        for _ in 0..100 {
+            let (l, _) = pad_normal.tick();
+            if l * prev < 0.0 {
+                crossings_normal += 1;
+            }
+            prev = l;
+        }
+
+        let mut pad_fast = DrumPad::new("Fast", 36);
+        pad_fast.load_sample(sine, 44100);
+        pad_fast.decay = 0.0;
+        pad_fast.pitch = 2.0;
+        pad_fast.trigger(127);
+
+        let mut crossings_fast = 0u32;
+        prev = 0.0;
+        for _ in 0..100 {
+            let (l, _) = pad_fast.tick();
+            if l * prev < 0.0 {
+                crossings_fast += 1;
+            }
+            prev = l;
+        }
+
+        assert!(
+            crossings_fast > crossings_normal,
+            "2x pitch should have more zero crossings: normal={crossings_normal}, fast={crossings_fast}"
+        );
+    }
+
+    #[test]
+    fn pitch_shifting_in_looped_mode_wraps_correctly() {
+        let mut pad = DrumPad::new("Loop", 36);
+        pad.load_sample(vec![0.5; 20], 44100);
+        pad.play_mode = PlayMode::Looped;
+        pad.decay = 0.0;
+        pad.pitch = 3.0;
+
+        pad.trigger(127);
+
+        for _ in 0..100 {
+            pad.tick();
+        }
+        assert!(
+            pad.is_playing(),
+            "looped pad with pitch=3.0 should keep playing"
+        );
+    }
+
+    #[test]
+    fn velocity_scales_output_proportionally() {
+        let sample = vec![1.0; 10];
+
+        let mut pad_full = DrumPad::new("Full", 36);
+        pad_full.load_sample(sample.clone(), 44100);
+        pad_full.decay = 0.0;
+        pad_full.trigger(127);
+        let (full_l, _) = pad_full.tick();
+
+        let mut pad_half = DrumPad::new("Half", 36);
+        pad_half.load_sample(sample, 44100);
+        pad_half.decay = 0.0;
+        pad_half.trigger(64);
+        let (half_l, _) = pad_half.tick();
+
+        let ratio = half_l / full_l;
+        let expected_ratio = 64.0 / 127.0;
+        assert!(
+            (ratio - expected_ratio).abs() < 0.02,
+            "velocity scaling should be proportional: got ratio {ratio}, expected ~{expected_ratio}"
+        );
+    }
+
+    #[test]
+    fn oneshot_via_drum_machine_process_completes() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![0.5; 30], 44100);
+        dm.pads[0].play_mode = PlayMode::OneShot;
+        dm.pads[0].decay = 0.0;
+
+        dm.note_on(36, 100, 0);
+        assert_eq!(dm.active_voices(), 1);
+
+        let mut buf = AudioBuffer::new(2, 64);
+        dm.process(&[], &[], &mut buf);
+
+        assert_eq!(
+            dm.active_voices(),
+            0,
+            "one-shot pad should finish after processing past sample end"
+        );
+    }
+
+    #[test]
+    fn looped_via_drum_machine_process_continues() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![0.5; 30], 44100);
+        dm.pads[0].play_mode = PlayMode::Looped;
+        dm.pads[0].decay = 0.0;
+
+        dm.note_on(36, 100, 0);
+
+        for _ in 0..5 {
+            let mut buf = AudioBuffer::new(2, 64);
+            dm.process(&[], &[], &mut buf);
+        }
+
+        assert_eq!(
+            dm.active_voices(),
+            1,
+            "looped pad should still be playing after many blocks"
+        );
     }
 }

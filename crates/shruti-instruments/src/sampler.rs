@@ -6,6 +6,15 @@ use crate::envelope::{AdsrParams, Envelope};
 use crate::instrument::{InstrumentInfo, InstrumentNode, InstrumentParam};
 use serde::{Deserialize, Serialize};
 
+/// A single slice point within a sample (index into sample data).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlicePoint {
+    /// Sample index where this slice begins.
+    pub index: usize,
+    /// Optional human-readable name for the slice.
+    pub name: Option<String>,
+}
+
 /// A zone maps a range of MIDI notes and velocities to a sample.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SampleZone {
@@ -21,6 +30,9 @@ pub struct SampleZone {
     pub loop_start: Option<usize>,
     pub loop_end: Option<usize>,
     pub loop_mode: LoopMode,
+    /// Ordered slice boundaries for REX-style slicing.
+    #[serde(default)]
+    pub slices: Vec<SlicePoint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +56,7 @@ impl SampleZone {
             loop_start: None,
             loop_end: None,
             loop_mode: LoopMode::NoLoop,
+            slices: Vec::new(),
         }
     }
 
@@ -55,10 +68,247 @@ impl SampleZone {
             && velocity <= self.velocity_high
     }
 
+    // ── Slice mode (REX-style) ──────────────────────────────────────
+
+    /// Add a manual slice point at the given sample index.
+    pub fn add_slice(&mut self, index: usize, name: Option<String>) {
+        if index < self.samples.len() {
+            self.slices.push(SlicePoint { index, name });
+            self.slices.sort_by_key(|s| s.index);
+        }
+    }
+
+    /// Remove all slice points.
+    pub fn clear_slices(&mut self) {
+        self.slices.clear();
+    }
+
+    /// Number of slices currently defined.
+    pub fn slice_count(&self) -> usize {
+        self.slices.len()
+    }
+
+    /// Auto-detect transients using energy-based onset detection and create
+    /// slice points at each detected onset.
+    pub fn auto_slice_by_transients(&mut self, threshold: f32) {
+        self.slices.clear();
+
+        if self.samples.is_empty() {
+            return;
+        }
+
+        let hop = 512_usize;
+        let window = 1024_usize;
+        let min_gap = 2048_usize;
+        let factor = 1.0 + threshold * 9.0;
+
+        let len = self.samples.len();
+        if len < window {
+            return;
+        }
+
+        let num_frames = (len - window) / hop + 1;
+        let mut energies = Vec::with_capacity(num_frames);
+        for i in 0..num_frames {
+            let start = i * hop;
+            let end = (start + window).min(len);
+            let energy: f32 = self.samples[start..end].iter().map(|s| s * s).sum();
+            energies.push(energy);
+        }
+
+        if energies.is_empty() {
+            return;
+        }
+
+        let avg_len = 8_usize;
+        let mut running_sum: f32 = 0.0;
+        let mut running_count: usize = 0;
+        let mut last_onset: Option<usize> = None;
+
+        for (i, &energy) in energies.iter().enumerate() {
+            let local_avg = if running_count > 0 {
+                running_sum / running_count as f32
+            } else {
+                0.0
+            };
+
+            let sample_pos = i * hop;
+
+            let gap_ok = match last_onset {
+                Some(prev) => sample_pos - prev >= min_gap,
+                None => true,
+            };
+
+            if gap_ok && energy > local_avg * factor && energy > 1e-8 {
+                self.slices.push(SlicePoint {
+                    index: sample_pos,
+                    name: None,
+                });
+                last_onset = Some(sample_pos);
+            }
+
+            running_sum += energy;
+            running_count += 1;
+            if running_count > avg_len {
+                running_sum -= energies[i + 1 - running_count];
+                running_count = avg_len;
+            }
+        }
+    }
+
+    /// Split the sample into individual `SampleZone` entries — one per slice —
+    /// mapped to consecutive MIDI keys starting from `base_note`.
+    pub fn slice_to_zones(&self, base_note: u8) -> Vec<SampleZone> {
+        if self.slices.is_empty() {
+            return Vec::new();
+        }
+
+        let mut zones = Vec::with_capacity(self.slices.len());
+        let num_slices = self.slices.len();
+
+        for (i, slice) in self.slices.iter().enumerate() {
+            let start = slice.index;
+            let end = if i + 1 < num_slices {
+                self.slices[i + 1].index
+            } else {
+                self.samples.len()
+            };
+
+            if start >= end || start >= self.samples.len() {
+                continue;
+            }
+
+            let note = base_note.saturating_add(i as u8).min(127);
+            let slice_name = slice
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("{}_slice_{}", self.name, i));
+            let slice_samples = self.samples[start..end.min(self.samples.len())].to_vec();
+
+            let mut zone = SampleZone::new(&slice_name, note, slice_samples, self.sample_rate);
+            zone.key_low = note;
+            zone.key_high = note;
+            zones.push(zone);
+        }
+
+        zones
+    }
+
+    // ── Pitch ─────────────────────────────────────────────────────────
+
     /// Pitch ratio to play this sample at the given MIDI note.
     pub fn pitch_ratio(&self, note: u8) -> f64 {
         let semitones = f64::from(note) - f64::from(self.root_key);
         2.0_f64.powf(semitones / 12.0)
+    }
+
+    /// Total number of samples.
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Whether this zone has no sample data.
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+
+    /// Trim the sample to the given range `[start..end)`.
+    /// Adjusts loop points to remain valid within the new range.
+    pub fn trim(&mut self, start: usize, end: usize) {
+        let end = end.min(self.samples.len());
+        let start = start.min(end);
+        self.samples = self.samples[start..end].to_vec();
+
+        // Adjust loop points relative to new start
+        self.loop_start = self.loop_start.and_then(|ls| {
+            if ls >= start && ls < end {
+                Some(ls - start)
+            } else {
+                None
+            }
+        });
+        self.loop_end = self.loop_end.and_then(|le| {
+            if le > start && le <= end {
+                Some(le - start)
+            } else {
+                None
+            }
+        });
+    }
+
+    /// Set loop points with validation.
+    /// Returns false if the points are invalid (out of range or start >= end).
+    pub fn set_loop_points(&mut self, start: usize, end: usize) -> bool {
+        if start >= end || end > self.samples.len() {
+            return false;
+        }
+        self.loop_start = Some(start);
+        self.loop_end = Some(end);
+        true
+    }
+
+    /// Clear loop points.
+    pub fn clear_loop_points(&mut self) {
+        self.loop_start = None;
+        self.loop_end = None;
+        self.loop_mode = LoopMode::NoLoop;
+    }
+
+    /// Apply a linear fade-in over the first `length` samples.
+    pub fn fade_in(&mut self, length: usize) {
+        let len = length.min(self.samples.len());
+        for i in 0..len {
+            self.samples[i] *= i as f32 / len as f32;
+        }
+    }
+
+    /// Apply a linear fade-out over the last `length` samples.
+    pub fn fade_out(&mut self, length: usize) {
+        let total = self.samples.len();
+        let len = length.min(total);
+        let start = total - len;
+        for i in 0..len {
+            self.samples[start + i] *= 1.0 - (i as f32 / len as f32);
+        }
+    }
+
+    /// Normalize the sample to peak amplitude of `target` (default 1.0).
+    /// Returns the gain factor applied, or 0.0 if the sample is silent.
+    pub fn normalize(&mut self, target: f32) -> f32 {
+        let peak = self.samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+        if peak < 1e-10 {
+            return 0.0;
+        }
+        let gain = target / peak;
+        for s in &mut self.samples {
+            *s *= gain;
+        }
+        gain
+    }
+
+    /// Reverse the sample data in place.
+    pub fn reverse(&mut self) {
+        self.samples.reverse();
+        // Swap and recalculate loop points
+        let len = self.samples.len();
+        let new_start = self.loop_end.map(|le| len.saturating_sub(le));
+        let new_end = self.loop_start.map(|ls| len.saturating_sub(ls));
+        self.loop_start = new_start;
+        self.loop_end = new_end;
+    }
+
+    /// Get the peak amplitude of the sample.
+    pub fn peak(&self) -> f32 {
+        self.samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max)
+    }
+
+    /// Get the RMS level of the sample.
+    pub fn rms(&self) -> f32 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        let sum_sq: f32 = self.samples.iter().map(|s| s * s).sum();
+        (sum_sq / self.samples.len() as f32).sqrt()
     }
 }
 
@@ -630,5 +880,576 @@ mod tests {
 
         sampler.reset();
         assert_eq!(sampler.active_voices(), 0);
+    }
+
+    // --- Sample editing tests ---
+
+    #[test]
+    fn trim_basic() {
+        let mut zone = SampleZone::new("Test", 60, vec![1.0, 2.0, 3.0, 4.0, 5.0], 44100);
+        zone.trim(1, 4);
+        assert_eq!(zone.samples, vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn trim_adjusts_loop_points() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0; 100], 44100);
+        zone.loop_start = Some(20);
+        zone.loop_end = Some(80);
+        zone.trim(10, 90);
+        assert_eq!(zone.samples.len(), 80);
+        assert_eq!(zone.loop_start, Some(10)); // 20-10
+        assert_eq!(zone.loop_end, Some(70)); // 80-10
+    }
+
+    #[test]
+    fn trim_invalidates_out_of_range_loop_points() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0; 100], 44100);
+        zone.loop_start = Some(5);
+        zone.loop_end = Some(95);
+        zone.trim(50, 100);
+        assert!(zone.loop_start.is_none()); // 5 < 50, out of range
+        assert_eq!(zone.loop_end, Some(45)); // 95-50
+    }
+
+    #[test]
+    fn set_loop_points_valid() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0; 100], 44100);
+        assert!(zone.set_loop_points(10, 90));
+        assert_eq!(zone.loop_start, Some(10));
+        assert_eq!(zone.loop_end, Some(90));
+    }
+
+    #[test]
+    fn set_loop_points_invalid() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0; 100], 44100);
+        assert!(!zone.set_loop_points(90, 10)); // start >= end
+        assert!(!zone.set_loop_points(0, 200)); // end > len
+        assert!(!zone.set_loop_points(50, 50)); // start == end
+    }
+
+    #[test]
+    fn clear_loop_points() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0; 100], 44100);
+        zone.set_loop_points(10, 90);
+        zone.loop_mode = LoopMode::Forward;
+        zone.clear_loop_points();
+        assert!(zone.loop_start.is_none());
+        assert!(zone.loop_end.is_none());
+        assert_eq!(zone.loop_mode, LoopMode::NoLoop);
+    }
+
+    #[test]
+    fn fade_in() {
+        let mut zone = SampleZone::new("Test", 60, vec![1.0; 10], 44100);
+        zone.fade_in(5);
+        assert_eq!(zone.samples[0], 0.0); // fully faded
+        assert!((zone.samples[4] - 0.8).abs() < 0.01); // 4/5
+        assert_eq!(zone.samples[5], 1.0); // unaffected
+        assert_eq!(zone.samples[9], 1.0); // unaffected
+    }
+
+    #[test]
+    fn fade_out() {
+        let mut zone = SampleZone::new("Test", 60, vec![1.0; 10], 44100);
+        zone.fade_out(5);
+        assert_eq!(zone.samples[0], 1.0); // unaffected
+        assert_eq!(zone.samples[4], 1.0); // unaffected
+        assert!((zone.samples[5] - 1.0).abs() < 0.01); // start of fade (0/5 = 0.0 attenuation)
+        assert!((zone.samples[9] - 0.2).abs() < 0.01); // 1.0 * (1 - 4/5) = 0.2
+    }
+
+    #[test]
+    fn normalize_scales_to_target() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.5, -0.3, 0.2], 44100);
+        let gain = zone.normalize(1.0);
+        assert!((gain - 2.0).abs() < 0.01); // peak was 0.5, gain = 1.0/0.5 = 2.0
+        assert!((zone.peak() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn normalize_silent_returns_zero() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0, 0.0, 0.0], 44100);
+        let gain = zone.normalize(1.0);
+        assert_eq!(gain, 0.0);
+    }
+
+    #[test]
+    fn reverse_flips_samples() {
+        let mut zone = SampleZone::new("Test", 60, vec![1.0, 2.0, 3.0, 4.0], 44100);
+        zone.reverse();
+        assert_eq!(zone.samples, vec![4.0, 3.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn reverse_adjusts_loop_points() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.0; 100], 44100);
+        zone.loop_start = Some(20);
+        zone.loop_end = Some(80);
+        zone.reverse();
+        assert_eq!(zone.loop_start, Some(20)); // 100 - 80
+        assert_eq!(zone.loop_end, Some(80)); // 100 - 20
+    }
+
+    #[test]
+    fn peak_and_rms() {
+        let zone = SampleZone::new("Test", 60, vec![0.5, -1.0, 0.3], 44100);
+        assert!((zone.peak() - 1.0).abs() < 0.01);
+        let expected_rms = ((0.25 + 1.0 + 0.09) / 3.0_f32).sqrt();
+        assert!((zone.rms() - expected_rms).abs() < 0.01);
+    }
+
+    #[test]
+    fn len_and_is_empty() {
+        let zone = SampleZone::new("Test", 60, vec![1.0, 2.0], 44100);
+        assert_eq!(zone.len(), 2);
+        assert!(!zone.is_empty());
+
+        let empty = SampleZone::new("Empty", 60, vec![], 44100);
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+    }
+
+    // ── 8G.6: comprehensive sample playback tests ──────────────────────
+
+    #[test]
+    fn pitch_mapping_root_key_plays_at_original_speed() {
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Test", 60, vec![1.0; 500], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let ratio = sampler.voices[0].pitch_ratio;
+        assert!(
+            (ratio - 1.0).abs() < 1e-9,
+            "root key should play at ratio 1.0, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn pitch_mapping_octave_up_doubles_speed() {
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Test", 60, vec![1.0; 500], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(72, 100, 0);
+
+        let ratio = sampler.voices[0].pitch_ratio;
+        assert!(
+            (ratio - 2.0).abs() < 1e-9,
+            "octave up should play at ratio 2.0, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn pitch_mapping_octave_up_exhausts_sample_in_half_the_frames() {
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Test", 60, vec![0.5; 200], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(72, 100, 0);
+
+        let mut buf = AudioBuffer::new(2, 128);
+        sampler.process(&[], &[], &mut buf);
+
+        assert_eq!(
+            sampler.active_voices(),
+            0,
+            "at 2x pitch, 200-sample zone should be done within 128 frames"
+        );
+    }
+
+    #[test]
+    fn pitch_mapping_octave_down_halves_speed() {
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Test", 60, vec![1.0; 500], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(48, 100, 0);
+
+        let ratio = sampler.voices[0].pitch_ratio;
+        assert!(
+            (ratio - 0.5).abs() < 1e-9,
+            "octave down should play at ratio 0.5, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn pitch_mapping_sample_rate_compensation() {
+        let mut sampler = Sampler::new(48000.0);
+        let zone = SampleZone::new("Test", 60, vec![1.0; 500], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let expected = 44100.0 / 48000.0;
+        let ratio = sampler.voices[0].pitch_ratio;
+        assert!(
+            (ratio - expected).abs() < 1e-6,
+            "sample rate compensation: expected {expected}, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn forward_loop_cycles_multiple_times() {
+        let mut sampler = Sampler::new(44100.0);
+        let samples: Vec<f32> = (0..100).map(|i| i as f32 / 100.0).collect();
+        let mut zone = SampleZone::new("Loop", 60, samples, 44100);
+        zone.loop_mode = LoopMode::Forward;
+        zone.loop_start = Some(20);
+        zone.loop_end = Some(60);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let mut buf = AudioBuffer::new(2, 256);
+        sampler.process(&[], &[], &mut buf);
+
+        assert_eq!(
+            sampler.active_voices(),
+            1,
+            "forward-loop voice should remain active"
+        );
+
+        let pos = sampler.voices[0].play_pos;
+        assert!(
+            (20.0..60.0).contains(&pos),
+            "play_pos should be in loop region [20, 60), got {pos}"
+        );
+    }
+
+    #[test]
+    fn forward_loop_produces_nonzero_audio_throughout() {
+        let mut sampler = Sampler::new(44100.0);
+        let mut zone = SampleZone::new("Loop", 60, vec![0.8; 100], 44100);
+        zone.loop_mode = LoopMode::Forward;
+        zone.loop_start = Some(10);
+        zone.loop_end = Some(90);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 127, 0);
+
+        for block in 0..5 {
+            let mut buf = AudioBuffer::new(2, 128);
+            sampler.process(&[], &[], &mut buf);
+            let has_nonzero = (0..128).any(|i| buf.get(i, 0).abs() > 0.001);
+            assert!(
+                has_nonzero,
+                "forward loop should produce audio in block {block}"
+            );
+        }
+    }
+
+    #[test]
+    fn pingpong_loop_stays_within_bounds() {
+        let mut sampler = Sampler::new(44100.0);
+        let mut zone = SampleZone::new("PingPong", 60, vec![0.5; 200], 44100);
+        zone.loop_mode = LoopMode::PingPong;
+        zone.loop_start = Some(40);
+        zone.loop_end = Some(160);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        for _ in 0..10 {
+            let mut buf = AudioBuffer::new(2, 128);
+            sampler.process(&[], &[], &mut buf);
+
+            assert_eq!(
+                sampler.active_voices(),
+                1,
+                "ping-pong voice should stay active"
+            );
+            let pos = sampler.voices[0].play_pos;
+            assert!(
+                (40.0..=160.0).contains(&pos),
+                "ping-pong play_pos should stay in [40, 160], got {pos}"
+            );
+        }
+    }
+
+    #[test]
+    fn pingpong_loop_reverses_direction_at_boundaries() {
+        let mut sampler = Sampler::new(44100.0);
+        let mut zone = SampleZone::new("PingPong", 60, vec![0.5; 100], 44100);
+        zone.loop_mode = LoopMode::PingPong;
+        zone.loop_start = Some(10);
+        zone.loop_end = Some(50);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let mut saw_forward = false;
+        let mut saw_reverse = false;
+        for _ in 0..200 {
+            let mut buf = AudioBuffer::new(2, 1);
+            sampler.process(&[], &[], &mut buf);
+            if sampler.voices[0].direction == 1 {
+                saw_forward = true;
+            } else if sampler.voices[0].direction == -1 {
+                saw_reverse = true;
+            }
+        }
+        assert!(saw_forward, "should have played forward at some point");
+        assert!(saw_reverse, "should have played in reverse at some point");
+    }
+
+    #[test]
+    fn velocity_zone_selection_boundary_values() {
+        let mut sampler = Sampler::new(44100.0);
+
+        let mut zone_pp = SampleZone::new("pp", 60, vec![0.1; 100], 44100);
+        zone_pp.velocity_low = 1;
+        zone_pp.velocity_high = 42;
+
+        let mut zone_mf = SampleZone::new("mf", 60, vec![0.5; 100], 44100);
+        zone_mf.velocity_low = 43;
+        zone_mf.velocity_high = 85;
+
+        let mut zone_ff = SampleZone::new("ff", 60, vec![1.0; 100], 44100);
+        zone_ff.velocity_low = 86;
+        zone_ff.velocity_high = 127;
+
+        sampler.add_zone(zone_pp);
+        sampler.add_zone(zone_mf);
+        sampler.add_zone(zone_ff);
+
+        assert_eq!(sampler.find_zone(60, 1), Some(0), "velocity 1 -> pp");
+        assert_eq!(sampler.find_zone(60, 42), Some(0), "velocity 42 -> pp");
+        assert_eq!(sampler.find_zone(60, 43), Some(1), "velocity 43 -> mf");
+        assert_eq!(sampler.find_zone(60, 85), Some(1), "velocity 85 -> mf");
+        assert_eq!(sampler.find_zone(60, 86), Some(2), "velocity 86 -> ff");
+        assert_eq!(sampler.find_zone(60, 127), Some(2), "velocity 127 -> ff");
+
+        assert_eq!(sampler.find_zone(60, 0), None, "velocity 0 -> None");
+    }
+
+    #[test]
+    fn velocity_zone_triggers_correct_zone_for_playback() {
+        let mut sampler = Sampler::new(44100.0);
+
+        let mut zone_soft = SampleZone::new("Soft", 60, vec![0.1; 100], 44100);
+        zone_soft.velocity_low = 1;
+        zone_soft.velocity_high = 64;
+
+        let mut zone_loud = SampleZone::new("Loud", 60, vec![0.9; 100], 44100);
+        zone_loud.velocity_low = 65;
+        zone_loud.velocity_high = 127;
+
+        sampler.add_zone(zone_soft);
+        sampler.add_zone(zone_loud);
+
+        sampler.note_on(60, 30, 0);
+        assert_eq!(sampler.voices[0].zone_index, 0, "soft velocity -> zone 0");
+
+        sampler.note_on(60, 100, 0);
+        assert_eq!(sampler.voices[1].zone_index, 1, "loud velocity -> zone 1");
+    }
+
+    #[test]
+    fn oneshot_stops_exactly_at_sample_end() {
+        let sample_len = 50;
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Short", 60, vec![0.7; sample_len], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let mut buf = AudioBuffer::new(2, sample_len as u32);
+        sampler.process(&[], &[], &mut buf);
+
+        assert_eq!(
+            sampler.active_voices(),
+            0,
+            "one-shot should deactivate after all samples consumed"
+        );
+    }
+
+    #[test]
+    fn oneshot_produces_silence_after_sample_ends() {
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Short", 60, vec![1.0; 50], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let mut buf1 = AudioBuffer::new(2, 64);
+        sampler.process(&[], &[], &mut buf1);
+
+        let mut buf2 = AudioBuffer::new(2, 64);
+        sampler.process(&[], &[], &mut buf2);
+
+        for i in 0..64 {
+            assert_eq!(
+                buf2.get(i, 0),
+                0.0,
+                "frame {i} should be silent after one-shot completes"
+            );
+        }
+    }
+
+    #[test]
+    fn oneshot_with_pitch_up_finishes_faster() {
+        let mut sampler = Sampler::new(44100.0);
+        let zone = SampleZone::new("Test", 60, vec![0.5; 400], 44100);
+        sampler.add_zone(zone);
+        sampler.note_on(84, 100, 0);
+
+        let mut buf = AudioBuffer::new(2, 128);
+        sampler.process(&[], &[], &mut buf);
+
+        assert_eq!(
+            sampler.active_voices(),
+            0,
+            "4x pitch should exhaust 400 samples within 128 frames"
+        );
+    }
+
+    #[test]
+    fn loop_mode_noloop_is_default() {
+        let zone = SampleZone::new("Default", 60, vec![], 44100);
+        assert_eq!(zone.loop_mode, LoopMode::NoLoop);
+        assert!(zone.loop_start.is_none());
+        assert!(zone.loop_end.is_none());
+    }
+
+    #[test]
+    fn forward_loop_without_explicit_bounds_uses_full_sample() {
+        let mut sampler = Sampler::new(44100.0);
+        let mut zone = SampleZone::new("FullLoop", 60, vec![0.5; 80], 44100);
+        zone.loop_mode = LoopMode::Forward;
+        sampler.add_zone(zone);
+        sampler.note_on(60, 100, 0);
+
+        let mut buf = AudioBuffer::new(2, 256);
+        sampler.process(&[], &[], &mut buf);
+
+        assert_eq!(
+            sampler.active_voices(),
+            1,
+            "forward loop with default bounds should keep playing"
+        );
+        let pos = sampler.voices[0].play_pos;
+        assert!(
+            (0.0..80.0).contains(&pos),
+            "play_pos should wrap within [0, 80), got {pos}"
+        );
+    }
+
+    #[test]
+    fn read_sample_interpolates_between_samples() {
+        let zone = SampleZone::new("Interp", 60, vec![0.0, 1.0, 0.0], 44100);
+        let val = Sampler::read_sample(&zone, 0.5);
+        assert!(
+            (val - 0.5).abs() < 1e-6,
+            "linear interpolation at 0.5 should give 0.5, got {val}"
+        );
+
+        let val2 = Sampler::read_sample(&zone, 1.25);
+        assert!(
+            (val2 - 0.75).abs() < 1e-6,
+            "linear interpolation at 1.25 should give 0.75, got {val2}"
+        );
+    }
+
+    // ── Slice mode tests ──────────────────────────────────────────────
+
+    fn make_transient_sample() -> Vec<f32> {
+        let sr = 44100;
+        let mut samples = vec![0.0_f32; sr];
+        let positions = [4410, 13230, 22050, 33075];
+        for &pos in &positions {
+            for i in 0..512 {
+                if pos + i < samples.len() {
+                    samples[pos + i] = 0.9 * (i as f32 / 512.0 * std::f32::consts::PI).sin();
+                }
+            }
+        }
+        samples
+    }
+
+    #[test]
+    fn auto_slice_finds_transients() {
+        let samples = make_transient_sample();
+        let mut zone = SampleZone::new("Beats", 60, samples, 44100);
+        zone.auto_slice_by_transients(0.3);
+
+        assert!(
+            zone.slice_count() >= 3,
+            "expected at least 3 slices, got {}",
+            zone.slice_count()
+        );
+
+        for s in &zone.slices {
+            assert!(s.index < 44100, "slice index {} out of bounds", s.index);
+        }
+
+        for w in zone.slices.windows(2) {
+            assert!(w[0].index < w[1].index, "slices not in ascending order");
+        }
+    }
+
+    #[test]
+    fn slice_to_zones_correct_count_and_keys() {
+        let samples = make_transient_sample();
+        let mut zone = SampleZone::new("Beats", 60, samples, 44100);
+        zone.auto_slice_by_transients(0.3);
+
+        let n = zone.slice_count();
+        assert!(n >= 2, "need at least 2 slices");
+
+        let base_note = 36_u8;
+        let zones = zone.slice_to_zones(base_note);
+
+        assert_eq!(zones.len(), n);
+
+        for (i, z) in zones.iter().enumerate() {
+            let expected_note = base_note + i as u8;
+            assert_eq!(z.root_key, expected_note);
+            assert_eq!(z.key_low, expected_note);
+            assert_eq!(z.key_high, expected_note);
+            assert!(!z.samples.is_empty());
+        }
+
+        let first_slice_idx = zone.slices[0].index;
+        let total: usize = zones.iter().map(|z| z.samples.len()).sum();
+        assert_eq!(total, 44100 - first_slice_idx);
+    }
+
+    #[test]
+    fn empty_sample_produces_no_slices() {
+        let mut zone = SampleZone::new("Empty", 60, vec![], 44100);
+        zone.auto_slice_by_transients(0.5);
+        assert_eq!(zone.slice_count(), 0);
+    }
+
+    #[test]
+    fn silent_sample_produces_no_slices() {
+        let mut zone = SampleZone::new("Silent", 60, vec![0.0; 44100], 44100);
+        zone.auto_slice_by_transients(0.5);
+        assert_eq!(zone.slice_count(), 0);
+    }
+
+    #[test]
+    fn manual_slice_management() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.5; 10000], 44100);
+
+        assert_eq!(zone.slice_count(), 0);
+
+        zone.add_slice(1000, Some("kick".to_string()));
+        zone.add_slice(5000, None);
+        zone.add_slice(3000, Some("snare".to_string()));
+
+        assert_eq!(zone.slice_count(), 3);
+        assert_eq!(zone.slices[0].index, 1000);
+        assert_eq!(zone.slices[1].index, 3000);
+        assert_eq!(zone.slices[2].index, 5000);
+
+        zone.clear_slices();
+        assert_eq!(zone.slice_count(), 0);
+    }
+
+    #[test]
+    fn add_slice_out_of_bounds_ignored() {
+        let mut zone = SampleZone::new("Test", 60, vec![0.5; 100], 44100);
+        zone.add_slice(200, None);
+        assert_eq!(zone.slice_count(), 0);
+    }
+
+    #[test]
+    fn slice_to_zones_empty_when_no_slices() {
+        let zone = SampleZone::new("Test", 60, vec![0.5; 10000], 44100);
+        let zones = zone.slice_to_zones(60);
+        assert!(zones.is_empty());
     }
 }

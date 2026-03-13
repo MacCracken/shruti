@@ -270,4 +270,168 @@ mod tests {
             assert!(out.is_finite(), "Output should be finite at sample {i}");
         }
     }
+
+    /// Generate a sine wave, filter it, and return the RMS of the steady-state output.
+    /// Uses 2 seconds of audio and skips the first 0.2s to avoid transient artifacts.
+    fn sine_rms_through_filter(
+        mode: FilterMode,
+        cutoff: f32,
+        resonance: f32,
+        freq: f32,
+        sample_rate: f32,
+    ) -> f32 {
+        let mut filter = Filter::new(mode, cutoff, resonance, sample_rate);
+        let n = (sample_rate * 2.0) as usize;
+        let skip = (sample_rate * 0.2) as usize;
+        let samples: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin())
+            .collect();
+        let mut sum_sq = 0.0f64;
+        let mut count = 0usize;
+        for (i, &s) in samples.iter().enumerate() {
+            let out = filter.process_sample(s);
+            if i >= skip {
+                sum_sq += (out as f64) * (out as f64);
+                count += 1;
+            }
+        }
+        (sum_sq / count as f64).sqrt() as f32
+    }
+
+    /// RMS of an unfiltered unit-amplitude sine is 1/sqrt(2) ≈ 0.7071
+    const SINE_RMS: f32 = std::f32::consts::FRAC_1_SQRT_2;
+
+    /// Convert a linear ratio to decibels.
+    fn to_db(ratio: f32) -> f32 {
+        20.0 * ratio.log10()
+    }
+
+    // ── Lowpass attenuation ──────────────────────────────────────────
+
+    #[test]
+    fn lowpass_attenuation_passes_below_cutoff() {
+        let rms_500 = sine_rms_through_filter(FilterMode::LowPass, 1000.0, 0.0, 500.0, SR);
+        // 500 Hz through 1 kHz lowpass should pass with minimal attenuation
+        assert!(
+            rms_500 > 0.5,
+            "LP 1kHz cutoff should pass 500Hz nearly unattenuated, got rms={rms_500}"
+        );
+    }
+
+    #[test]
+    fn lowpass_attenuation_rejects_above_cutoff() {
+        let rms_500 = sine_rms_through_filter(FilterMode::LowPass, 1000.0, 0.0, 500.0, SR);
+        let rms_5k = sine_rms_through_filter(FilterMode::LowPass, 1000.0, 0.0, 5000.0, SR);
+        let atten_db = to_db(rms_5k / rms_500);
+        assert!(
+            atten_db < -6.0,
+            "LP 1kHz cutoff: 5kHz should be at least -6dB relative to 500Hz, got {atten_db:.1} dB"
+        );
+    }
+
+    // ── Highpass attenuation ─────────────────────────────────────────
+
+    #[test]
+    fn highpass_attenuation_passes_above_cutoff() {
+        let rms_5k = sine_rms_through_filter(FilterMode::HighPass, 1000.0, 0.0, 5000.0, SR);
+        assert!(
+            rms_5k > 0.5,
+            "HP 1kHz cutoff should pass 5kHz nearly unattenuated, got rms={rms_5k}"
+        );
+    }
+
+    #[test]
+    fn highpass_attenuation_rejects_below_cutoff() {
+        let rms_500 = sine_rms_through_filter(FilterMode::HighPass, 1000.0, 0.0, 500.0, SR);
+        let rms_5k = sine_rms_through_filter(FilterMode::HighPass, 1000.0, 0.0, 5000.0, SR);
+        let atten_db = to_db(rms_500 / rms_5k);
+        assert!(
+            atten_db < -6.0,
+            "HP 1kHz cutoff: 500Hz should be at least -6dB relative to 5kHz, got {atten_db:.1} dB"
+        );
+    }
+
+    // ── Bandpass peak ────────────────────────────────────────────────
+
+    #[test]
+    fn bandpass_peak_passes_center() {
+        let rms_center = sine_rms_through_filter(FilterMode::BandPass, 1000.0, 0.5, 1000.0, SR);
+        let rms_low = sine_rms_through_filter(FilterMode::BandPass, 1000.0, 0.5, 100.0, SR);
+        let rms_high = sine_rms_through_filter(FilterMode::BandPass, 1000.0, 0.5, 10000.0, SR);
+        assert!(
+            rms_center > rms_low,
+            "BP: center 1kHz rms={rms_center} should exceed 100Hz rms={rms_low}"
+        );
+        assert!(
+            rms_center > rms_high,
+            "BP: center 1kHz rms={rms_center} should exceed 10kHz rms={rms_high}"
+        );
+        // Both off-center should be attenuated meaningfully
+        assert!(
+            to_db(rms_low / rms_center) < -6.0,
+            "BP: 100Hz should be at least -6dB vs center"
+        );
+        assert!(
+            to_db(rms_high / rms_center) < -6.0,
+            "BP: 10kHz should be at least -6dB vs center"
+        );
+    }
+
+    // ── Notch rejection ──────────────────────────────────────────────
+
+    #[test]
+    fn notch_rejection_attenuates_center() {
+        // High resonance for a tight notch
+        let rms_center = sine_rms_through_filter(FilterMode::Notch, 1000.0, 0.99, 1000.0, SR);
+        let rms_100 = sine_rms_through_filter(FilterMode::Notch, 1000.0, 0.99, 100.0, SR);
+        let rms_5k = sine_rms_through_filter(FilterMode::Notch, 1000.0, 0.99, 5000.0, SR);
+        // Center frequency should be strongly attenuated
+        assert!(
+            rms_center < 0.3,
+            "Notch should attenuate 1kHz center, got rms={rms_center}"
+        );
+        // Away from center should pass relatively unchanged
+        assert!(rms_100 > 0.5, "Notch should pass 100Hz, got rms={rms_100}");
+        assert!(rms_5k > 0.5, "Notch should pass 5kHz, got rms={rms_5k}");
+    }
+
+    // ── Resonance boost ──────────────────────────────────────────────
+
+    #[test]
+    fn resonance_boost_exceeds_unity() {
+        // With very high resonance, the signal near cutoff should exceed input RMS
+        let rms_res = sine_rms_through_filter(FilterMode::LowPass, 1000.0, 0.98, 950.0, SR);
+        assert!(
+            rms_res > SINE_RMS,
+            "High resonance near cutoff should boost above unity sine RMS ({SINE_RMS:.4}), got {rms_res:.4}"
+        );
+    }
+
+    // ── Cutoff sweep ─────────────────────────────────────────────────
+
+    #[test]
+    fn cutoff_sweep_progressive_attenuation() {
+        // A 5 kHz tone through progressively lower LP cutoffs should get quieter
+        let cutoffs = [8000.0, 4000.0, 2000.0, 1000.0];
+        let rms_values: Vec<f32> = cutoffs
+            .iter()
+            .map(|&c| sine_rms_through_filter(FilterMode::LowPass, c, 0.0, 5000.0, SR))
+            .collect();
+        for i in 1..rms_values.len() {
+            assert!(
+                rms_values[i] < rms_values[i - 1],
+                "Lowering cutoff from {} to {} should increase attenuation of 5kHz: rms {} vs {}",
+                cutoffs[i - 1],
+                cutoffs[i],
+                rms_values[i - 1],
+                rms_values[i],
+            );
+        }
+        // The most aggressive cutoff should produce significant attenuation
+        let total_atten_db = to_db(rms_values[3] / rms_values[0]);
+        assert!(
+            total_atten_db < -12.0,
+            "Sweeping cutoff from 8kHz to 1kHz should attenuate 5kHz by >12dB, got {total_atten_db:.1} dB"
+        );
+    }
 }

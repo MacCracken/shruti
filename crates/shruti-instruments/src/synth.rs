@@ -670,6 +670,41 @@ mod tests {
     }
 
     #[test]
+    fn synth_max_polyphony_stress() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        // Trigger more notes than MAX_VOICES (16)
+        for i in 0..24 {
+            synth.note_on(36 + i, 100, 0);
+        }
+        // Voice count should be capped at MAX_VOICES
+        assert_eq!(
+            synth.active_voices(),
+            MAX_VOICES,
+            "active voices should be capped at {MAX_VOICES}"
+        );
+
+        // Process audio and verify output is finite (no NaN/inf)
+        let mut buf = AudioBuffer::new(2, 1024);
+        synth.process(&[], &[], &mut buf);
+
+        let mut has_nonzero = false;
+        for i in 0..1024 {
+            let sample = buf.get(i, 0);
+            assert!(
+                sample.is_finite(),
+                "sample at frame {i} is not finite: {sample}"
+            );
+            if sample.abs() > 0.001 {
+                has_nonzero = true;
+            }
+        }
+        assert!(
+            has_nonzero,
+            "synth with 16 active voices should produce audio output"
+        );
+    }
+
+    #[test]
     fn different_filter_modes_produce_different_output() {
         fn render_with_mode(mode: f32) -> Vec<f32> {
             let mut synth = SubtractiveSynth::new(48000.0);

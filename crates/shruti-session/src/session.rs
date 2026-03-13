@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::audio_pool::AudioPool;
+use crate::error::SessionError;
 use crate::timeline::Timeline;
 use crate::track::{Send, SendPosition, Track, TrackGroup, TrackGroupId, TrackId, TrackKind};
 use crate::transport::Transport;
@@ -336,6 +337,144 @@ impl Session {
         } else {
             false
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Output routing
+    // ---------------------------------------------------------------
+
+    /// Set the primary output target for a track.
+    /// Target must be a Bus or Master track. Pass `None` to route to master (default).
+    pub fn set_track_output(
+        &mut self,
+        track_id: TrackId,
+        output: Option<TrackId>,
+    ) -> Result<(), SessionError> {
+        // Cannot route master track
+        if self
+            .tracks
+            .iter()
+            .any(|t| t.id == track_id && t.kind == TrackKind::Master)
+        {
+            return Err(SessionError::InvalidOperation(
+                "cannot set output routing on master track".into(),
+            ));
+        }
+
+        // Validate target exists and is Bus or Master
+        if let Some(target_id) = output {
+            if target_id == track_id {
+                return Err(SessionError::InvalidOperation(
+                    "track cannot route to itself".into(),
+                ));
+            }
+            let target = self
+                .track(target_id)
+                .ok_or_else(|| SessionError::TrackNotFound("routing target not found".into()))?;
+            if target.kind != TrackKind::Bus && target.kind != TrackKind::Master {
+                return Err(SessionError::InvalidOperation(
+                    "output target must be a Bus or Master track".into(),
+                ));
+            }
+            // Check for routing loops
+            if self.would_create_routing_loop(track_id, target_id) {
+                return Err(SessionError::InvalidOperation(
+                    "routing would create a loop".into(),
+                ));
+            }
+        }
+
+        let track = self
+            .track_mut(track_id)
+            .ok_or_else(|| SessionError::TrackNotFound("source track not found".into()))?;
+        track.routing.output = output;
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Set the sidechain input source for a track.
+    pub fn set_sidechain_input(
+        &mut self,
+        track_id: TrackId,
+        source: Option<TrackId>,
+    ) -> Result<(), SessionError> {
+        // Validate source track exists
+        if let Some(source_id) = source {
+            if source_id == track_id {
+                return Err(SessionError::InvalidOperation(
+                    "track cannot sidechain from itself".into(),
+                ));
+            }
+            if self.track(source_id).is_none() {
+                return Err(SessionError::TrackNotFound(
+                    "sidechain source not found".into(),
+                ));
+            }
+        }
+
+        let track = self
+            .track_mut(track_id)
+            .ok_or_else(|| SessionError::TrackNotFound("track not found".into()))?;
+        track.routing.sidechain_input = source;
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Returns the full routing chain from a track to master.
+    /// The chain includes the track itself, then each output target, ending at master.
+    /// Returns an empty vec if the track is not found.
+    pub fn track_output_chain(&self, track_id: TrackId) -> Vec<TrackId> {
+        let mut chain = Vec::new();
+        let mut current = Some(track_id);
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(id) = current {
+            if !visited.insert(id) {
+                // Loop detected, stop
+                break;
+            }
+            let track = match self.track(id) {
+                Some(t) => t,
+                None => break,
+            };
+            chain.push(id);
+            if track.kind == TrackKind::Master {
+                break;
+            }
+            match track.routing.output {
+                Some(next) => current = Some(next),
+                None => {
+                    // Implicit route to master
+                    if let Some(master) = self.master() {
+                        chain.push(master.id);
+                    }
+                    break;
+                }
+            }
+        }
+        chain
+    }
+
+    /// Check if routing `source` to `target` would create a loop.
+    fn would_create_routing_loop(&self, source: TrackId, target: TrackId) -> bool {
+        // Walk from target following its output chain; if we reach source, it's a loop
+        let mut current = Some(target);
+        let mut visited = std::collections::HashSet::new();
+        while let Some(id) = current {
+            if id == source {
+                return true;
+            }
+            if !visited.insert(id) {
+                break;
+            }
+            match self.track(id) {
+                Some(t) if t.kind != TrackKind::Master => {
+                    current = t.routing.output;
+                }
+                _ => break,
+            }
+        }
+        false
     }
 
     /// Total number of tracks (including master).
@@ -982,5 +1121,284 @@ mod tests {
         let restored: Session = serde_json::from_str(&json).unwrap();
         assert!(restored.groups.is_empty());
         assert_eq!(restored.name, "Old");
+    }
+
+    // ---------------------------------------------------------------
+    // Output routing
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_route_track_to_bus() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Reverb Bus");
+
+        assert!(session.set_track_output(audio_id, Some(bus_id)).is_ok());
+        assert_eq!(
+            session.track(audio_id).unwrap().routing.output,
+            Some(bus_id)
+        );
+    }
+
+    #[test]
+    fn test_route_bus_to_master() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bus_id = session.add_bus_track("Reverb Bus");
+        let master_id = session.master().unwrap().id;
+
+        assert!(session.set_track_output(bus_id, Some(master_id)).is_ok());
+        assert_eq!(
+            session.track(bus_id).unwrap().routing.output,
+            Some(master_id)
+        );
+    }
+
+    #[test]
+    fn test_route_track_to_audio_track_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let a1 = session.add_audio_track("A");
+        let a2 = session.add_audio_track("B");
+
+        let result = session.set_track_output(a1, Some(a2));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_track_to_self_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+
+        let result = session.set_track_output(audio_id, Some(audio_id));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_master_output_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bus_id = session.add_bus_track("Bus");
+        let master_id = session.master().unwrap().id;
+
+        let result = session.set_track_output(master_id, Some(bus_id));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_routing_loop_detection() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bus_a = session.add_bus_track("Bus A");
+        let bus_b = session.add_bus_track("Bus B");
+
+        // bus_a -> bus_b (ok)
+        assert!(session.set_track_output(bus_a, Some(bus_b)).is_ok());
+        // bus_b -> bus_a would create a loop
+        let result = session.set_track_output(bus_b, Some(bus_a));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_routing_loop_detection_three_buses() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bus_a = session.add_bus_track("Bus A");
+        let bus_b = session.add_bus_track("Bus B");
+        let bus_c = session.add_bus_track("Bus C");
+
+        // A -> B -> C is fine
+        assert!(session.set_track_output(bus_a, Some(bus_b)).is_ok());
+        assert!(session.set_track_output(bus_b, Some(bus_c)).is_ok());
+        // C -> A would create A -> B -> C -> A loop
+        let result = session.set_track_output(bus_c, Some(bus_a));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_to_none_resets_to_master() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Bus");
+
+        session.set_track_output(audio_id, Some(bus_id)).unwrap();
+        session.set_track_output(audio_id, None).unwrap();
+        assert!(session.track(audio_id).unwrap().routing.output.is_none());
+    }
+
+    #[test]
+    fn test_route_nonexistent_track_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bus_id = session.add_bus_track("Bus");
+        let bogus = TrackId::new();
+
+        let result = session.set_track_output(bogus, Some(bus_id));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_to_nonexistent_target_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bogus = TrackId::new();
+
+        let result = session.set_track_output(audio_id, Some(bogus));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sidechain_assignment() {
+        let mut session = Session::new("Test", 48000, 256);
+        let vocal = session.add_audio_track("Vocal");
+        let bass = session.add_audio_track("Bass");
+
+        assert!(session.set_sidechain_input(bass, Some(vocal)).is_ok());
+        assert_eq!(
+            session.track(bass).unwrap().routing.sidechain_input,
+            Some(vocal)
+        );
+    }
+
+    #[test]
+    fn test_sidechain_self_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let vocal = session.add_audio_track("Vocal");
+
+        let result = session.set_sidechain_input(vocal, Some(vocal));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sidechain_nonexistent_source_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let vocal = session.add_audio_track("Vocal");
+        let bogus = TrackId::new();
+
+        let result = session.set_sidechain_input(vocal, Some(bogus));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sidechain_clear() {
+        let mut session = Session::new("Test", 48000, 256);
+        let vocal = session.add_audio_track("Vocal");
+        let bass = session.add_audio_track("Bass");
+
+        session.set_sidechain_input(bass, Some(vocal)).unwrap();
+        session.set_sidechain_input(bass, None).unwrap();
+        assert!(
+            session
+                .track(bass)
+                .unwrap()
+                .routing
+                .sidechain_input
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_track_output_chain_default() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let master_id = session.master().unwrap().id;
+
+        let chain = session.track_output_chain(audio_id);
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[0], audio_id);
+        assert_eq!(chain[1], master_id);
+    }
+
+    #[test]
+    fn test_track_output_chain_through_bus() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Bus");
+        let master_id = session.master().unwrap().id;
+
+        session.set_track_output(audio_id, Some(bus_id)).unwrap();
+        // Bus defaults to master (None output)
+
+        let chain = session.track_output_chain(audio_id);
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain[0], audio_id);
+        assert_eq!(chain[1], bus_id);
+        assert_eq!(chain[2], master_id);
+    }
+
+    #[test]
+    fn test_track_output_chain_explicit_master_route() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bus_id = session.add_bus_track("Bus");
+        let master_id = session.master().unwrap().id;
+
+        session.set_track_output(bus_id, Some(master_id)).unwrap();
+
+        let chain = session.track_output_chain(bus_id);
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[0], bus_id);
+        assert_eq!(chain[1], master_id);
+    }
+
+    #[test]
+    fn test_track_output_chain_master_only() {
+        let session = Session::new("Test", 48000, 256);
+        let master_id = session.master().unwrap().id;
+
+        let chain = session.track_output_chain(master_id);
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0], master_id);
+    }
+
+    #[test]
+    fn test_track_output_chain_nonexistent() {
+        let session = Session::new("Test", 48000, 256);
+        let bogus = TrackId::new();
+
+        let chain = session.track_output_chain(bogus);
+        assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn test_routing_dirty_flag() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Bus");
+        session.dirty = false;
+
+        session.set_track_output(audio_id, Some(bus_id)).unwrap();
+        assert!(session.dirty);
+
+        session.dirty = false;
+        let vocal = session.add_audio_track("Vocal");
+        session.dirty = false;
+        session.set_sidechain_input(audio_id, Some(vocal)).unwrap();
+        assert!(session.dirty);
+    }
+
+    #[test]
+    fn test_routing_serde_backward_compat() {
+        // Simulate an old session without routing fields
+        let session = Session::new("Old", 48000, 256);
+        let json = serde_json::to_string(&session).unwrap();
+        // Remove all routing fields
+        let without_routing =
+            json.replace(r#","routing":{"output":null,"sidechain_input":null}"#, "");
+        let restored: Session = serde_json::from_str(&without_routing).unwrap();
+        let master = restored.master().unwrap();
+        assert!(master.routing.output.is_none());
+        assert!(master.routing.sidechain_input.is_none());
+    }
+
+    #[test]
+    fn test_routing_serde_roundtrip() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Bus");
+        let vocal = session.add_audio_track("Vocal");
+
+        session.set_track_output(audio_id, Some(bus_id)).unwrap();
+        session.set_sidechain_input(audio_id, Some(vocal)).unwrap();
+
+        let json = serde_json::to_string(&session).unwrap();
+        let restored: Session = serde_json::from_str(&json).unwrap();
+
+        let track = restored.track(audio_id).unwrap();
+        assert_eq!(track.routing.output, Some(bus_id));
+        assert_eq!(track.routing.sidechain_input, Some(vocal));
     }
 }

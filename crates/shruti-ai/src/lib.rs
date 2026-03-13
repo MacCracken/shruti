@@ -7,6 +7,7 @@
 
 pub mod agent_api;
 pub mod mcp;
+pub mod serve;
 pub mod voice;
 
 pub use agent_api::AgentApi;

@@ -280,6 +280,24 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
         EditCommand::ToggleGroupCollapsed { group_id } => {
             session.toggle_group_collapsed(*group_id);
         }
+        EditCommand::SetTrackOutput {
+            track_id,
+            new_output,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id) {
+                track.routing.output = *new_output;
+            }
+        }
+        EditCommand::SetSidechainInput {
+            track_id,
+            new_source,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id) {
+                track.routing.sidechain_input = *new_source;
+            }
+        }
         EditCommand::Compound { commands } => {
             for sub in commands.iter_mut() {
                 apply_command(sub, session);
@@ -490,6 +508,24 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
         }
         EditCommand::ToggleGroupCollapsed { group_id } => {
             session.toggle_group_collapsed(*group_id);
+        }
+        EditCommand::SetTrackOutput {
+            track_id,
+            old_output,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id) {
+                track.routing.output = *old_output;
+            }
+        }
+        EditCommand::SetSidechainInput {
+            track_id,
+            old_source,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id) {
+                track.routing.sidechain_input = *old_source;
+            }
         }
         EditCommand::Compound { commands } => {
             for sub in commands.iter().rev() {
@@ -1612,5 +1648,123 @@ mod tests {
 
         um.undo(&mut session);
         assert!(!session.group(gid).unwrap().collapsed);
+    }
+
+    // ---------------------------------------------------------------
+    // Output routing undo/redo
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_set_track_output_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Bus");
+        let mut um = UndoManager::new(100);
+
+        um.execute(
+            EditCommand::SetTrackOutput {
+                track_id: audio_id,
+                old_output: None,
+                new_output: Some(bus_id),
+            },
+            &mut session,
+        );
+        assert_eq!(
+            session.track(audio_id).unwrap().routing.output,
+            Some(bus_id)
+        );
+
+        um.undo(&mut session);
+        assert!(session.track(audio_id).unwrap().routing.output.is_none());
+
+        um.redo(&mut session);
+        assert_eq!(
+            session.track(audio_id).unwrap().routing.output,
+            Some(bus_id)
+        );
+    }
+
+    #[test]
+    fn test_set_sidechain_input_undo_redo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bass = session.add_audio_track("Bass");
+        let vocal = session.add_audio_track("Vocal");
+        let mut um = UndoManager::new(100);
+
+        um.execute(
+            EditCommand::SetSidechainInput {
+                track_id: bass,
+                old_source: None,
+                new_source: Some(vocal),
+            },
+            &mut session,
+        );
+        assert_eq!(
+            session.track(bass).unwrap().routing.sidechain_input,
+            Some(vocal)
+        );
+
+        um.undo(&mut session);
+        assert!(
+            session
+                .track(bass)
+                .unwrap()
+                .routing
+                .sidechain_input
+                .is_none()
+        );
+
+        um.redo(&mut session);
+        assert_eq!(
+            session.track(bass).unwrap().routing.sidechain_input,
+            Some(vocal)
+        );
+    }
+
+    #[test]
+    fn test_routing_compound_undo() {
+        let mut session = Session::new("Test", 48000, 256);
+        let audio_id = session.add_audio_track("Guitar");
+        let bus_id = session.add_bus_track("Bus");
+        let vocal = session.add_audio_track("Vocal");
+        let mut um = UndoManager::new(100);
+
+        um.execute(
+            EditCommand::Compound {
+                commands: vec![
+                    EditCommand::SetTrackOutput {
+                        track_id: audio_id,
+                        old_output: None,
+                        new_output: Some(bus_id),
+                    },
+                    EditCommand::SetSidechainInput {
+                        track_id: audio_id,
+                        old_source: None,
+                        new_source: Some(vocal),
+                    },
+                ],
+            },
+            &mut session,
+        );
+
+        assert_eq!(
+            session.track(audio_id).unwrap().routing.output,
+            Some(bus_id)
+        );
+        assert_eq!(
+            session.track(audio_id).unwrap().routing.sidechain_input,
+            Some(vocal)
+        );
+
+        um.undo(&mut session);
+        assert!(session.track(audio_id).unwrap().routing.output.is_none());
+        assert!(
+            session
+                .track(audio_id)
+                .unwrap()
+                .routing
+                .sidechain_input
+                .is_none()
+        );
     }
 }

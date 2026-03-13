@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.11 | **Last Updated**: 2026-03-11
-> **Status**: Phases 1–7C, 7A, 7B, 8A–8D complete — MVP v1 + instruments + audit fixes
-> **Tests**: 723 passing (168 dsp, 55 engine, 120 instruments, 137 session, 19 plugin, 103 ai, 121 ui), 59.4% line coverage (excl. vendor), 0 clippy warnings, 0 audit vulnerabilities
+> **Version**: 2026.3.12 | **Last Updated**: 2026-03-12
+> **Status**: Phases 1–7D, 8A–8G complete — MVP v1 + instruments + full AGNOS integration + audit fixes
+> **Tests**: 993 passing (172 dsp, 55 engine, 295 instruments, 205 session, 19 plugin, 126 ai, 121 ui), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -25,28 +25,13 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 7A — Agent API | AI agent control | AgentApi (session/tracks/transport/export), 6 MCP tools, daimon integration |
 | 7B — Agnoshi | Natural language | 7 intent patterns, translate module, curl bridge |
 | 7C — AI Production | Analysis & auto-mix | Spectral FFT, dynamics (peak/RMS/LUFS/crest), auto-mix suggestions, composition analysis, voice control (12 intents) |
+| 7D — AGNOS Distribution | OS integration | Takumi + marketplace recipes, sandbox profile, argonaut service (opt-in), aethersafha Wayland embedding, 5 MCP tools, 5 agnoshi intents |
 | — Editing & Routing | Interactive arrangement | Track reorder (drag), region move/trim (drag), bus send routing (3-pass render), submixes |
 | — Live Recording | Audio capture | Input stream wiring, start/stop recording, buffer→pool→region pipeline, configurable RecordingConfig (44.1–192 kHz, 1–8 ch) |
 | 8A — Instrument Engine | Built-in instruments | `shruti-instruments` crate, InstrumentNode trait, VoiceManager, Oscillator (PolyBLEP), ADSR Envelope, SubtractiveSynth |
 | — Code Audit (R1-6) | Security, perf, memory, correctness, concurrency | Pre-allocated audio buffers, filter coeff caching, FFT validation, path traversal guard, export overflow guard, record buffer cap, transport loop fix, Acquire/Release atomics, atomic session update |
 
 ---
-
-## Phase 7: AGNOS Integration (remaining)
-
-**Goal:** First-class AI agent support on AGNOS.
-
-### 7D — AGNOS Distribution
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Takumi recipe | Done | Build from source, native binary, desktop entry |
-| 2 | Marketplace recipe | Done | Auto-version from release tags |
-| 3 | Sandbox profile | Done | PipeWire/ALSA, Landlock, Wayland |
-| 4 | Argonaut service integration | Small | Optional auto-start in Desktop mode |
-| 5 | Aethersafha Wayland integration | Medium | Embed in compositor, proper surface management |
-
-**Exit criteria:** An AGNOS agent can open a session, arrange tracks, apply effects, mix, and export — with human oversight.
 
 ---
 
@@ -93,7 +78,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | 1 | Subtractive synth | Done | PolyBLEP oscillator, dual ADSR (amp + filter), SVF filter (LP/HP/BP/Notch), dual LFO (6 shapes × 4 targets), 23 params, 16-voice polyphony |
-| 2 | Modulation matrix | Medium | Assignable mod sources (LFO, envelope, velocity, aftertouch, mod wheel) → any parameter; per-voice and global |
+| 2 | Modulation matrix | Done | 8 sources (LFO1/2, AmpEnv, FilterEnv, Velocity, Aftertouch, ModWheel, PitchBend) → 8 destinations, 16 routings, bipolar amounts |
 | 3 | Effects per instrument | Done | EffectChain with 5 types (Chorus, Delay, Reverb, Distortion, FilterDrive), integrated into SubtractiveSynth, DrumMachine, Sampler |
 | 4 | Oscillator anti-aliasing | Done | PolyBLEP for alias-free saw/square at all frequencies |
 
@@ -116,9 +101,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 |---|------|--------|-------|
 | 1 | Drum pad engine | Done | 16-pad sample player, one-shot/looped, pitch/gain/pan/decay, GM drum map (note 36+), velocity sensitivity |
 | 2 | Step sequencer | Done | 16/32/64-step grid per pad, swing, per-step probability, accent, BPM-synced |
-| 3 | Pattern system | Medium | Pattern banks (A/B/C/D × 16), pattern chaining, song mode (pattern sequence on timeline) |
+| 3 | Pattern system | Done | Pattern banks (A/B/C/D × 16 = 64 patterns), pattern chaining with song mode, copy/select/chain API |
 | 4 | Kit management | Done | DrumKit preset: 16-pad config snapshot with save/load JSON, sample_path references, from_drum_machine/apply_to |
-| 5 | Sample layering | Medium | Velocity layers per pad (up to 8 layers), round-robin, random variation |
+| 5 | Sample layering | Done | Velocity layers per pad (up to 8), round-robin/random selection, fallback to main samples |
 | 6 | Per-pad effects | Done | PadEffects with one-pole LPF, tanh drive, reverb/delay send levels per pad |
 
 ### 8D — Sampler
@@ -126,9 +111,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | 1 | Multi-sample engine | Done | Key zones + velocity zones, root key, pitch ratio, 16-voice polyphony, linear interpolation |
-| 2 | Sample editing | Medium | In-place trim, loop points (forward/ping-pong/one-shot), fade, normalize |
+| 2 | Sample editing | Done | In-place trim, loop points (forward/ping-pong/one-shot), fade in/out, normalize, reverse, peak/RMS analysis |
 | 3 | Time-stretching | Large | Granular or phase-vocoder based pitch-independent time stretch; real-time quality |
-| 4 | Slice mode | Medium | Auto-slice by transients, map slices to MIDI keys (REX-style) |
+| 4 | Slice mode | Done | Energy-based onset detection, auto-slice by transients, `slice_to_zones()` maps slices to MIDI keys (REX-style) |
 | 5 | Sample format support | Done | WAV, FLAC, AIFF, OGG/Vorbis via symphonia; SUPPORTED_EXTENSIONS, is_supported_extension() |
 | 6 | SFZ/SF2 import | Medium | Load SoundFont and SFZ instrument definitions for instant playability |
 
@@ -154,20 +139,26 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 5 | Track kind icons & colors | Done | Unicode icons, RGB default colors, labels per TrackKind; Track::color override with display_color() |
 | 6 | Track templates | Done | TrackTemplate: save/load track config (kind, gain, pan, channels, instrument params, color) as JSON |
 | 7 | Track groups / folders | Done | Collapsible track groups with undo/redo, arrangement + mixer UI integration |
-| 8 | Output routing matrix | Medium | Any track → any bus/master; sidechain routing for compressor keying |
+| 8 | Output routing matrix | Done | Any track → any bus/master; sidechain routing for compressor keying; loop detection via chain walking |
 
 ### 8G — Instrument Testing
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Oscillator accuracy tests | Medium | Frequency accuracy, aliasing measurements, DC offset checks across full MIDI range |
-| 2 | Filter response tests | Medium | Verify cutoff, resonance, slope against expected frequency response curves |
+| 1 | Oscillator accuracy tests | Done | Frequency accuracy (±1Hz), aliasing measurements, DC offset checks, amplitude consistency across waveforms |
+| 2 | Filter response tests | Done | Cutoff accuracy, resonance boost, slope verification, mode switching (LP/HP/BP/Notch) |
 | 3 | Envelope timing tests | Done | Attack/decay/release ±1ms at 44100/48000/96000 Hz, sample rate change consistency |
-| 4 | Polyphony stress tests | Medium | Max voices, voice stealing correctness, no clicks/pops on voice allocation |
+| 4 | Polyphony stress tests | Done | Max voices, voice stealing correctness (oldest/quietest/lowest), allocation under load |
 | 5 | Preset roundtrip tests | Done | Synth (with audio verify), DrumMachine, Sampler preset roundtrips + cross-instrument JSON |
-| 6 | Sample playback tests | Medium | Correct pitch mapping, loop points, velocity layer selection, one-shot vs gated |
-| 7 | Step sequencer tests | Medium | Timing accuracy, swing calculation, probability distribution, pattern chaining |
-| 8 | Instrument ↔ MIDI integration | Medium | End-to-end: MIDI clip → instrument → audio output verification |
+| 6 | Sample playback tests | Done | Pitch mapping, loop points (forward/ping-pong), velocity layer selection, one-shot vs gated, drum machine playback |
+| 7 | Step sequencer tests | Done | Timing accuracy, swing calculation, probability distribution, pattern chaining, BPM sync |
+| 8 | Instrument ↔ MIDI integration | Done | End-to-end: MIDI clip → instrument → audio output for synth, drum machine, sampler |
+
+### 16A — Shruti HTTP Server (AGNOS Integration Blocker)
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | `shruti serve --port 8050` | Done | axum HTTP server wrapping AgentApi (8 endpoints + health), CORS, `Serve` CLI subcommand, 16 async tests |
 
 ---
 

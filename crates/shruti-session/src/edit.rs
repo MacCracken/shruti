@@ -136,6 +136,18 @@ pub enum EditCommand {
     },
     /// Toggle a group's collapsed state.
     ToggleGroupCollapsed { group_id: TrackGroupId },
+    /// Set a track's output routing target.
+    SetTrackOutput {
+        track_id: TrackId,
+        old_output: Option<TrackId>,
+        new_output: Option<TrackId>,
+    },
+    /// Set a track's sidechain input source.
+    SetSidechainInput {
+        track_id: TrackId,
+        old_source: Option<TrackId>,
+        new_source: Option<TrackId>,
+    },
     /// Compound command (multiple edits as one undoable action).
     Compound { commands: Vec<EditCommand> },
 }
