@@ -39,7 +39,49 @@ jobs:
         run: cargo audit
 
   test:
-    name: Test
+    name: Test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - shruti-engine
+          - shruti-dsp
+          - shruti-plugin
+          - shruti-ui
+          - shruti-session
+          - shruti-ai
+          - shruti-instruments
+          - shruti
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install audio dev libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Run unit tests for ${{ matrix.package }}
+        run: cargo test -p ${{ matrix.package }} --lib --bins --benches --examples
+
+  integration:
+    name: Integration Tests (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - shruti-instruments
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install audio dev libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Run integration tests for ${{ matrix.package }}
+        run: cargo test -p ${{ matrix.package }} --test '*'
+
+  e2e:
+    name: E2E Tests
+    needs: [test, integration]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -47,8 +89,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install audio dev libraries
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - name: Run tests
-        run: cargo test --workspace --all-targets
+      - name: Run end-to-end tests
+        run: cargo test -p shruti --test integration
 
   coverage:
     name: Coverage (50% threshold)
@@ -66,7 +108,7 @@ jobs:
 
   build:
     name: Build Release
-    needs: [check, test, security, coverage]
+    needs: [check, test, integration, e2e, security, coverage]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
