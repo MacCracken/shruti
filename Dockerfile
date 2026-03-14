@@ -12,7 +12,7 @@
 # TLS:    docker run -p 443:443 -e TLS_ENABLED=true -e TLS_DOMAIN=shruti.example.com shruti-server
 
 # ── Stage 1: Builder ────────────────────────────────────────────────
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 
 # System packages needed at build time:
 #   - ALSA (cpal audio backend)
