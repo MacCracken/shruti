@@ -25,6 +25,7 @@ use shruti_session::region::Region;
 use shruti_session::session::Session;
 use shruti_session::store::SessionStore;
 use shruti_session::track::SendPosition;
+use shruti_session::types::FramePos;
 use shruti_session::undo::UndoManager;
 
 // ---------------------------------------------------------------------------
@@ -87,10 +88,20 @@ fn full_audio_pipeline_renders_sine_through_timeline() {
 
     // Add regions to tracks.
     let track1 = session.track_mut(track1_id).unwrap();
-    track1.add_region(Region::new("sine440.wav".into(), 0, 0, buffer_size as u64));
+    track1.add_region(Region::new(
+        "sine440.wav".into(),
+        0u64,
+        0u64,
+        buffer_size as u64,
+    ));
 
     let track2 = session.track_mut(track2_id).unwrap();
-    track2.add_region(Region::new("sine880.wav".into(), 0, 0, buffer_size as u64));
+    track2.add_region(Region::new(
+        "sine880.wav".into(),
+        0u64,
+        0u64,
+        buffer_size as u64,
+    ));
 
     // Render through the timeline.
     let mut output = AudioBuffer::new(2, buffer_size);
@@ -138,7 +149,12 @@ fn full_audio_pipeline_muted_track_excluded() {
         .insert("sine.wav".into(), AudioBuffer::from_interleaved(sine, 2));
 
     let track = session.track_mut(track_id).unwrap();
-    track.add_region(Region::new("sine.wav".into(), 0, 0, buffer_size as u64));
+    track.add_region(Region::new(
+        "sine.wav".into(),
+        0u64,
+        0u64,
+        buffer_size as u64,
+    ));
     track.muted = true;
 
     let mut output = AudioBuffer::new(2, buffer_size);
@@ -170,10 +186,10 @@ fn instrument_pipeline_synth_produces_audio_from_midi() {
     let _track_id = session.add_instrument_track("Lead Synth", Some("SubtractiveSynth".into()));
 
     // Create MIDI clip with a chord (C major: C4, E4, G4).
-    let mut clip = MidiClip::new("Chord", 0, buffer_size as u64);
-    clip.add_note(0, buffer_size as u64, 60, 100, 0); // C4
-    clip.add_note(0, buffer_size as u64, 64, 90, 0); // E4
-    clip.add_note(0, buffer_size as u64, 67, 80, 0); // G4
+    let mut clip = MidiClip::new("Chord", 0u64, buffer_size as u64);
+    clip.add_note(0u64, buffer_size as u64, 60, 100, 0); // C4
+    clip.add_note(0u64, buffer_size as u64, 64, 90, 0); // E4
+    clip.add_note(0u64, buffer_size as u64, 67, 80, 0); // G4
 
     // Create synth and send note-on events.
     let mut synth = SubtractiveSynth::new(sample_rate);
@@ -444,15 +460,15 @@ fn session_persistence_roundtrip_full() {
     session.track_mut(audio2).unwrap().gain = 0.9;
 
     // Add a region to audio1.
-    let region = Region::new("guitar_take1.wav".into(), 0, 0, 48000);
+    let region = Region::new("guitar_take1.wav".into(), 0u64, 0u64, 48000u64);
     session.track_mut(audio1).unwrap().add_region(region);
 
     // Add a second region.
-    let region2 = Region::new("guitar_take2.wav".into(), 48000, 0, 24000);
+    let region2 = Region::new("guitar_take2.wav".into(), 48000u64, 0u64, 24000u64);
     session.track_mut(audio1).unwrap().add_region(region2);
 
     // Add a region to audio2.
-    let region3 = Region::new("vocals.wav".into(), 0, 0, 96000);
+    let region3 = Region::new("vocals.wav".into(), 0u64, 0u64, 96000u64);
     session.track_mut(audio2).unwrap().add_region(region3);
 
     // Add a send.
@@ -461,17 +477,17 @@ fn session_persistence_roundtrip_full() {
     // Add automation.
     let mut auto_lane = AutomationLane::new(AutomationTarget::TrackGain);
     auto_lane.add_point(AutomationPoint {
-        position: 0,
+        position: FramePos(0),
         value: 0.0,
         curve: CurveType::Linear,
     });
     auto_lane.add_point(AutomationPoint {
-        position: 48000,
+        position: FramePos(48000),
         value: 1.0,
         curve: CurveType::SCurve,
     });
     auto_lane.add_point(AutomationPoint {
-        position: 96000,
+        position: FramePos(96000),
         value: 0.5,
         curve: CurveType::Step,
     });
@@ -510,7 +526,7 @@ fn session_persistence_roundtrip_full() {
     assert_eq!(loaded_audio1.regions.len(), 2);
     assert_eq!(loaded_audio1.regions[0].audio_file_id, "guitar_take1.wav");
     assert_eq!(loaded_audio1.regions[1].audio_file_id, "guitar_take2.wav");
-    assert_eq!(loaded_audio1.regions[1].timeline_pos, 48000);
+    assert_eq!(loaded_audio1.regions[1].timeline_pos, FramePos(48000));
 
     // Sends.
     assert_eq!(loaded_audio1.sends.len(), 1);
@@ -521,7 +537,7 @@ fn session_persistence_roundtrip_full() {
     assert_eq!(loaded_audio1.automation.len(), 1);
     let loaded_auto = &loaded_audio1.automation[0];
     assert_eq!(loaded_auto.points.len(), 3);
-    assert_eq!(loaded_auto.points[0].position, 0);
+    assert_eq!(loaded_auto.points[0].position, FramePos(0));
     assert!((loaded_auto.points[0].value - 0.0).abs() < 1e-6);
     assert_eq!(loaded_auto.points[1].curve, CurveType::SCurve);
     assert_eq!(loaded_auto.points[2].curve, CurveType::Step);
@@ -555,7 +571,7 @@ fn undo_redo_comprehensive_12_operations() {
     let original_region_count = session.track(track_id).unwrap().regions.len();
 
     // Operation 1: Add region.
-    let region = Region::new("file1.wav".into(), 0, 0, 1000);
+    let region = Region::new("file1.wav".into(), 0u64, 0u64, 1000u64);
     let region_id = region.id;
     undo.execute(
         EditCommand::AddRegion {
@@ -567,7 +583,7 @@ fn undo_redo_comprehensive_12_operations() {
     assert_eq!(session.track(track_id).unwrap().regions.len(), 1);
 
     // Operation 2: Add another region.
-    let region2 = Region::new("file2.wav".into(), 1000, 0, 2000);
+    let region2 = Region::new("file2.wav".into(), 1000u64, 0u64, 2000u64);
     let region2_id = region2.id;
     undo.execute(
         EditCommand::AddRegion {
@@ -583,8 +599,8 @@ fn undo_redo_comprehensive_12_operations() {
         EditCommand::MoveRegion {
             track_id,
             region_id,
-            old_pos: 0,
-            new_pos: 500,
+            old_pos: FramePos(0),
+            new_pos: FramePos(500),
         },
         &mut session,
     );
@@ -595,7 +611,7 @@ fn undo_redo_comprehensive_12_operations() {
             .region(region_id)
             .unwrap()
             .timeline_pos,
-        500
+        FramePos(500)
     );
 
     // Operation 4: Set track gain.
@@ -655,8 +671,8 @@ fn undo_redo_comprehensive_12_operations() {
         EditCommand::SetFadeIn {
             track_id,
             region_id,
-            old_fade: 0,
-            new_fade: 100,
+            old_fade: FramePos(0),
+            new_fade: FramePos(100),
         },
         &mut session,
     );
@@ -667,7 +683,7 @@ fn undo_redo_comprehensive_12_operations() {
             .region(region_id)
             .unwrap()
             .fade_in,
-        100
+        FramePos(100)
     );
 
     // Operation 10: Set fade out.
@@ -675,8 +691,8 @@ fn undo_redo_comprehensive_12_operations() {
         EditCommand::SetFadeOut {
             track_id,
             region_id,
-            old_fade: 0,
-            new_fade: 200,
+            old_fade: FramePos(0),
+            new_fade: FramePos(200),
         },
         &mut session,
     );
@@ -687,11 +703,11 @@ fn undo_redo_comprehensive_12_operations() {
             .region(region_id)
             .unwrap()
             .fade_out,
-        200
+        FramePos(200)
     );
 
     // Operation 11: Add another region to track 2.
-    let region3 = Region::new("file3.wav".into(), 0, 0, 500);
+    let region3 = Region::new("file3.wav".into(), 0u64, 0u64, 500u64);
     undo.execute(
         EditCommand::AddRegion {
             track_id: track2_id,
@@ -1021,12 +1037,12 @@ fn preset_file_roundtrip_all_instruments() {
 #[test]
 fn midi_routing_velocity_curve_channel_filter_note_range() {
     // Create a set of MIDI events.
-    let mut clip = MidiClip::new("Test Clip", 0, 48000);
-    clip.add_note(0, 1000, 60, 100, 0); // C4, vel 100, ch 0
-    clip.add_note(0, 1000, 48, 80, 1); // C3, vel 80, ch 1
-    clip.add_note(0, 1000, 72, 120, 0); // C5, vel 120, ch 0
-    clip.add_note(0, 1000, 84, 60, 0); // C6, vel 60, ch 0 (above range)
-    clip.add_note(0, 1000, 30, 90, 0); // below range
+    let mut clip = MidiClip::new("Test Clip", 0u64, 48000u64);
+    clip.add_note(0u64, 1000u64, 60, 100, 0); // C4, vel 100, ch 0
+    clip.add_note(0u64, 1000u64, 48, 80, 1); // C3, vel 80, ch 1
+    clip.add_note(0u64, 1000u64, 72, 120, 0); // C5, vel 120, ch 0
+    clip.add_note(0u64, 1000u64, 84, 60, 0); // C6, vel 60, ch 0 (above range)
+    clip.add_note(0u64, 1000u64, 30, 90, 0); // below range
 
     // Route: channel 0 only, note range 36-72, soft velocity curve.
     let mut route = MidiRoute::new(uuid::Uuid::new_v4());
@@ -1075,8 +1091,8 @@ fn midi_routing_fixed_velocity() {
     route.velocity_curve = VelocityCurve::Fixed(80);
 
     let event = NoteEvent {
-        position: 0,
-        duration: 100,
+        position: FramePos(0),
+        duration: FramePos(100),
         note: 60,
         velocity: 127,
         channel: 0,
@@ -1092,8 +1108,8 @@ fn midi_routing_hard_velocity_curve() {
     route.velocity_curve = VelocityCurve::Hard;
 
     let event = NoteEvent {
-        position: 0,
-        duration: 100,
+        position: FramePos(0),
+        duration: FramePos(100),
         note: 60,
         velocity: 90,
         channel: 0,
@@ -1281,8 +1297,8 @@ fn session_with_bus_sends_renders_correctly() {
     // Add region.
     session.track_mut(audio_id).unwrap().add_region(Region::new(
         "source.wav".into(),
-        0,
-        0,
+        0u64,
+        0u64,
         buffer_size as u64,
     ));
 
@@ -1330,8 +1346,8 @@ fn automation_affects_timeline_render() {
 
     session.track_mut(track_id).unwrap().add_region(Region::new(
         "constant.wav".into(),
-        0,
-        0,
+        0u64,
+        0u64,
         buffer_size as u64,
     ));
 
@@ -1353,7 +1369,7 @@ fn automation_affects_timeline_render() {
     // this should override the track gain from 1.0 to 0.25 for the whole buffer.
     let mut auto_lane = AutomationLane::new(AutomationTarget::TrackGain);
     auto_lane.add_point(AutomationPoint {
-        position: 0,
+        position: FramePos(0),
         value: 0.25,
         curve: CurveType::Linear,
     });

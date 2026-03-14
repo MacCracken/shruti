@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::automation::AutomationLane;
 use crate::midi::MidiClip;
 use crate::region::{Region, RegionId};
+use crate::types::FramePos;
 
 /// Unique identifier for a track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -531,7 +532,7 @@ impl Track {
     ///
     /// Regions are kept sorted by `timeline_pos`, so we use binary search to
     /// skip regions that start at or after `end`, giving O(log n + k) lookup.
-    pub fn regions_in_range(&self, start: u64, end: u64) -> Vec<&Region> {
+    pub fn regions_in_range(&self, start: FramePos, end: FramePos) -> Vec<&Region> {
         // Find the first region whose timeline_pos >= end — everything from
         // that index onward starts too late to overlap.
         let upper = self
@@ -625,8 +626,8 @@ mod tests {
     #[test]
     fn test_track_regions() {
         let mut track = Track::new_audio("Track 1");
-        let r1 = Region::new("file1".into(), 0, 0, 1000);
-        let r2 = Region::new("file2".into(), 2000, 0, 500);
+        let r1 = Region::new("file1".into(), 0u64, 0u64, 1000u64);
+        let r2 = Region::new("file2".into(), 2000u64, 0u64, 500u64);
         let r1_id = r1.id;
 
         track.add_region(r1);
@@ -634,10 +635,10 @@ mod tests {
         assert_eq!(track.regions.len(), 2);
 
         // Range query
-        let in_range = track.regions_in_range(500, 1500);
+        let in_range = track.regions_in_range(FramePos(500), FramePos(1500));
         assert_eq!(in_range.len(), 1);
 
-        let in_range = track.regions_in_range(0, 3000);
+        let in_range = track.regions_in_range(FramePos(0), FramePos(3000));
         assert_eq!(in_range.len(), 2);
 
         // Remove
@@ -702,10 +703,10 @@ mod tests {
         assert_eq!(track.kind, TrackKind::Midi);
         assert!(track.midi_clips.is_empty());
 
-        let mut clip = crate::midi::MidiClip::new("Intro", 0, 48000);
-        clip.add_note(0, 12000, 60, 100, 0);
-        clip.add_note(12000, 12000, 64, 90, 0);
-        clip.add_cc(0, 1, 64, 0);
+        let mut clip = crate::midi::MidiClip::new("Intro", 0u64, 48000u64);
+        clip.add_note(0u64, 12000u64, 60, 100, 0);
+        clip.add_note(12000u64, 12000u64, 64, 90, 0);
+        clip.add_cc(0u64, 1, 64, 0);
 
         track.midi_clips.push(clip);
         assert_eq!(track.midi_clips.len(), 1);
@@ -1351,29 +1352,32 @@ mod tests {
     fn test_add_region_maintains_sorted_order() {
         let mut track = Track::new_audio("Sorted");
         // Insert in reverse order
-        track.add_region(Region::new("f3".into(), 3000, 0, 100));
-        track.add_region(Region::new("f1".into(), 1000, 0, 100));
-        track.add_region(Region::new("f2".into(), 2000, 0, 100));
+        track.add_region(Region::new("f3".into(), 3000u64, 0u64, 100u64));
+        track.add_region(Region::new("f1".into(), 1000u64, 0u64, 100u64));
+        track.add_region(Region::new("f2".into(), 2000u64, 0u64, 100u64));
 
-        let positions: Vec<u64> = track.regions.iter().map(|r| r.timeline_pos).collect();
-        assert_eq!(positions, vec![1000, 2000, 3000]);
+        let positions: Vec<FramePos> = track.regions.iter().map(|r| r.timeline_pos).collect();
+        assert_eq!(
+            positions,
+            vec![FramePos(1000), FramePos(2000), FramePos(3000)]
+        );
     }
 
     #[test]
     fn test_regions_in_range_binary_search() {
         let mut track = Track::new_audio("BSearch");
         // Add many regions at evenly spaced positions
-        for i in 0..100 {
-            track.add_region(Region::new(format!("f{i}"), i * 1000, 0, 500));
+        for i in 0u64..100 {
+            track.add_region(Region::new(format!("f{i}"), i * 1000, 0u64, 500u64));
         }
 
         // Query a range that only overlaps a few regions
-        let found = track.regions_in_range(5000, 7000);
+        let found = track.regions_in_range(FramePos(5000), FramePos(7000));
         // Regions at 5000..5500, 6000..6500, 6500 doesn't exist so only those two
         // Plus region at 4500 doesn't exist (pos 4000 ends at 4500 < 5000)
         // Actually: pos 5000 end 5500, pos 6000 end 6500 — both overlap [5000,7000)
         assert_eq!(found.len(), 2);
-        assert_eq!(found[0].timeline_pos, 5000);
-        assert_eq!(found[1].timeline_pos, 6000);
+        assert_eq!(found[0].timeline_pos, FramePos(5000));
+        assert_eq!(found[1].timeline_pos, FramePos(6000));
     }
 }

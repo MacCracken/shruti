@@ -1,6 +1,6 @@
 [package]
 name = "shruti-dsp"
-version = "2026.3.11"
+version = "2026.3.14"
 edition = "2024"
 description = "DSP primitives and effects for Shruti"
 license = "GPL-3.0"

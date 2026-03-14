@@ -312,7 +312,7 @@ impl AgentApi {
             .map(|b| b.frames() as u64)
             .unwrap_or(0);
 
-        let region = Region::new(file_id, position, 0, duration);
+        let region = Region::new(file_id, position, 0u64, duration);
         let region_id = region.id;
 
         let track = match session.tracks.iter_mut().find(|t| t.name == track_name) {
@@ -359,7 +359,7 @@ impl AgentApi {
             None => return ApiResult::err("no active session"),
         };
 
-        session.transport.seek(position);
+        session.transport.seek(shruti_session::FramePos(position));
         ApiResult::ok(format!("seeked to frame {position}"))
     }
 
@@ -386,19 +386,19 @@ impl AgentApi {
         };
 
         let length = session.session_length();
-        if length == 0 {
+        if length == shruti_session::FramePos::ZERO {
             return ApiResult::err("session is empty");
         }
-        if length > u32::MAX as u64 {
+        if length.0 > u32::MAX as u64 {
             return ApiResult::err("session too long for single-buffer export");
         }
 
         let channels = 2u16;
-        let mut output = shruti_dsp::AudioBuffer::new(channels, length as u32);
+        let mut output = shruti_dsp::AudioBuffer::new(channels, length.0 as u32);
 
         // Render the full session through the timeline
         if session.timeline.is_some() {
-            let mut tl = shruti_session::Timeline::new(channels, length as u32);
+            let mut tl = shruti_session::Timeline::new(channels, length.0 as u32);
             tl.render(
                 &session.tracks,
                 &session.transport,
@@ -432,12 +432,12 @@ impl AgentApi {
         };
 
         let length = session.session_length();
-        if length == 0 {
+        if length == shruti_session::FramePos::ZERO {
             return ApiResult::err("session is empty");
         }
 
         // Guard against u64→u32 overflow (max ~24 hours at 192kHz stereo)
-        if length > u32::MAX as u64 {
+        if length.0 > u32::MAX as u64 {
             return ApiResult::err("session too long for single-buffer export");
         }
 
@@ -455,10 +455,10 @@ impl AgentApi {
         };
 
         let channels = 2u16;
-        let mut output = shruti_dsp::AudioBuffer::new(channels, length as u32);
+        let mut output = shruti_dsp::AudioBuffer::new(channels, length.0 as u32);
 
         if session.timeline.is_some() {
-            let mut tl = shruti_session::Timeline::new(channels, length as u32);
+            let mut tl = shruti_session::Timeline::new(channels, length.0 as u32);
             tl.render(
                 &session.tracks,
                 &session.transport,
@@ -659,7 +659,7 @@ impl AgentApi {
         let bpm = session.transport.bpm;
         let frames_per_bar = (session.sample_rate as f64 * 60.0 / bpm) * 4.0;
         let bars = if frames_per_bar > 0.0 {
-            (length as f64 / frames_per_bar).ceil() as u64
+            (length.as_f64() / frames_per_bar).ceil() as u64
         } else {
             0
         };
@@ -883,7 +883,7 @@ mod tests {
         session.audio_pool.insert("test_audio".to_string(), buf);
 
         // Add a region referencing that audio to the Drums track
-        let region = Region::new("test_audio".to_string(), 0, 0, 4096);
+        let region = Region::new("test_audio".to_string(), 0u64, 0u64, 4096u64);
         let track = session
             .tracks
             .iter_mut()
@@ -936,7 +936,7 @@ mod tests {
         api.add_track("Vocals", "audio");
         // Add region referencing non-existent audio
         let session = api.session.as_mut().unwrap();
-        let region = Region::new("missing_audio".to_string(), 0, 0, 1000);
+        let region = Region::new("missing_audio".to_string(), 0u64, 0u64, 1000u64);
         session
             .tracks
             .iter_mut()
@@ -987,7 +987,7 @@ mod tests {
         api.create_session("Test", 48000, 256);
         api.add_track("Vocals", "audio");
         let session = api.session.as_mut().unwrap();
-        let region = Region::new("missing_audio".to_string(), 0, 0, 1000);
+        let region = Region::new("missing_audio".to_string(), 0u64, 0u64, 1000u64);
         session
             .tracks
             .iter_mut()
@@ -1048,7 +1048,7 @@ mod tests {
             let pool_id = format!("audio_{name}");
             let session = api.session.as_mut().unwrap();
             session.audio_pool.insert(pool_id.clone(), buf);
-            let region = Region::new(pool_id, 0, 0, 4096);
+            let region = Region::new(pool_id, 0u64, 0u64, 4096u64);
             session
                 .tracks
                 .iter_mut()
@@ -1159,7 +1159,7 @@ mod tests {
         let samples: Vec<f32> = vec![0.1; 1_920_000];
         let buf = shruti_dsp::AudioBuffer::from_interleaved(samples, 1);
         session.audio_pool.insert("long_audio".to_string(), buf);
-        let region = Region::new("long_audio".to_string(), 0, 0, 1_920_000);
+        let region = Region::new("long_audio".to_string(), 0u64, 0u64, 1_920_000u64);
         session
             .tracks
             .iter_mut()

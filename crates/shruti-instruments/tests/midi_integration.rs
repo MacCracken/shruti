@@ -45,7 +45,10 @@ fn is_silent(buf: &AudioBuffer, threshold: f32) -> bool {
 /// Build NoteEvents from a MidiClip using its note_ons_at helper.
 /// Collects note-on events that start at `frame` (absolute position).
 fn collect_note_ons(clip: &MidiClip, frame: u64) -> Vec<NoteEvent> {
-    clip.note_ons_at(frame).into_iter().cloned().collect()
+    clip.note_ons_at(shruti_session::FramePos(frame))
+        .into_iter()
+        .cloned()
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -54,10 +57,10 @@ fn collect_note_ons(clip: &MidiClip, frame: u64) -> Vec<NoteEvent> {
 
 #[test]
 fn synth_plays_midi_clip() {
-    let mut clip = MidiClip::new("Synth Test", 0, 48000);
-    clip.add_note(0, 4800, 60, 100, 0); // C4
-    clip.add_note(0, 4800, 64, 90, 0); // E4
-    clip.add_note(0, 4800, 67, 80, 0); // G4
+    let mut clip = MidiClip::new("Synth Test", 0u64, 48000u64);
+    clip.add_note(0u64, 4800u64, 60, 100, 0); // C4
+    clip.add_note(0u64, 4800u64, 64, 90, 0); // E4
+    clip.add_note(0u64, 4800u64, 67, 80, 0); // G4
 
     // Collect note-on events at the clip start (frame 0).
     let note_events = collect_note_ons(&clip, 0);
@@ -79,10 +82,10 @@ fn synth_plays_midi_clip() {
 
 #[test]
 fn drum_machine_plays_midi_clip() {
-    let mut clip = MidiClip::new("Drums", 0, 48000);
-    clip.add_note(0, 2400, 36, 127, 9); // Bass Drum (pad 0, note 36)
-    clip.add_note(0, 2400, 38, 110, 9); // Snare (pad 2, note 38)
-    clip.add_note(0, 2400, 42, 100, 9); // Closed HH (pad 6, note 42)
+    let mut clip = MidiClip::new("Drums", 0u64, 48000u64);
+    clip.add_note(0u64, 2400u64, 36, 127, 9); // Bass Drum (pad 0, note 36)
+    clip.add_note(0u64, 2400u64, 38, 110, 9); // Snare (pad 2, note 38)
+    clip.add_note(0u64, 2400u64, 42, 100, 9); // Closed HH (pad 6, note 42)
 
     let note_events = collect_note_ons(&clip, 0);
     assert_eq!(note_events.len(), 3);
@@ -109,8 +112,8 @@ fn drum_machine_plays_midi_clip() {
 
 #[test]
 fn sampler_plays_midi_clip() {
-    let mut clip = MidiClip::new("Sampler Test", 0, 48000);
-    clip.add_note(0, 4800, 60, 100, 0);
+    let mut clip = MidiClip::new("Sampler Test", 0u64, 48000u64);
+    clip.add_note(0u64, 4800u64, 60, 100, 0);
 
     let note_events = collect_note_ons(&clip, 0);
 
@@ -174,13 +177,13 @@ fn cc_events_do_not_crash_and_params_affect_output() {
     // Also verify that passing CC events does not panic.
     let cc_events = vec![
         ControlChange {
-            position: 0,
+            position: shruti_session::FramePos(0),
             controller: 1, // Mod wheel
             value: 64,
             channel: 0,
         },
         ControlChange {
-            position: 100,
+            position: shruti_session::FramePos(100),
             controller: 74, // Filter cutoff (common CC)
             value: 32,
             channel: 0,
@@ -249,11 +252,11 @@ fn note_off_stops_sound() {
 
 #[test]
 fn multiple_simultaneous_notes() {
-    let mut clip = MidiClip::new("Chord", 0, 48000);
-    clip.add_note(0, 4800, 60, 100, 0); // C4
-    clip.add_note(0, 4800, 64, 100, 0); // E4
-    clip.add_note(0, 4800, 67, 100, 0); // G4
-    clip.add_note(0, 4800, 72, 100, 0); // C5
+    let mut clip = MidiClip::new("Chord", 0u64, 48000u64);
+    clip.add_note(0u64, 4800u64, 60, 100, 0); // C4
+    clip.add_note(0u64, 4800u64, 64, 100, 0); // E4
+    clip.add_note(0u64, 4800u64, 67, 100, 0); // G4
+    clip.add_note(0u64, 4800u64, 72, 100, 0); // C5
 
     let note_events = collect_note_ons(&clip, 0);
     assert_eq!(note_events.len(), 4);
@@ -281,8 +284,8 @@ fn multiple_simultaneous_notes() {
     // Now render a single note for comparison.
     let mut synth_single = SubtractiveSynth::new(SAMPLE_RATE);
     let single_events = vec![NoteEvent {
-        position: 0,
-        duration: 4800,
+        position: shruti_session::FramePos(0),
+        duration: shruti_session::FramePos(4800),
         note: 60,
         velocity: 100,
         channel: 0,
@@ -309,7 +312,7 @@ fn multiple_simultaneous_notes() {
 
 #[test]
 fn empty_clip_produces_silence() {
-    let clip = MidiClip::new("Empty", 0, 48000);
+    let clip = MidiClip::new("Empty", 0u64, 48000u64);
     let note_events = collect_note_ons(&clip, 0);
     assert!(note_events.is_empty());
 

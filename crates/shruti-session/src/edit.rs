@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::region::{Region, RegionId};
 use crate::track::{TrackGroup, TrackGroupId, TrackId};
+use crate::types::{FramePos, TrackSlot};
 
 /// An editing command that can be applied and undone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,16 +20,16 @@ pub enum EditCommand {
     MoveRegion {
         track_id: TrackId,
         region_id: RegionId,
-        old_pos: u64,
-        new_pos: u64,
+        old_pos: FramePos,
+        new_pos: FramePos,
     },
     /// Move a region from one track to another.
     MoveRegionToTrack {
         from_track: TrackId,
         to_track: TrackId,
         region_id: RegionId,
-        old_pos: u64,
-        new_pos: u64,
+        old_pos: FramePos,
+        new_pos: FramePos,
         /// Stored for undo.
         region: Option<Region>,
     },
@@ -36,7 +37,7 @@ pub enum EditCommand {
     SplitRegion {
         track_id: TrackId,
         region_id: RegionId,
-        split_frame: u64,
+        split_frame: FramePos,
         /// The original region before split, stored for undo.
         original: Option<Region>,
         /// The two resulting regions after split.
@@ -47,31 +48,31 @@ pub enum EditCommand {
     TrimStart {
         track_id: TrackId,
         region_id: RegionId,
-        old_start: u64,
-        old_offset: u64,
-        old_duration: u64,
-        new_start: u64,
+        old_start: FramePos,
+        old_offset: FramePos,
+        old_duration: FramePos,
+        new_start: FramePos,
     },
     /// Trim the end of a region.
     TrimEnd {
         track_id: TrackId,
         region_id: RegionId,
-        old_duration: u64,
-        new_end: u64,
+        old_duration: FramePos,
+        new_end: FramePos,
     },
     /// Set fade-in duration on a region.
     SetFadeIn {
         track_id: TrackId,
         region_id: RegionId,
-        old_fade: u64,
-        new_fade: u64,
+        old_fade: FramePos,
+        new_fade: FramePos,
     },
     /// Set fade-out duration on a region.
     SetFadeOut {
         track_id: TrackId,
         region_id: RegionId,
-        old_fade: u64,
-        new_fade: u64,
+        old_fade: FramePos,
+        new_fade: FramePos,
     },
     /// Set region gain.
     SetRegionGain {
@@ -97,7 +98,10 @@ pub enum EditCommand {
     /// Toggle track solo.
     ToggleTrackSolo { track_id: TrackId },
     /// Move a track from one index to another.
-    MoveTrack { from_index: usize, to_index: usize },
+    MoveTrack {
+        from_index: TrackSlot,
+        to_index: TrackSlot,
+    },
     /// Set an instrument parameter on a track by index.
     SetInstrumentParam {
         track_id: TrackId,

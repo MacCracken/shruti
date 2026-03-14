@@ -5,6 +5,8 @@ use shruti_dsp::{AudioBuffer, AudioFormat};
 use std::path::Path;
 use std::thread;
 
+use crate::error::EngineError;
+
 /// Manages recording from the RT thread to disk.
 ///
 /// Uses a lock-free ring buffer: the RT callback pushes samples
@@ -37,19 +39,17 @@ impl RecordManager {
     }
 
     /// Stop recording and write the accumulated audio to a WAV file.
-    pub fn finish(
-        mut self,
-        path: &Path,
-        format: &AudioFormat,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn finish(mut self, path: &Path, format: &AudioFormat) -> Result<(), EngineError> {
         // Drop the producer to signal the consumer thread to finish
         drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
 
         let handle = self.accumulator_handle.take().unwrap();
-        let samples = handle.join().map_err(|_| "recording thread panicked")?;
+        let samples = handle
+            .join()
+            .map_err(|_| EngineError::Recording("recording thread panicked".into()))?;
 
         let buffer = AudioBuffer::from_interleaved(samples, format.channels);
-        write_wav_file(path, &buffer, format)?;
+        write_wav_file(path, &buffer, format).map_err(|e| EngineError::Recording(e.to_string()))?;
 
         Ok(())
     }

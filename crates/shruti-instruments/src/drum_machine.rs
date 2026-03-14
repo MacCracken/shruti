@@ -365,6 +365,40 @@ const GM_DRUM_NAMES: [&str; NUM_PADS] = [
     "Claves",
 ];
 
+use crate::instrument::ParamIndex;
+
+/// Type-safe parameter indices for [`DrumMachine`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(usize)]
+pub enum DrumMachineParam {
+    Volume = 0,
+}
+
+impl ParamIndex for DrumMachineParam {
+    fn index(self) -> usize {
+        self as usize
+    }
+    fn count() -> usize {
+        DrumMachineParam::Volume as usize + 1
+    }
+}
+
+impl From<DrumMachineParam> for usize {
+    fn from(p: DrumMachineParam) -> usize {
+        p as usize
+    }
+}
+
+impl TryFrom<usize> for DrumMachineParam {
+    type Error = ();
+    fn try_from(v: usize) -> Result<Self, ()> {
+        match v {
+            0 => Ok(Self::Volume),
+            _ => Err(()),
+        }
+    }
+}
+
 /// 16-pad drum machine implementing InstrumentNode.
 pub struct DrumMachine {
     info: InstrumentInfo,
@@ -399,6 +433,16 @@ impl DrumMachine {
         }
     }
 
+    /// Get a parameter value using a type-safe [`DrumMachineParam`] key.
+    pub fn get_param(&self, param: DrumMachineParam) -> f32 {
+        self.params[param.index()].value
+    }
+
+    /// Set a parameter value using a type-safe [`DrumMachineParam`] key.
+    pub fn set_param(&mut self, param: DrumMachineParam, value: f32) {
+        self.params[param.index()].set(value);
+    }
+
     fn find_pad_by_note(&self, note: u8) -> Option<usize> {
         self.pads.iter().position(|p| p.midi_note == note)
     }
@@ -406,7 +450,7 @@ impl DrumMachine {
     /// Render pads into output buffer (adds to existing content).
     fn render_pads(&mut self, note_events: &[NoteEvent], output: &mut AudioBuffer) {
         let frames = output.frames();
-        let volume = self.params[0].value;
+        let volume = self.params[DrumMachineParam::Volume.index()].value;
 
         for event in note_events {
             self.note_on(event.note, event.velocity, event.channel);
@@ -739,8 +783,8 @@ mod tests {
         dm.pads[0].load_sample(make_sine_sample(1000), 44100);
 
         let events = vec![NoteEvent {
-            position: 0,
-            duration: 1000,
+            position: shruti_session::FramePos(0),
+            duration: shruti_session::FramePos(1000),
             note: 36,
             velocity: 100,
             channel: 0,
@@ -1287,5 +1331,52 @@ mod tests {
             1,
             "looped pad should still be playing after many blocks"
         );
+    }
+
+    // ── DrumMachineParam enum tests ────────────────────────────────────
+
+    #[test]
+    fn drum_machine_param_round_trip() {
+        for i in 0..DrumMachineParam::count() {
+            let param = DrumMachineParam::try_from(i).expect("valid index");
+            assert_eq!(usize::from(param), i);
+            assert_eq!(param.index(), i);
+        }
+    }
+
+    #[test]
+    fn drum_machine_param_count_matches_params_vec() {
+        let dm = DrumMachine::new(44100.0);
+        assert_eq!(
+            DrumMachineParam::count(),
+            dm.params().len(),
+            "DrumMachineParam::count() must match actual params length"
+        );
+    }
+
+    #[test]
+    fn drum_machine_param_all_indices_distinct() {
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..DrumMachineParam::count() {
+            let param = DrumMachineParam::try_from(i).unwrap();
+            assert!(
+                seen.insert(param.index()),
+                "duplicate index {}",
+                param.index()
+            );
+        }
+    }
+
+    #[test]
+    fn drum_machine_param_out_of_range_returns_err() {
+        assert!(DrumMachineParam::try_from(DrumMachineParam::count()).is_err());
+        assert!(DrumMachineParam::try_from(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn drum_machine_get_set_param_typed() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.set_param(DrumMachineParam::Volume, 0.6);
+        assert!((dm.get_param(DrumMachineParam::Volume) - 0.6).abs() < 1e-6);
     }
 }

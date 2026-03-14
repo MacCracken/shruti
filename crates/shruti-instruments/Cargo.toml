@@ -1,6 +1,6 @@
 [package]
 name = "shruti-instruments"
-version = "2026.3.11"
+version = "2026.3.14"
 edition = "2024"
 description = "Built-in virtual instruments for Shruti"
 license = "GPL-3.0"

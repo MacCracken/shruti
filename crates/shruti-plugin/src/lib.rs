@@ -1,5 +1,6 @@
 //! Plugin hosting for VST3, CLAP, and native Rust plugins.
 
+pub mod error;
 pub mod format;
 pub mod host;
 pub mod instance;
@@ -7,6 +8,7 @@ pub mod node;
 pub mod scanner;
 pub mod state;
 
+pub use error::PluginError;
 pub use format::PluginFormat;
 pub use host::PluginHost;
 pub use instance::{ParamId, ParamInfo, PluginInfo, PluginInstance};

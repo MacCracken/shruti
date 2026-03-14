@@ -61,7 +61,7 @@ fn transport_buttons(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
         )
         .clicked()
     {
-        state.session.transport.position = 0;
+        state.session.transport.position = shruti_session::FramePos::ZERO;
     }
 
     // Stop
@@ -138,7 +138,7 @@ fn position_display(ui: &mut Ui, state: &UiState, colors: &ThemeColors) {
     let bpm = state.session.transport.bpm;
 
     // Time display (hh:mm:ss.ms)
-    let total_secs = pos as f64 / sr as f64;
+    let total_secs = pos.as_f64() / sr as f64;
     let hours = (total_secs / 3600.0) as u32;
     let minutes = ((total_secs % 3600.0) / 60.0) as u32;
     let seconds = total_secs % 60.0;
@@ -156,7 +156,7 @@ fn position_display(ui: &mut Ui, state: &UiState, colors: &ThemeColors) {
 
     // Bar:Beat display
     let frames_per_beat = (sr as f64 * 60.0) / bpm;
-    let total_beats = pos as f64 / frames_per_beat;
+    let total_beats = pos.as_f64() / frames_per_beat;
     let bar = (total_beats / 4.0).floor() as u32 + 1;
     let beat = (total_beats % 4.0).floor() as u32 + 1;
     let tick = ((total_beats % 1.0) * 960.0) as u32;

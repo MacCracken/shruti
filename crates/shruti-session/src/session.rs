@@ -5,6 +5,7 @@ use crate::error::SessionError;
 use crate::timeline::Timeline;
 use crate::track::{Send, SendPosition, Track, TrackGroup, TrackGroupId, TrackId, TrackKind};
 use crate::transport::Transport;
+use crate::types::FramePos;
 
 /// A session is the top-level project container.
 #[derive(Serialize, Deserialize)]
@@ -605,21 +606,21 @@ impl Session {
     }
 
     /// Find the end position of the last region or MIDI clip across all tracks.
-    pub fn session_length(&self) -> u64 {
+    pub fn session_length(&self) -> FramePos {
         let audio_end = self
             .tracks
             .iter()
             .flat_map(|t| t.regions.iter())
             .map(|r| r.end_pos())
             .max()
-            .unwrap_or(0);
+            .unwrap_or(FramePos::ZERO);
         let midi_end = self
             .tracks
             .iter()
             .flat_map(|t| t.midi_clips.iter())
             .map(|c| c.end_pos())
             .max()
-            .unwrap_or(0);
+            .unwrap_or(FramePos::ZERO);
         audio_end.max(midi_end)
     }
 }
@@ -666,10 +667,10 @@ mod tests {
         let t1 = session.add_audio_track("Track 1");
 
         let track = session.track_mut(t1).unwrap();
-        track.add_region(Region::new("file1".into(), 0, 0, 48000));
-        track.add_region(Region::new("file2".into(), 96000, 0, 48000));
+        track.add_region(Region::new("file1".into(), 0u64, 0u64, 48000u64));
+        track.add_region(Region::new("file2".into(), 96000u64, 0u64, 48000u64));
 
-        assert_eq!(session.session_length(), 144000); // 96000 + 48000
+        assert_eq!(session.session_length(), FramePos(144000)); // 96000 + 48000
     }
 
     #[test]
@@ -755,11 +756,11 @@ mod tests {
         let m1 = session.add_midi_track("Synth");
 
         let track = session.track_mut(m1).unwrap();
-        let clip = MidiClip::new("Clip 1", 10000, 50000);
+        let clip = MidiClip::new("Clip 1", 10000u64, 50000u64);
         track.midi_clips.push(clip);
 
         // MIDI clip end = 10000 + 50000 = 60000
-        assert_eq!(session.session_length(), 60000);
+        assert_eq!(session.session_length(), FramePos(60000));
     }
 
     #[test]
@@ -769,22 +770,24 @@ mod tests {
         let m1 = session.add_midi_track("MIDI");
 
         // Audio region ends at 30000
-        session
-            .track_mut(a1)
-            .unwrap()
-            .add_region(Region::new("f".into(), 10000, 0, 20000));
+        session.track_mut(a1).unwrap().add_region(Region::new(
+            "f".into(),
+            10000u64,
+            0u64,
+            20000u64,
+        ));
 
         // MIDI clip ends at 100000 (should be the max)
-        let clip = MidiClip::new("C", 50000, 50000);
+        let clip = MidiClip::new("C", 50000u64, 50000u64);
         session.track_mut(m1).unwrap().midi_clips.push(clip);
 
-        assert_eq!(session.session_length(), 100000);
+        assert_eq!(session.session_length(), FramePos(100000));
     }
 
     #[test]
     fn test_session_length_empty() {
         let session = Session::new("Empty", 48000, 256);
-        assert_eq!(session.session_length(), 0);
+        assert_eq!(session.session_length(), FramePos::ZERO);
     }
 
     #[test]

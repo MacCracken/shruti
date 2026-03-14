@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use shruti_session::undo::UndoManager;
-use shruti_session::{Region, RegionId, Session, TrackGroupId};
+use shruti_session::{FramePos, Region, RegionId, Session, TrackGroupId};
 
 use crate::views::browser::BrowserTab;
 use crate::widgets::waveform::WaveformPeaks;
@@ -16,7 +16,7 @@ pub enum ArrangementDrag {
     MoveRegion {
         region_id: RegionId,
         track_index: usize,
-        start_frame: u64,
+        start_frame: FramePos,
         /// X offset from region left edge to mouse position at drag start.
         grab_offset_px: f32,
     },
@@ -24,15 +24,15 @@ pub enum ArrangementDrag {
     TrimStart {
         region_id: RegionId,
         track_index: usize,
-        original_pos: u64,
-        original_offset: u64,
-        original_duration: u64,
+        original_pos: FramePos,
+        original_offset: FramePos,
+        original_duration: FramePos,
     },
     /// Resizing a region from the right edge (trim end).
     TrimEnd {
         region_id: RegionId,
         track_index: usize,
-        original_duration: u64,
+        original_duration: FramePos,
     },
     /// Dragging a track header to reorder.
     ReorderTrack {
@@ -449,7 +449,7 @@ mod tests {
         let drag = ArrangementDrag::MoveRegion {
             region_id,
             track_index: 2,
-            start_frame: 48000,
+            start_frame: FramePos(48000),
             grab_offset_px: 15.5,
         };
         match &drag {
@@ -461,7 +461,7 @@ mod tests {
             } => {
                 assert_eq!(*rid, region_id);
                 assert_eq!(*track_index, 2);
-                assert_eq!(*start_frame, 48000);
+                assert_eq!(*start_frame, FramePos(48000));
                 assert!((*grab_offset_px - 15.5).abs() < f32::EPSILON);
             }
             _ => panic!("expected MoveRegion variant"),
@@ -474,9 +474,9 @@ mod tests {
         let drag = ArrangementDrag::TrimStart {
             region_id,
             track_index: 1,
-            original_pos: 1000,
-            original_offset: 200,
-            original_duration: 5000,
+            original_pos: FramePos(1000),
+            original_offset: FramePos(200),
+            original_duration: FramePos(5000),
         };
         match &drag {
             ArrangementDrag::TrimStart {
@@ -488,9 +488,9 @@ mod tests {
             } => {
                 assert_eq!(*rid, region_id);
                 assert_eq!(*track_index, 1);
-                assert_eq!(*original_pos, 1000);
-                assert_eq!(*original_offset, 200);
-                assert_eq!(*original_duration, 5000);
+                assert_eq!(*original_pos, FramePos(1000));
+                assert_eq!(*original_offset, FramePos(200));
+                assert_eq!(*original_duration, FramePos(5000));
             }
             _ => panic!("expected TrimStart variant"),
         }
@@ -502,7 +502,7 @@ mod tests {
         let drag = ArrangementDrag::TrimEnd {
             region_id,
             track_index: 3,
-            original_duration: 9600,
+            original_duration: FramePos(9600),
         };
         match &drag {
             ArrangementDrag::TrimEnd {
@@ -512,7 +512,7 @@ mod tests {
             } => {
                 assert_eq!(*rid, region_id);
                 assert_eq!(*track_index, 3);
-                assert_eq!(*original_duration, 9600);
+                assert_eq!(*original_duration, FramePos(9600));
             }
             _ => panic!("expected TrimEnd variant"),
         }

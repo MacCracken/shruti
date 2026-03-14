@@ -14,6 +14,7 @@ pub mod store;
 pub mod timeline;
 pub mod track;
 pub mod transport;
+pub mod types;
 pub mod undo;
 
 pub use automation::{AutomationLane, AutomationPoint, AutomationTarget, CurveType};
@@ -29,4 +30,5 @@ pub use track::{
     TrackTemplate,
 };
 pub use transport::{Transport, TransportState};
+pub use types::{FramePos, TrackSlot};
 pub use undo::UndoManager;

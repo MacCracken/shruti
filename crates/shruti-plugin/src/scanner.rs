@@ -5,6 +5,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+use crate::error::PluginError;
 use crate::format::PluginFormat;
 
 /// A plugin discovered during scanning.
@@ -52,11 +53,12 @@ impl ScanCache {
     }
 
     /// Save cache to a JSON file.
-    pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save(&self, path: &Path) -> Result<(), PluginError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let data = serde_json::to_string_pretty(self)?;
+        let data = serde_json::to_string_pretty(self)
+            .map_err(|e| PluginError::ScanError(e.to_string()))?;
         std::fs::write(path, data)?;
         Ok(())
     }

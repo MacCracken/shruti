@@ -1,14 +1,17 @@
 #!/bin/bash
-# Shruti Version Bump Script (CalVer: YYYY.M.D-N)
+# Shruti Version Bump Script
+# CalVer: YYYY.M.D or YYYY.M.D-N for same-day patches
 # Usage: ./bump-version.sh <new_version>
-# Example: ./bump-version.sh 2026.3.11-1
+# Example: ./bump-version.sh 2026.3.14
+# Example: ./bump-version.sh 2026.3.14-1
 
 set -e
 
 if [ -z "$1" ]; then
     echo "Current version: $(cat VERSION)"
     echo "Usage: $0 <new_version>"
-    echo "Example: $0 2026.3.11-1"
+    echo "Example: $0 2026.3.14"
+    echo "Example: $0 2026.3.14-1  (same-day patch)"
     exit 1
 fi
 

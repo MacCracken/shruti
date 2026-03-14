@@ -132,13 +132,23 @@ impl ShrutiApp {
         match action {
             Action::Play => {
                 self.state.session.transport.state = TransportState::Playing;
+                if let Some(engine) = &self.engine {
+                    engine.play();
+                }
             }
             Action::Stop => {
                 self.state.session.transport.state = TransportState::Stopped;
+                self.state.session.transport.position = shruti_session::FramePos::ZERO;
                 self.state.recording = false;
+                if let Some(engine) = &self.engine {
+                    engine.stop();
+                }
             }
             Action::Pause => {
                 self.state.session.transport.state = TransportState::Paused;
+                if let Some(engine) = &self.engine {
+                    engine.pause();
+                }
             }
             Action::Record => {
                 if self.state.recording {
@@ -165,7 +175,7 @@ impl ShrutiApp {
                                     let region = shruti_session::Region::new(
                                         recording_id.clone(),
                                         position,
-                                        0,
+                                        0u64,
                                         frames as u64,
                                     );
                                     track.add_region(region);
@@ -186,12 +196,22 @@ impl ShrutiApp {
             Action::ToggleLoop => {
                 self.state.session.transport.loop_enabled =
                     !self.state.session.transport.loop_enabled;
+                if let Some(engine) = &self.engine {
+                    engine.sync_transport(&self.state.session.transport);
+                }
             }
             Action::Rewind | Action::GoToStart => {
-                self.state.session.transport.position = 0;
+                self.state.session.transport.position = shruti_session::FramePos::ZERO;
+                if let Some(engine) = &self.engine {
+                    engine.seek(0);
+                }
             }
             Action::GoToEnd => {
-                self.state.session.transport.position = self.state.session.session_length();
+                let end = self.state.session.session_length();
+                self.state.session.transport.position = end;
+                if let Some(engine) = &self.engine {
+                    engine.seek(end.0);
+                }
             }
             Action::ToggleArrangement => {
                 self.state.view_mode = ViewMode::Arrangement;
@@ -276,7 +296,7 @@ impl ShrutiApp {
                     self.state.scroll_x = 0.0;
                 }
                 // Empty session: just reset scroll
-                if length == 0 {
+                if length == shruti_session::FramePos::ZERO {
                     self.state.scroll_x = 0.0;
                 }
             }
@@ -285,7 +305,12 @@ impl ShrutiApp {
                     / self.state.session.transport.bpm;
                 let frames_per_bar =
                     frames_per_beat * self.state.session.transport.time_sig_num as f64;
-                self.state.session.transport.position += frames_per_bar as u64;
+                let new_pos = self.state.session.transport.position
+                    + shruti_session::FramePos(frames_per_bar as u64);
+                self.state.session.transport.position = new_pos;
+                if let Some(engine) = &self.engine {
+                    engine.seek(new_pos.0);
+                }
             }
             Action::SplitAtPlayhead => {
                 if let (Some(track_idx), Some(region_id)) =
@@ -366,10 +391,10 @@ impl ShrutiApp {
                     .save_file()
                 {
                     let length = self.state.session.session_length();
-                    if length > 0 {
+                    if length > shruti_session::FramePos::ZERO {
                         let channels = 2u16;
-                        let mut output = shruti_dsp::AudioBuffer::new(channels, length as u32);
-                        let mut tl = shruti_session::Timeline::new(channels, length as u32);
+                        let mut output = shruti_dsp::AudioBuffer::new(channels, length.0 as u32);
+                        let mut tl = shruti_session::Timeline::new(channels, length.0 as u32);
                         tl.render(
                             &self.state.session.tracks,
                             &self.state.session.transport,
@@ -472,6 +497,15 @@ impl eframe::App for ShrutiApp {
         // Request continuous repaint during playback
         if self.state.session.transport.state == shruti_session::TransportState::Playing {
             ctx.request_repaint();
+        }
+
+        // Sync playhead position from audio engine → UI transport.
+        // During playback the audio thread advances the position; read it back
+        // so the UI playhead tracks the actual audio output.
+        if let Some(ref engine) = self.engine
+            && engine.is_playing()
+        {
+            self.state.session.transport.position = shruti_session::FramePos(engine.position());
         }
 
         // Sync meter levels from the audio engine

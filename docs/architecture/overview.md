@@ -2,10 +2,10 @@
 
 ## Design Principles
 
-1. **Real-time safety** — The audio thread never allocates, locks, or blocks. All communication with the audio thread uses lock-free queues and atomic operations.
+1. **Real-time safety** — The audio thread never allocates or blocks. Communication with the audio thread uses double-buffered data slots, lock-free atomics, and `try_lock` with fallback (never silence on contention).
 2. **Modular crates** — Each subsystem is a standalone crate. The engine can be used without the UI; DSP primitives can be used without the engine.
-3. **Zero-copy where possible** — Audio buffers are passed by reference through the graph. Copies only happen at explicit boundaries (bounce, export).
-4. **Crash isolation** — Plugins run in separate processes. A crashing plugin never takes down the DAW.
+3. **Type safety** — Domain newtypes (`FramePos`, `TrackSlot`, `TrackId`, `RegionId`) prevent primitive type confusion. Instrument parameters use typed enums (`SynthParam`, `SamplerParam`, `DrumMachineParam`).
+4. **Typed errors** — Each crate has its own error enum (`AudioError`, `SessionError`, `EngineError`, `PluginError`, `InstrumentError`) with proper `Display`, `Error`, and `From` impls.
 
 ## Crate Dependency Graph
 
@@ -13,44 +13,47 @@
 shruti (binary)
 ├── shruti-ui
 │   ├── shruti-session
-│   │   ├── shruti-engine
-│   │   │   └── shruti-dsp
-│   │   └── shruti-engine
-│   └── shruti-engine
-├── shruti-plugin
-│   └── shruti-engine
-└── shruti-ai (optional, AGNOS)
-    └── shruti-session
+│   ├── shruti-engine
+│   │   └── shruti-dsp
+│   └── shruti-plugin
+├── shruti-instruments
+│   └── shruti-dsp
+└── shruti-ai
+    ├── shruti-session
+    └── shruti-dsp
 ```
 
 ## Audio Engine
 
-The audio engine is the core real-time component. It compiles a directed acyclic graph (DAG) of audio nodes into an execution plan that the audio thread processes each buffer cycle.
+The audio engine compiles a directed acyclic graph (DAG) of audio nodes into an execution plan that the audio thread processes each buffer cycle.
 
 Key properties:
-- **Lock-free graph updates** — The non-RT thread builds a new execution plan and swaps it atomically. The RT thread always has a valid plan.
-- **Fixed buffer size** — Buffer size is set at initialization. All nodes process the same number of frames per cycle.
-- **Sample-accurate events** — MIDI and automation events carry sample offsets within the buffer for sub-buffer timing.
+- **Double-buffered graph swap** — The non-RT thread builds a new execution plan and places it in a pending slot. The RT thread picks it up via `try_lock`; on contention, it renders the previous plan as fallback.
+- **Double-buffered session data** — Track/pool updates use the same pattern: the audio thread owns a local copy and checks for pending updates each cycle.
+- **Lock-free transport** — Playhead position, play/pause/record state, and loop settings are shared via `Acquire`/`Release` atomics. Seek uses an atomic request slot to avoid write races.
+- **Pre-allocated buffers** — Per-node output buffers, bus accumulation buffers, and scratch buffers are allocated once and reused.
 
 ## Session Model
 
 A session is the top-level project container:
-- **Tracks** — Ordered list of audio/MIDI/bus tracks
-- **Timeline** — Regions placed on tracks with non-destructive edits
-- **Mixer state** — Gain, pan, sends, plugin chains per track
-- **Automation** — Parameter curves bound to any automatable parameter
-- **Undo history** — Command log enabling full undo/redo
+- **Tracks** — Ordered list with 8 track kinds: Audio, Bus, Master, Midi, Instrument, DrumMachine, Sampler, AiPlayer
+- **Timeline** — Regions placed on tracks with non-destructive edits (move, trim, split, fade)
+- **Mixer state** — Gain, pan, mute, solo, sends (pre/post-fader), output routing with loop detection
+- **Automation** — Parameter curves (Linear, Step, SCurve) bound to track gain, pan, send levels, instrument params
+- **Track groups** — Collapsible folders for organizational grouping
+- **Undo history** — Command-pattern log (1000-deep VecDeque) enabling full undo/redo
+- **Instruments** — Built-in synth, drum machine, sampler with per-instrument effect chains and presets
 
 Sessions serialize to a directory containing a SQLite database (metadata, automation, undo history) and a pool of audio files.
 
 ## Platform Abstraction
 
-Audio backend selection is compile-time (feature flags) and runtime (user preference):
+Audio backend via cpal:
 
-| Platform | Backends |
-|----------|----------|
-| Linux | ALSA, PipeWire, JACK |
+| Platform | Backend |
+|----------|---------|
+| Linux | ALSA, PipeWire |
 | macOS | CoreAudio |
 | Windows | WASAPI |
 
-A thin `AudioHost` trait abstracts device enumeration, stream creation, and callback registration.
+A thin `AudioHost` trait abstracts device enumeration, stream creation, and callback registration. MIDI I/O via midir.

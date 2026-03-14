@@ -54,6 +54,18 @@ impl InstrumentParam {
     }
 }
 
+/// Trait for type-safe parameter indices.
+///
+/// Each instrument defines an enum whose variants map 1-to-1 to the entries in
+/// `InstrumentNode::params()`. Implementing this trait lets callers use the enum
+/// with the typed `get_param` / `set_param` helpers instead of raw `usize` offsets.
+pub trait ParamIndex: Copy {
+    /// The `usize` offset into the params slice.
+    fn index(self) -> usize;
+    /// Total number of parameters the instrument exposes.
+    fn count() -> usize;
+}
+
 /// Trait for all virtual instruments.
 pub trait InstrumentNode: Send {
     /// Get instrument info.

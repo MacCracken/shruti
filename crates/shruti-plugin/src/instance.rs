@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use shruti_dsp::AudioBuffer;
 
+use crate::error::PluginError;
 use crate::format::PluginFormat;
 use crate::state::PluginState;
 
@@ -41,7 +42,7 @@ pub trait PluginInstance: Send {
     fn info(&self) -> &PluginInfo;
 
     /// Activate the plugin for processing at the given sample rate and buffer size.
-    fn activate(&mut self, sample_rate: f64, max_buffer_size: u32) -> Result<(), String>;
+    fn activate(&mut self, sample_rate: f64, max_buffer_size: u32) -> Result<(), PluginError>;
 
     /// Deactivate the plugin (stop processing).
     fn deactivate(&mut self);

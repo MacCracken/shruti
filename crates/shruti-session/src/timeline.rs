@@ -3,6 +3,7 @@ use crate::automation::AutomationTarget;
 use crate::region::Region;
 use crate::track::{SendPosition, Track, TrackId, TrackKind};
 use crate::transport::Transport;
+use crate::types::FramePos;
 use shruti_dsp::AudioBuffer;
 use shruti_dsp::effects::StereoPanner;
 
@@ -201,12 +202,12 @@ impl Timeline {
     fn render_track(
         &mut self,
         track: &Track,
-        position: u64,
+        position: FramePos,
         frames: u32,
         channels: u16,
         audio_pool: &AudioPool,
     ) {
-        let end = position + frames as u64;
+        let end = position + FramePos::from(frames);
         let active_regions = track.regions_in_range(position, end);
 
         for region in active_regions {
@@ -220,24 +221,24 @@ impl Timeline {
         &mut self,
         region: &Region,
         source: &AudioBuffer,
-        position: u64,
+        position: FramePos,
         frames: u32,
         channels: u16,
     ) {
         let src_channels = source.channels().min(channels);
 
         for frame_offset in 0..frames {
-            let timeline_frame = position + frame_offset as u64;
+            let timeline_frame = position + FramePos::from(frame_offset);
 
             if let Some(source_frame) = region.source_frame_at(timeline_frame) {
-                if source_frame >= source.frames() as u64 {
+                if source_frame.0 >= source.frames() as u64 {
                     continue;
                 }
 
                 let fade_gain = region.fade_gain_at(timeline_frame);
 
                 for ch in 0..src_channels {
-                    let sample = source.get(source_frame as u32, ch) * fade_gain;
+                    let sample = source.get(source_frame.0 as u32, ch) * fade_gain;
                     let existing = self.track_buffer.get(frame_offset, ch);
                     self.track_buffer.set(frame_offset, ch, existing + sample);
                 }
@@ -259,7 +260,7 @@ mod tests {
         pool.insert("file1".into(), source);
 
         let mut track = Track::new_audio("Track 1");
-        track.add_region(Region::new("file1".into(), 0, 0, 3));
+        track.add_region(Region::new("file1".into(), 0u64, 0u64, 3u64));
 
         let transport = Transport::new(48000);
 
@@ -281,10 +282,10 @@ mod tests {
 
         let mut track = Track::new_audio("Track 1");
         // Region starts at frame 2 on timeline, reads from source offset 1
-        track.add_region(Region::new("file1".into(), 2, 1, 2));
+        track.add_region(Region::new("file1".into(), 2u64, 1u64, 2u64));
 
         let mut transport = Transport::new(48000);
-        transport.position = 2;
+        transport.position = FramePos(2);
 
         let mut timeline = Timeline::new(2, 2);
         let mut output = AudioBuffer::new(2, 2);
@@ -306,7 +307,7 @@ mod tests {
 
         let mut audio_track = Track::new_audio("Drums");
         let _audio_id = audio_track.id;
-        audio_track.add_region(Region::new("drums_audio".to_string(), 0, 0, 512));
+        audio_track.add_region(Region::new("drums_audio".to_string(), 0u64, 0u64, 512u64));
 
         let bus_track = Track::new_bus("Reverb Bus");
         let bus_id = bus_track.id;
@@ -360,7 +361,7 @@ mod tests {
 
         let mut audio_track = Track::new_audio("Src");
         audio_track.gain = 0.0; // Mute the track gain
-        audio_track.add_region(Region::new("src".to_string(), 0, 0, 4));
+        audio_track.add_region(Region::new("src".to_string(), 0u64, 0u64, 4u64));
 
         let bus_track = Track::new_bus("Bus");
         let bus_id = bus_track.id;
@@ -407,7 +408,7 @@ mod tests {
 
         let mut audio_track = Track::new_audio("Src");
         audio_track.muted = true; // mute the track
-        audio_track.add_region(Region::new("src".to_string(), 0, 0, 4));
+        audio_track.add_region(Region::new("src".to_string(), 0u64, 0u64, 4u64));
 
         let bus_track = Track::new_bus("Bus");
         let bus_id = bus_track.id;
@@ -447,7 +448,7 @@ mod tests {
         let bus_id = bus_track.id;
 
         let mut track1 = Track::new_audio("Track1");
-        track1.add_region(Region::new("src1".to_string(), 0, 0, 4));
+        track1.add_region(Region::new("src1".to_string(), 0u64, 0u64, 4u64));
         track1.sends.push(Send {
             target: bus_id,
             level: 1.0,
@@ -456,7 +457,7 @@ mod tests {
         });
 
         let mut track2 = Track::new_audio("Track2");
-        track2.add_region(Region::new("src2".to_string(), 0, 0, 4));
+        track2.add_region(Region::new("src2".to_string(), 0u64, 0u64, 4u64));
         track2.sends.push(Send {
             target: bus_id,
             level: 1.0,
@@ -491,7 +492,7 @@ mod tests {
         let bus_id = bus_track.id;
 
         let mut audio_track = Track::new_audio("Src");
-        audio_track.add_region(Region::new("src".to_string(), 0, 0, 4));
+        audio_track.add_region(Region::new("src".to_string(), 0u64, 0u64, 4u64));
         audio_track.sends.push(Send {
             target: bus_id,
             level: 1.0,

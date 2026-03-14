@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+use crate::types::FramePos;
+
 /// A single MIDI note event on a track.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteEvent {
     /// Start position in frames.
-    pub position: u64,
+    pub position: FramePos,
     /// Duration in frames.
-    pub duration: u64,
+    pub duration: FramePos,
     /// MIDI note number (0-127).
     pub note: u8,
     /// Velocity (0-127).
@@ -19,7 +21,7 @@ pub struct NoteEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlChange {
     /// Position in frames.
-    pub position: u64,
+    pub position: FramePos,
     /// CC number (0-127).
     pub controller: u8,
     /// CC value (0-127).
@@ -38,24 +40,37 @@ pub struct MidiClip {
     /// Control change events.
     pub control_changes: Vec<ControlChange>,
     /// Position on the timeline in frames.
-    pub timeline_pos: u64,
+    pub timeline_pos: FramePos,
     /// Duration of the clip in frames.
-    pub duration: u64,
+    pub duration: FramePos,
 }
 
 impl MidiClip {
-    pub fn new(name: impl Into<String>, timeline_pos: u64, duration: u64) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        timeline_pos: impl Into<FramePos>,
+        duration: impl Into<FramePos>,
+    ) -> Self {
         Self {
             name: name.into(),
             notes: Vec::new(),
             control_changes: Vec::new(),
-            timeline_pos,
-            duration,
+            timeline_pos: timeline_pos.into(),
+            duration: duration.into(),
         }
     }
 
     /// Add a note event, maintaining sorted order by position (frame).
-    pub fn add_note(&mut self, position: u64, duration: u64, note: u8, velocity: u8, channel: u8) {
+    pub fn add_note(
+        &mut self,
+        position: impl Into<FramePos>,
+        duration: impl Into<FramePos>,
+        note: u8,
+        velocity: u8,
+        channel: u8,
+    ) {
+        let position = position.into();
+        let duration = duration.into();
         let event = NoteEvent {
             position,
             duration,
@@ -71,7 +86,14 @@ impl MidiClip {
     }
 
     /// Add a control change event, maintaining sorted order by position (frame).
-    pub fn add_cc(&mut self, position: u64, controller: u8, value: u8, channel: u8) {
+    pub fn add_cc(
+        &mut self,
+        position: impl Into<FramePos>,
+        controller: u8,
+        value: u8,
+        channel: u8,
+    ) {
+        let position = position.into();
         let event = ControlChange {
             position,
             controller,
@@ -86,12 +108,12 @@ impl MidiClip {
     }
 
     /// Get the end position on the timeline.
-    pub fn end_pos(&self) -> u64 {
+    pub fn end_pos(&self) -> FramePos {
         self.timeline_pos + self.duration
     }
 
     /// Get notes active at a given frame position.
-    pub fn notes_at(&self, frame: u64) -> Vec<&NoteEvent> {
+    pub fn notes_at(&self, frame: FramePos) -> Vec<&NoteEvent> {
         self.notes
             .iter()
             .filter(|n| {
@@ -102,7 +124,7 @@ impl MidiClip {
     }
 
     /// Get note-on events at exactly the given frame.
-    pub fn note_ons_at(&self, frame: u64) -> Vec<&NoteEvent> {
+    pub fn note_ons_at(&self, frame: FramePos) -> Vec<&NoteEvent> {
         self.notes
             .iter()
             .filter(|n| self.timeline_pos + n.position == frame)
@@ -110,7 +132,7 @@ impl MidiClip {
     }
 
     /// Get note-off events at exactly the given frame.
-    pub fn note_offs_at(&self, frame: u64) -> Vec<&NoteEvent> {
+    pub fn note_offs_at(&self, frame: FramePos) -> Vec<&NoteEvent> {
         self.notes
             .iter()
             .filter(|n| self.timeline_pos + n.position + n.duration == frame)
@@ -124,10 +146,10 @@ mod tests {
 
     #[test]
     fn test_midi_clip_creation() {
-        let mut clip = MidiClip::new("Chorus", 0, 48000);
-        clip.add_note(0, 12000, 60, 100, 0);
-        clip.add_note(12000, 12000, 64, 90, 0);
-        clip.add_cc(0, 1, 64, 0);
+        let mut clip = MidiClip::new("Chorus", 0u64, 48000u64);
+        clip.add_note(0u64, 12000u64, 60, 100, 0);
+        clip.add_note(12000u64, 12000u64, 64, 90, 0);
+        clip.add_cc(0u64, 1, 64, 0);
 
         assert_eq!(clip.name, "Chorus");
         assert_eq!(clip.notes.len(), 2);
@@ -137,88 +159,88 @@ mod tests {
         assert_eq!(clip.notes[1].note, 64);
         assert_eq!(clip.control_changes[0].controller, 1);
         assert_eq!(clip.control_changes[0].value, 64);
-        assert_eq!(clip.end_pos(), 48000);
+        assert_eq!(clip.end_pos(), FramePos(48000));
     }
 
     #[test]
     fn test_notes_at() {
-        let mut clip = MidiClip::new("Test", 1000, 48000);
+        let mut clip = MidiClip::new("Test", 1000u64, 48000u64);
         // Note at relative position 0, duration 500 -> absolute 1000..1500
-        clip.add_note(0, 500, 60, 100, 0);
+        clip.add_note(0u64, 500u64, 60, 100, 0);
         // Note at relative position 200, duration 300 -> absolute 1200..1500
-        clip.add_note(200, 300, 64, 80, 0);
+        clip.add_note(200u64, 300u64, 64, 80, 0);
 
         // Frame 1000: only note 60 is active (starts at 1000)
-        let active = clip.notes_at(1000);
+        let active = clip.notes_at(FramePos(1000));
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].note, 60);
 
         // Frame 1200: both notes active
-        let active = clip.notes_at(1200);
+        let active = clip.notes_at(FramePos(1200));
         assert_eq!(active.len(), 2);
 
         // Frame 1500: neither active (end is exclusive)
-        let active = clip.notes_at(1500);
+        let active = clip.notes_at(FramePos(1500));
         assert_eq!(active.len(), 0);
 
         // Frame 999: nothing active yet
-        let active = clip.notes_at(999);
+        let active = clip.notes_at(FramePos(999));
         assert_eq!(active.len(), 0);
     }
 
     #[test]
     fn test_note_ons_offs() {
-        let mut clip = MidiClip::new("Test", 0, 48000);
-        clip.add_note(100, 400, 60, 100, 0);
-        clip.add_note(100, 200, 64, 80, 0);
-        clip.add_note(500, 100, 67, 90, 0);
+        let mut clip = MidiClip::new("Test", 0u64, 48000u64);
+        clip.add_note(100u64, 400u64, 60, 100, 0);
+        clip.add_note(100u64, 200u64, 64, 80, 0);
+        clip.add_note(500u64, 100u64, 67, 90, 0);
 
         // Note-ons at frame 100: notes 60 and 64
-        let ons = clip.note_ons_at(100);
+        let ons = clip.note_ons_at(FramePos(100));
         assert_eq!(ons.len(), 2);
 
         // Note-ons at frame 500: note 67
-        let ons = clip.note_ons_at(500);
+        let ons = clip.note_ons_at(FramePos(500));
         assert_eq!(ons.len(), 1);
         assert_eq!(ons[0].note, 67);
 
         // Note-offs at frame 300: note 64 (100 + 200)
-        let offs = clip.note_offs_at(300);
+        let offs = clip.note_offs_at(FramePos(300));
         assert_eq!(offs.len(), 1);
         assert_eq!(offs[0].note, 64);
 
         // Note-offs at frame 500: note 60 (100 + 400)
-        let offs = clip.note_offs_at(500);
+        let offs = clip.note_offs_at(FramePos(500));
         assert_eq!(offs.len(), 1);
         assert_eq!(offs[0].note, 60);
 
         // Note-offs at frame 600: note 67 (500 + 100)
-        let offs = clip.note_offs_at(600);
+        let offs = clip.note_offs_at(FramePos(600));
         assert_eq!(offs.len(), 1);
         assert_eq!(offs[0].note, 67);
     }
 
     #[test]
     fn test_add_note_maintains_sorted_order() {
-        let mut clip = MidiClip::new("Test", 0, 48000);
+        let mut clip = MidiClip::new("Test", 0u64, 48000u64);
         // Add notes out of order
-        clip.add_note(500, 100, 67, 90, 0);
-        clip.add_note(100, 400, 60, 100, 0);
-        clip.add_note(300, 200, 64, 80, 0);
+        clip.add_note(500u64, 100u64, 67, 90, 0);
+        clip.add_note(100u64, 400u64, 60, 100, 0);
+        clip.add_note(300u64, 200u64, 64, 80, 0);
 
-        let positions: Vec<u64> = clip.notes.iter().map(|n| n.position).collect();
-        assert_eq!(positions, vec![100, 300, 500]);
+        let positions: Vec<FramePos> = clip.notes.iter().map(|n| n.position).collect();
+        assert_eq!(positions, vec![FramePos(100), FramePos(300), FramePos(500)]);
     }
 
     #[test]
     fn test_add_cc_maintains_sorted_order() {
-        let mut clip = MidiClip::new("Test", 0, 48000);
+        let mut clip = MidiClip::new("Test", 0u64, 48000u64);
         // Add CCs out of order
-        clip.add_cc(400, 7, 100, 0);
-        clip.add_cc(100, 1, 64, 0);
-        clip.add_cc(200, 11, 80, 0);
+        clip.add_cc(400u64, 7, 100, 0);
+        clip.add_cc(100u64, 1, 64, 0);
+        clip.add_cc(200u64, 11, 80, 0);
 
-        let positions: Vec<u64> = clip.control_changes.iter().map(|cc| cc.position).collect();
-        assert_eq!(positions, vec![100, 200, 400]);
+        let positions: Vec<FramePos> = clip.control_changes.iter().map(|cc| cc.position).collect();
+        assert_eq!(positions, vec![FramePos(100), FramePos(200), FramePos(400)]);
     }
 }

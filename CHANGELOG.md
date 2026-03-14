@@ -1,9 +1,64 @@
 # Changelog
 
 All notable changes to Shruti are documented here.
-Format: CalVer (YYYY.M.D-N).
+Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 
-## 2026.3.11-0 — Initial Release
+## 2026.3.14 — Engineering Backlog (High Priority)
+
+### Newtypes for Domain IDs
+- `FramePos(u64)` newtype for all frame-based positions and durations — prevents confusion with raw u64 values (buffer sizes, sample counts)
+- `TrackSlot(usize)` newtype for track slot indices — prevents confusion with other usize indices
+- `#[serde(transparent)]` on both types for backward-compatible JSON serialization
+- Arithmetic ops (Add, Sub, Rem, AddAssign, SubAssign), Ord, Hash, Display
+- Helper methods: `as_f32()`, `as_f64()`, `abs_diff()`, `saturating_sub()`, `min()`, `max()`
+- Migrated all frame fields across 7 crates: Region, Transport, AutomationPoint, MidiClip, NoteEvent, ControlChange, EditCommand, Timeline, Session, ArrangementDrag, Agent API
+
+### Type-Safe Instrument Parameters
+- `SynthParam` enum (34 variants) replacing magic number indices for SubtractiveSynth
+- `SamplerParam` enum (5 variants) for Sampler
+- `DrumMachineParam` enum (1 variant) for DrumMachine
+- `ParamIndex` trait with `index()` and `count()` methods
+- `From<Enum> for usize` and `TryFrom<usize> for Enum` conversions
+- `get_param()`/`set_param()` convenience methods on all instruments
+- All internal code uses enum variants; old PARAM_* constants removed
+
+### Unified Error Types
+- `EngineError` enum: Backend, Graph, Recording, Io variants — replaces `Box<dyn Error>` in shruti-engine
+- `PluginError` enum: NotFound, LoadError, StateError, ScanError, Io — replaces `String` errors in shruti-plugin
+- `InstrumentError` enum: ParseError, InvalidConfig, Io — replaces `String` errors in SF2/SFZ parsers
+- All error types implement Display, Error (with proper `source()` chains), and relevant From conversions
+
+### Bidirectional Playhead Engine Sync
+- UI transport controls (play/stop/pause/seek) now drive audio engine via `SharedTransport` atomics
+- Audio thread position advances are read back to UI transport during playback
+- `SharedTransport::seek_request` — atomic seek slot avoids UI/audio race on position writes
+- `SharedTransport::loop_enabled/loop_start/loop_end` — loop settings shared via atomics
+- Audio callback handles loop wrapping with modulo overshoot
+- `AudioEngine::sync_transport()` — pushes UI loop settings to audio thread
+- 4 new SharedTransport tests (seek request, loop sync, default values)
+
+### Lock-Free Session Updates (Double-Buffered)
+- Replaced `Arc<Mutex<SharedSessionData>>` with double-buffered pending slot pattern
+- Audio callback owns local copy of session data — no lock needed to read
+- UI thread writes to `pending_session: Arc<Mutex<Option<SharedSessionData>>>`
+- Audio thread picks up pending data via `try_lock()` on each callback
+- On contention, audio thread continues rendering with previous data instead of outputting silence
+- Eliminates `try_lock` silence gaps that occurred during session updates
+
+### Double-Buffered Graph Plan Swap
+- `GraphProcessor` now stores `current_plan` (owned by RT thread) + `pending_plan` (written by non-RT thread)
+- On `try_lock` failure, RT thread uses previous plan as fallback instead of outputting silence
+- Poisoned mutex recovery preserved across all code paths
+- 3 new tests: fallback rendering on contention, pending plan pickup, empty processor silence
+
+### Test & Quality
+- 1381 total tests across workspace (up from 1327)
+- 0 clippy warnings
+- 0 audit vulnerabilities
+
+---
+
+## 2026.3.11 — Initial Release
 
 ### Phase 1: Foundation
 - Cargo workspace with 6 crates: engine, dsp, plugin, session, ui, ai
@@ -379,4 +434,4 @@ Format: CalVer (YYYY.M.D-N).
 ### CI/CD
 - GitHub Actions: CI (fmt, clippy, audit, test, build)
 - GitHub Actions: Release (Linux amd64/arm64, macOS x86/arm, Windows)
-- CalVer versioning (YYYY.M.D-N) with `bump-version.sh`
+- CalVer versioning (`YYYY.M.D` or `YYYY.M.D-N`) with `bump-version.sh`

@@ -59,8 +59,8 @@ pub fn note_row_y(note: u8) -> f32 {
 }
 
 /// Convert a frame position to an X pixel offset given the pixels-per-frame scale.
-pub fn beat_grid_x(frame: u64, pixels_per_frame: f64, scroll_x: f64) -> f32 {
-    (frame as f64 * pixels_per_frame - scroll_x) as f32
+pub fn beat_grid_x(frame: shruti_session::FramePos, pixels_per_frame: f64, scroll_x: f64) -> f32 {
+    (frame.as_f64() * pixels_per_frame - scroll_x) as f32
 }
 
 /// Map a velocity value (0-127) to an alpha multiplier in 0.3..1.0.
@@ -271,8 +271,8 @@ pub fn piano_roll_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
 
                 for note_event in &clip.notes {
                     let note_x =
-                        clip_origin_x + (note_event.position as f64 * pixels_per_frame) as f32;
-                    let note_w = (note_event.duration as f64 * pixels_per_frame) as f32;
+                        clip_origin_x + (note_event.position.as_f64() * pixels_per_frame) as f32;
+                    let note_w = (note_event.duration.as_f64() * pixels_per_frame) as f32;
                     let note_y = grid_rect.top() + note_row_y(note_event.note);
 
                     // Cull notes outside the visible grid.
@@ -465,13 +465,14 @@ mod tests {
 
     #[test]
     fn beat_grid_x_positions() {
+        use shruti_session::FramePos;
         // At frame 0 with no scroll, x should be 0.
-        assert!((beat_grid_x(0, 0.01, 0.0) - 0.0).abs() < f32::EPSILON);
+        assert!((beat_grid_x(FramePos(0), 0.01, 0.0) - 0.0).abs() < f32::EPSILON);
         // At frame 48000 with ppf=0.01, x = 480.0 pixels.
-        let x = beat_grid_x(48000, 0.01, 0.0);
+        let x = beat_grid_x(FramePos(48000), 0.01, 0.0);
         assert!((x - 480.0).abs() < 0.01);
         // With scroll offset 100.0, x shifts left.
-        let x_scrolled = beat_grid_x(48000, 0.01, 100.0);
+        let x_scrolled = beat_grid_x(FramePos(48000), 0.01, 100.0);
         assert!((x_scrolled - 380.0).abs() < 0.01);
     }
 
@@ -507,7 +508,7 @@ mod tests {
     fn empty_midi_clip_has_no_notes() {
         use shruti_session::midi::MidiClip;
 
-        let clip = MidiClip::new("Empty", 0, 48000);
+        let clip = MidiClip::new("Empty", 0u64, 48000u64);
         assert!(clip.notes.is_empty());
         // No notes means nothing to render -- the drawing loop would iterate zero times.
     }

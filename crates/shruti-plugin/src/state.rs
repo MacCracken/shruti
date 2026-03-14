@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::PluginError;
 use crate::instance::ParamId;
 
 /// Serializable plugin state for save/restore.
@@ -28,26 +29,26 @@ impl PluginState {
         }
     }
 
-    /// Validate the state blob. Returns an error message if invalid.
+    /// Validate the state blob. Returns an error if invalid.
     ///
     /// Checks:
     /// - The chunk size does not exceed `MAX_STATE_BLOB_SIZE` (10 MB).
     /// - If the chunk is non-empty, it must be at least 4 bytes (minimum
     ///   meaningful header for any binary format).
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), PluginError> {
         if self.chunk.len() > MAX_STATE_BLOB_SIZE {
-            return Err(format!(
+            return Err(PluginError::StateError(format!(
                 "state blob too large: {} bytes (max {})",
                 self.chunk.len(),
                 MAX_STATE_BLOB_SIZE
-            ));
+            )));
         }
         // Non-empty chunks should have at least a minimal header
         if !self.chunk.is_empty() && self.chunk.len() < 4 {
-            return Err(format!(
+            return Err(PluginError::StateError(format!(
                 "state blob too small to be valid: {} bytes (minimum 4)",
                 self.chunk.len()
-            ));
+            )));
         }
         Ok(())
     }
@@ -94,7 +95,7 @@ mod tests {
         let mut state = PluginState::new("test".into());
         state.chunk = vec![0x01, 0x02]; // Only 2 bytes, below minimum of 4
         let err = state.validate().unwrap_err();
-        assert!(err.contains("too small"));
+        assert!(err.to_string().contains("too small"));
     }
 
     #[test]
@@ -102,7 +103,7 @@ mod tests {
         let mut state = PluginState::new("test".into());
         state.chunk = vec![0u8; MAX_STATE_BLOB_SIZE + 1];
         let err = state.validate().unwrap_err();
-        assert!(err.contains("too large"));
+        assert!(err.to_string().contains("too large"));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.13 | **Last Updated**: 2026-03-13
-> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog + code audit R8 — MVP v1 + instruments + full AGNOS integration + audit fixes
-> **Tests**: 1327 passing (184 dsp, 75 engine, 359 instruments, 260 session, 34 plugin, 134 ai, 251 ui + 7 shruti + 23 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
+> **Version**: 2026.3.14 | **Last Updated**: 2026-03-14
+> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog (high priority resolved) + code audit R8 — MVP v1 + instruments + full AGNOS integration + audit fixes
+> **Tests**: 1381 passing (184 dsp, 89 engine, 383 instruments, 251 session, 47 plugin, 134 ai, 263 ui + 7 shruti + 23 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -219,97 +219,39 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Engineering Backlog
 
-Items from 6-round code audit. All CRITICAL/HIGH issues fixed. Remaining MEDIUM/LOW grouped by domain, sorted by priority.
+All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 
-### Audio Engine (ui/engine)
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| H | Lock-free session updates | Replace `Arc<Mutex<SharedSessionData>>` with lock-free triple buffer or crossbeam channel; eliminates `try_lock` silence and `Vec<Track>` clone under lock |
-| H | Double-buffered graph plan swap | GraphProcessor should keep stale plan as fallback instead of outputting silence on `try_lock` failure |
-| ~~M~~ | ~~Lock-free meter levels~~ | **Done** — `AtomicStereoLevel` + `MeterLevels` using `AtomicU32` for lock-free meter reads/writes |
-| ~~M~~ | ~~Mono→stereo channel upmix~~ | **Done** — FilePlayerNode duplicates mono to both L/R channels |
-| ~~M~~ | ~~Poisoned mutex recovery~~ | **Done** — Log + `into_inner()` recovery in process/is_finished/swap |
-| ~~M~~ | ~~Render failure logging~~ | **Done** — eprintln when interleaved buffer shorter than expected |
-| ~~L~~ | ~~DeviceCache diff-based refresh~~ | **Done** — Diff-based device list update preserving existing entries |
-
-### DSP (dsp)
+### DSP
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| ~~M~~ | ~~EBU R128 compliant LUFS~~ | **Done** — Per-channel mean-square averaging per EBU R128 |
-| ~~M~~ | ~~Compressor soft knee verification~~ | **Done** — Standard quadratic soft knee formula |
-| ~~M~~ | ~~Audio file parsing safety~~ | **Done** — `catch_unwind` around symphonia decoding |
-| ~~L~~ | ~~Reverb/allpass min buffer size~~ | **Done** — `.max(1)` on comb/allpass buffer sizes |
-| ~~L~~ | ~~Delay samples explicit clamp~~ | **Done** — Explicit `.min(buf_len - 1)` clamp |
 | L | Zero-copy `as_interleaved()` | Ensure no unnecessary copy in hot audio path |
 
-### Instruments (instruments)
+### Instruments
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| H | Type-safe parameter system | Replace magic number indices (`PARAM_WAVEFORM=0`) with enum-based parameter IDs |
 | M | PolyBLEP rising edge correction | Sawtooth only corrects trailing edge; add phase=0 correction for better anti-aliasing |
-| ~~M~~ | ~~Envelope stage_pos reset~~ | **Done** — Reset to 0 on every state transition |
-| ~~M~~ | ~~LFO S&H double-sample at cycle boundary~~ | **Done** — Phase advance before S&H check |
-| ~~M~~ | ~~Per-sample `powf` in pitch modulation~~ | **Done** — `fast_exp2()` bit-manipulation approximation |
-| ~~M~~ | ~~LFO/ADSR helper deduplication~~ | **Done** — `read_adsr()` generic helper |
-| ~~M~~ | ~~Sample rate observer trait~~ | **Done** — `set_sample_rate()` propagates to all components |
 | L | InstrumentPreset clone overhead | Use `Cow` or `Arc` for shared preset data |
-| ~~L~~ | ~~Filter cutoff modulation docs~~ | **Done** — Documented octave depth mapping |
 
-### Session (session)
+### Session
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| H | Newtypes for domain IDs | `FramePos(u64)`, `TrackSlot(usize)`, `RegionId(Uuid)` — prevent primitive type confusion |
-| ~~M~~ | ~~Audio pool LRU eviction~~ | **Done** — `max_entries` + `access_counter` + `touch()` for LRU eviction |
-| ~~M~~ | ~~Region list sorted for binary search~~ | **Done** — Regions sorted by `timeline_pos`, binary search in `regions_in_range()` |
 | M | Undo history delta/COW | Current stores full command copies; reduce memory for large sessions |
-| ~~M~~ | ~~`VecDeque` for undo stack~~ | **Done** — O(1) eviction with `VecDeque::pop_front()` |
-| ~~M~~ | ~~Schema validation on load~~ | **Done** — `Session::validate()` called on load |
-| ~~L~~ | ~~MidiClip sorted events~~ | **Done** — `add_note()`/`add_cc()` insert in sorted order |
 | L | SmallString for Track names | Interning or SmallString for hot-path string fields |
-| ~~L~~ | ~~Automation dead code cleanup~~ | **Done** — Removed unreachable `right_idx == 0` branch |
 
-### UI / UX (ui)
+### UI / UX
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| ~~**C**~~ | ~~**Auto-save + crash recovery**~~ | **Done** — `.shruti_backup` every 60s, `*` dirty indicator, `backup_path_for()` |
-| ~~**C**~~ | ~~**Background file I/O**~~ | **Done** — Background save/load/export via `mpsc` + `BackgroundTaskState` |
-| ~~**C**~~ | ~~**Save prompt on New/Open**~~ | **Done** — `DeferredAction` + save prompt dialog on dirty session |
-| ~~H~~ | ~~Error toast notifications~~ | **Done** — `Toast` + `ToastSeverity` + overlay rendering |
-| ~~H~~ | ~~Comprehensive undo/redo~~ | **Done** — Mute/solo/gain/pan wrapped in `EditCommand` in mixer |
-| ~~H~~ | ~~Audio engine init feedback~~ | **Done** — `engine_init_error` dialog on startup failure |
-| H | Playhead engine sync | Bidirectional sync between UI transport and `SharedTransport` |
-| ~~M~~ | ~~Waveform peaks caching~~ | **Done** — `waveform_cache: HashMap<RegionId, WaveformPeaks>` |
-| ~~M~~ | ~~Snap-to-grid / quantize~~ | **Done** — `snap_enabled` field + quantization logic |
 | M | Drag visual feedback | Ghost/opacity on dragged regions; cursor hints on interactive elements |
-| ~~M~~ | ~~Recording animation~~ | **Done** — Blinking red circle indicator during recording |
-| ~~M~~ | ~~Grid level-of-detail~~ | **Done** — Skip grid lines when closer than 5px |
-| ~~M~~ | ~~Zoom boundary clamping~~ | **Done** — `clamp_zoom()` + `zoom_to_fit()` helpers |
-| ~~M~~ | ~~Missing keyboard shortcuts~~ | **Done** — Solo, arm, FFwd, export bound to keys |
-| ~~M~~ | ~~Audio pool persistence~~ | **Done** — `save_audio_pool()` persists manifest alongside session |
-| ~~L~~ | ~~Theme colors caching~~ | **Done** — `applied_theme_name` + only reapply on change |
 | L | Theme JSON validation | Reject malformed theme files gracefully |
 
-### Security (ai/plugin)
+### Code Quality
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| ~~M~~ | ~~MCP request size limit~~ | **Done** — Max body size in MCP dispatch |
-| ~~M~~ | ~~Agent API rate limiting~~ | **Done** — Throttle MCP/agent endpoints |
-| ~~M~~ | ~~Plugin scanner symlink depth~~ | **Done** — `MAX_SYMLINK_DEPTH` limit on directory traversal |
-| ~~L~~ | ~~Preferences file permissions~~ | **Done** — 0600 on `preferences.json` |
-| ~~L~~ | ~~Plugin state blob validation~~ | **Done** — `MAX_STATE_BLOB_SIZE` + `validate_chunk()` |
-| ~~L~~ | ~~Plugin scanner disk cache~~ | **Done** — `ScanCache` persisted to disk, re-scan on directory mtime change |
-
-### Code Quality (cross-cutting)
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| H | Unified `ShrutiError` type | Consistent error handling across all crates; replace mixed `Box<dyn Error>` / `String` |
 | M | Shared test utilities crate | Deduplicate `generate_sine()`, `rms_of_buffer()` helpers |
 | M | Integration test crate | Cross-crate tests: synth→filter→delay→output pipeline |
 | M | Centralize magic numbers | Config module for hardcoded values (window size, max delay, frequency ranges) |
@@ -361,4 +303,4 @@ Items from 6-round code audit. All CRITICAL/HIGH issues fixed. Remaining MEDIUM/
 | **T3: UI data logic** | 75% | +250 | app.rs action dispatch (extract pure functions from `handle_action`), state.rs transitions, theme/style.rs (test struct construction not rendering), shortcuts.rs | Extract testable logic from egui callbacks; test state machines |
 | **T4: UI widget math** | 80% | +250 | fader dB↔linear conversion, knob angle math, meter peak decay, timeline_ruler grid calculation, waveform zoom level selection | Test pure computation functions; skip egui `Ui` painting code |
 
-*Last Updated: 2026-03-13*
+*Last Updated: 2026-03-14*

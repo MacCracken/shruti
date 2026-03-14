@@ -239,9 +239,9 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
             from_index,
             to_index,
         } => {
-            if *from_index < session.tracks.len() {
-                let track = session.tracks.remove(*from_index);
-                let actual_to = (*to_index).min(session.tracks.len());
+            if from_index.0 < session.tracks.len() {
+                let track = session.tracks.remove(from_index.0);
+                let actual_to = to_index.0.min(session.tracks.len());
                 session.tracks.insert(actual_to, track);
             }
         }
@@ -470,10 +470,10 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
             to_index,
         } => {
             // Reverse: move from to_index back to from_index
-            let actual_to = (*to_index).min(session.tracks.len().saturating_sub(1));
+            let actual_to = to_index.0.min(session.tracks.len().saturating_sub(1));
             if actual_to < session.tracks.len() {
                 let track = session.tracks.remove(actual_to);
-                let actual_from = (*from_index).min(session.tracks.len());
+                let actual_from = from_index.0.min(session.tracks.len());
                 session.tracks.insert(actual_from, track);
             }
         }
@@ -547,6 +547,7 @@ mod tests {
     use crate::edit::EditCommand;
     use crate::region::Region;
     use crate::session::Session;
+    use crate::types::{FramePos, TrackSlot};
 
     fn make_session_with_track() -> (Session, crate::track::TrackId) {
         let mut session = Session::new("Test", 48000, 256);
@@ -555,7 +556,7 @@ mod tests {
     }
 
     fn make_region(pos: u64, duration: u64) -> Region {
-        Region::new("audio.wav".into(), pos, 0, duration)
+        Region::new("audio.wav".into(), pos, 0u64, duration)
     }
 
     // ---------------------------------------------------------------
@@ -786,8 +787,8 @@ mod tests {
             EditCommand::MoveRegion {
                 track_id,
                 region_id,
-                old_pos: 100,
-                new_pos: 5000,
+                old_pos: FramePos(100),
+                new_pos: FramePos(5000),
             },
             &mut session,
         );
@@ -799,7 +800,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .timeline_pos,
-            5000
+            FramePos(5000)
         );
 
         // Undo
@@ -811,7 +812,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .timeline_pos,
-            100
+            FramePos(100)
         );
 
         // Redo
@@ -823,7 +824,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .timeline_pos,
-            5000
+            FramePos(5000)
         );
     }
 
@@ -843,8 +844,8 @@ mod tests {
                 from_track: track_a,
                 to_track: track_b,
                 region_id,
-                old_pos: 100,
-                new_pos: 2000,
+                old_pos: FramePos(100),
+                new_pos: FramePos(2000),
                 region: None,
             },
             &mut session,
@@ -860,7 +861,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .timeline_pos,
-            2000
+            FramePos(2000)
         );
 
         // Undo: region back on track A at original position
@@ -874,7 +875,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .timeline_pos,
-            100
+            FramePos(100)
         );
 
         // Redo
@@ -896,7 +897,7 @@ mod tests {
             EditCommand::SplitRegion {
                 track_id,
                 region_id,
-                split_frame: 400,
+                split_frame: FramePos(400),
                 original: None,
                 left_id: None,
                 right_id: None,
@@ -914,7 +915,7 @@ mod tests {
         let track = session.track(track_id).unwrap();
         assert_eq!(track.regions.len(), 1);
         assert!(track.region(region_id).is_some());
-        assert_eq!(track.region(region_id).unwrap().duration, 1000);
+        assert_eq!(track.region(region_id).unwrap().duration, FramePos(1000));
 
         // Redo: split again
         um.redo(&mut session);
@@ -936,25 +937,25 @@ mod tests {
             EditCommand::TrimStart {
                 track_id,
                 region_id,
-                old_start: 100,
-                old_offset: 0,
-                old_duration: 1000,
-                new_start: 300,
+                old_start: FramePos(100),
+                old_offset: FramePos(0),
+                old_duration: FramePos(1000),
+                new_start: FramePos(300),
             },
             &mut session,
         );
 
         let r = session.track(track_id).unwrap().region(region_id).unwrap();
-        assert_eq!(r.timeline_pos, 300);
-        assert_eq!(r.source_offset, 200);
-        assert_eq!(r.duration, 800);
+        assert_eq!(r.timeline_pos, FramePos(300));
+        assert_eq!(r.source_offset, FramePos(200));
+        assert_eq!(r.duration, FramePos(800));
 
         // Undo
         um.undo(&mut session);
         let r = session.track(track_id).unwrap().region(region_id).unwrap();
-        assert_eq!(r.timeline_pos, 100);
-        assert_eq!(r.source_offset, 0);
-        assert_eq!(r.duration, 1000);
+        assert_eq!(r.timeline_pos, FramePos(100));
+        assert_eq!(r.source_offset, FramePos(0));
+        assert_eq!(r.duration, FramePos(1000));
     }
 
     #[test]
@@ -970,19 +971,19 @@ mod tests {
             EditCommand::TrimEnd {
                 track_id,
                 region_id,
-                old_duration: 1000,
-                new_end: 600,
+                old_duration: FramePos(1000),
+                new_end: FramePos(600),
             },
             &mut session,
         );
 
         let r = session.track(track_id).unwrap().region(region_id).unwrap();
-        assert_eq!(r.duration, 600);
+        assert_eq!(r.duration, FramePos(600));
 
         // Undo
         um.undo(&mut session);
         let r = session.track(track_id).unwrap().region(region_id).unwrap();
-        assert_eq!(r.duration, 1000);
+        assert_eq!(r.duration, FramePos(1000));
     }
 
     #[test]
@@ -998,8 +999,8 @@ mod tests {
             EditCommand::SetFadeIn {
                 track_id,
                 region_id,
-                old_fade: 0,
-                new_fade: 200,
+                old_fade: FramePos(0),
+                new_fade: FramePos(200),
             },
             &mut session,
         );
@@ -1011,7 +1012,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .fade_in,
-            200
+            FramePos(200)
         );
 
         um.undo(&mut session);
@@ -1022,7 +1023,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .fade_in,
-            0
+            FramePos(0)
         );
     }
 
@@ -1039,8 +1040,8 @@ mod tests {
             EditCommand::SetFadeOut {
                 track_id,
                 region_id,
-                old_fade: 0,
-                new_fade: 150,
+                old_fade: FramePos(0),
+                new_fade: FramePos(150),
             },
             &mut session,
         );
@@ -1052,7 +1053,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .fade_out,
-            150
+            FramePos(150)
         );
 
         um.undo(&mut session);
@@ -1063,7 +1064,7 @@ mod tests {
                 .region(region_id)
                 .unwrap()
                 .fade_out,
-            0
+            FramePos(0)
         );
     }
 
@@ -1364,8 +1365,8 @@ mod tests {
 
         undo.execute(
             EditCommand::MoveTrack {
-                from_index: 0,
-                to_index: 2,
+                from_index: TrackSlot(0),
+                to_index: TrackSlot(2),
             },
             &mut session,
         );
@@ -1393,8 +1394,8 @@ mod tests {
         // Move track from index 0 to index 3
         undo.execute(
             EditCommand::MoveTrack {
-                from_index: 0,
-                to_index: 3,
+                from_index: TrackSlot(0),
+                to_index: TrackSlot(3),
             },
             &mut session,
         );
@@ -1487,8 +1488,8 @@ mod tests {
                         region: region.clone(),
                     },
                     EditCommand::MoveTrack {
-                        from_index: 0,
-                        to_index: 2,
+                        from_index: TrackSlot(0),
+                        to_index: TrackSlot(2),
                     },
                 ],
             },

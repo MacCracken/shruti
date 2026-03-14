@@ -1,7 +1,7 @@
 use egui::{Color32, Rect, ScrollArea, Stroke, Ui, pos2, vec2};
 
-use shruti_session::RegionId;
 use shruti_session::edit::EditCommand;
+use shruti_session::{FramePos, RegionId};
 
 use crate::state::{ArrangementDrag, UiState};
 use crate::theme::ThemeColors;
@@ -24,20 +24,20 @@ enum PendingAction {
     StartMoveRegion {
         region_id: RegionId,
         track_index: usize,
-        start_frame: u64,
+        start_frame: FramePos,
         grab_offset_px: f32,
     },
     StartTrimStart {
         region_id: RegionId,
         track_index: usize,
-        original_pos: u64,
-        original_offset: u64,
-        original_duration: u64,
+        original_pos: FramePos,
+        original_offset: FramePos,
+        original_duration: FramePos,
     },
     StartTrimEnd {
         region_id: RegionId,
         track_index: usize,
-        original_duration: u64,
+        original_duration: FramePos,
     },
     StartReorderTrack {
         from_index: usize,
@@ -262,8 +262,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                         let track = &state.session.tracks[track_idx];
                         for region in &track.regions {
                             let region_x = lane_rect.left()
-                                + (region.timeline_pos as f64 * pixels_per_frame - scroll_x) as f32;
-                            let region_w = (region.duration as f64 * pixels_per_frame) as f32;
+                                + (region.timeline_pos.as_f64() * pixels_per_frame - scroll_x)
+                                    as f32;
+                            let region_w = (region.duration.as_f64() * pixels_per_frame) as f32;
 
                             if region_x + region_w >= lane_rect.left()
                                 && region_x <= lane_rect.right()
@@ -306,7 +307,7 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                                     }
                                     if let Some(peaks) = state.waveform_cache.get(&region.id) {
                                         let samples_per_pixel = (1.0 / pixels_per_frame) as f32;
-                                        let start_sample = region.source_offset as usize;
+                                        let start_sample = region.source_offset.0 as usize;
                                         waveform::draw_waveform(
                                             ui,
                                             region_rect.shrink2(vec2(1.0, 4.0)),
@@ -407,7 +408,7 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                                 let points: Vec<(f64, f32)> = lane
                                     .points
                                     .iter()
-                                    .map(|p| (p.position as f64, p.value))
+                                    .map(|p| (p.position.as_f64(), p.value))
                                     .collect();
                                 automation_lane::draw_automation(
                                     ui,
@@ -424,8 +425,8 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                         let track = &state.session.tracks[track_idx];
                         for clip in &track.midi_clips {
                             let clip_x = lane_rect.left()
-                                + (clip.timeline_pos as f64 * pixels_per_frame - scroll_x) as f32;
-                            let clip_w = (clip.duration as f64 * pixels_per_frame) as f32;
+                                + (clip.timeline_pos.as_f64() * pixels_per_frame - scroll_x) as f32;
+                            let clip_w = (clip.duration.as_f64() * pixels_per_frame) as f32;
 
                             if clip_x + clip_w >= lane_rect.left() && clip_x <= lane_rect.right() {
                                 let clip_rect = Rect::from_min_size(
@@ -453,9 +454,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                                 if clip_rect.width() > 10.0 {
                                     for note in &clip.notes {
                                         let note_x = clip_rect.left()
-                                            + (note.position as f64 * pixels_per_frame) as f32;
+                                            + (note.position.as_f64() * pixels_per_frame) as f32;
                                         let note_w =
-                                            (note.duration as f64 * pixels_per_frame) as f32;
+                                            (note.duration.as_f64() * pixels_per_frame) as f32;
                                         let note_y = clip_rect.bottom()
                                             - (note.note as f32 / 127.0) * clip_rect.height();
                                         let note_h = 2.0;
@@ -494,7 +495,7 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
 
                         // Draw playhead
                         let playhead_x = lane_rect.left()
-                            + (state.session.transport.position as f64 * pixels_per_frame
+                            + (state.session.transport.position.as_f64() * pixels_per_frame
                                 - scroll_x) as f32;
                         if playhead_x >= lane_rect.left() && playhead_x <= lane_rect.right() {
                             painter.line_segment(
@@ -588,8 +589,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     if let Some(pos) = pointer_pos {
                         let lane_left = available.left() + TRACK_HEADER_WIDTH;
                         let new_x = pos.x - lane_left - grab_offset_px;
-                        let new_frame =
-                            ((new_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64;
+                        let new_frame = FramePos(
+                            ((new_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64,
+                        );
 
                         if new_frame != start_frame && track_index < state.session.tracks.len() {
                             let track_id = state.session.tracks[track_index].id;
@@ -607,7 +609,8 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     // Live preview: move region to current mouse position
                     let lane_left = available.left() + TRACK_HEADER_WIDTH;
                     let new_x = pos.x - lane_left - grab_offset_px;
-                    let new_frame = ((new_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64;
+                    let new_frame =
+                        FramePos(((new_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64);
 
                     if track_index < state.session.tracks.len()
                         && let Some(r) = state.session.tracks[track_index].region_mut(region_id)
@@ -646,9 +649,11 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     {
                         let lane_left = available.left() + TRACK_HEADER_WIDTH;
                         let end_x = pos.x - lane_left;
-                        let end_frame =
-                            ((end_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64;
-                        let new_duration = end_frame.saturating_sub(r.timeline_pos).max(1);
+                        let end_frame = FramePos(
+                            ((end_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64,
+                        );
+                        let new_duration =
+                            end_frame.saturating_sub(r.timeline_pos).max(FramePos(1));
                         r.duration = new_duration;
                     }
                 }
@@ -685,18 +690,20 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     {
                         let lane_left = available.left() + TRACK_HEADER_WIDTH;
                         let start_x = pos.x - lane_left;
-                        let new_start_frame =
-                            ((start_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64;
+                        let new_start_frame = FramePos(
+                            ((start_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64,
+                        );
                         let original_end = original_pos + original_duration;
                         // Don't let start go past the end
-                        let clamped_start = new_start_frame.min(original_end.saturating_sub(1));
+                        let clamped_start =
+                            new_start_frame.min(original_end.saturating_sub(FramePos(1)));
                         // Don't let start go before the original start minus offset
                         let clamped_start =
                             clamped_start.max(original_pos.saturating_sub(original_offset));
                         let delta = clamped_start.saturating_sub(original_pos);
                         r.timeline_pos = clamped_start;
                         r.source_offset = original_offset + delta;
-                        r.duration = original_duration.saturating_sub(delta).max(1);
+                        r.duration = original_duration.saturating_sub(delta).max(FramePos(1));
                     }
                 }
             }
@@ -712,8 +719,8 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                             .min(state.session.tracks.len().saturating_sub(1));
                         if to_index != from_index && state.session.tracks.len() > 1 {
                             let cmd = EditCommand::MoveTrack {
-                                from_index,
-                                to_index,
+                                from_index: shruti_session::TrackSlot(from_index),
+                                to_index: shruti_session::TrackSlot(to_index),
                             };
                             state.undo.execute(cmd, &mut state.session);
                         }
@@ -743,8 +750,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
         && let Some(region) = state.session.tracks[*track_index].region(*region_id)
     {
         let lane_left = available.left() + TRACK_HEADER_WIDTH;
-        let ghost_x = lane_left + (region.timeline_pos as f64 * pixels_per_frame - scroll_x) as f32;
-        let ghost_w = (region.duration as f64 * pixels_per_frame) as f32;
+        let ghost_x =
+            lane_left + (region.timeline_pos.as_f64() * pixels_per_frame - scroll_x) as f32;
+        let ghost_w = (region.duration.as_f64() * pixels_per_frame) as f32;
         let ghost_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
         let ghost_rect =
             Rect::from_min_size(pos2(ghost_x, ghost_y), vec2(ghost_w, TRACK_HEIGHT - 4.0));
@@ -805,7 +813,7 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
 ///
 /// Returns the nearest grid-aligned frame position based on BPM and sample rate.
 /// Grid resolution is one beat (quarter note).
-pub fn snap_to_grid(position: u64, bpm: f64, sample_rate: u32) -> u64 {
+pub fn snap_to_grid(position: FramePos, bpm: f64, sample_rate: u32) -> FramePos {
     if bpm <= 0.0 || sample_rate == 0 {
         return position;
     }
@@ -813,8 +821,8 @@ pub fn snap_to_grid(position: u64, bpm: f64, sample_rate: u32) -> u64 {
     if frames_per_beat <= 0.0 {
         return position;
     }
-    let beat_index = (position as f64 / frames_per_beat).round();
-    (beat_index * frames_per_beat) as u64
+    let beat_index = (position.as_f64() / frames_per_beat).round();
+    FramePos((beat_index * frames_per_beat) as u64)
 }
 
 /// Compute the minimum grid spacing in pixels for the current zoom level.
@@ -860,17 +868,17 @@ pub enum GridLod {
 /// Returns clamped `pixels_per_frame` within sensible bounds.
 /// `session_length` is the total session length in frames; `view_width_px` is the
 /// available view width in pixels.
-pub fn clamp_zoom(pixels_per_frame: f64, session_length: u64, view_width_px: f32) -> f64 {
+pub fn clamp_zoom(pixels_per_frame: f64, session_length: FramePos, view_width_px: f32) -> f64 {
     const MIN_PPF: f64 = 0.00001;
     const MAX_PPF: f64 = 1.0;
 
-    if session_length == 0 || view_width_px <= 0.0 {
+    if session_length == FramePos::ZERO || view_width_px <= 0.0 {
         return pixels_per_frame.clamp(MIN_PPF, MAX_PPF);
     }
 
     // At minimum zoom, the whole session should fit in ~10x the view width
     // (don't let it get so small the session vanishes).
-    let min_ppf = (view_width_px as f64) / (session_length as f64 * 10.0);
+    let min_ppf = (view_width_px as f64) / (session_length.as_f64() * 10.0);
     let min_ppf = min_ppf.max(MIN_PPF);
 
     pixels_per_frame.clamp(min_ppf, MAX_PPF)
@@ -879,13 +887,13 @@ pub fn clamp_zoom(pixels_per_frame: f64, session_length: u64, view_width_px: f32
 /// Compute the zoom-to-fit `pixels_per_frame` for a given session length and view width.
 ///
 /// Returns `None` if the session is empty.
-pub fn zoom_to_fit(session_length: u64, view_width_px: f32) -> Option<f64> {
-    if session_length == 0 || view_width_px <= 0.0 {
+pub fn zoom_to_fit(session_length: FramePos, view_width_px: f32) -> Option<f64> {
+    if session_length == FramePos::ZERO || view_width_px <= 0.0 {
         return None;
     }
     // Leave 5% margin on each side
     let usable_width = view_width_px as f64 * 0.9;
-    Some(usable_width / session_length as f64)
+    Some(usable_width / session_length.as_f64())
 }
 
 fn draw_grid(
@@ -949,53 +957,53 @@ mod tests {
     #[test]
     fn snap_to_grid_on_beat_boundary() {
         // 120 BPM, 48kHz => 24000 frames/beat
-        let snapped = snap_to_grid(24000, 120.0, 48000);
-        assert_eq!(snapped, 24000); // already on boundary
+        let snapped = snap_to_grid(FramePos(24000), 120.0, 48000);
+        assert_eq!(snapped, FramePos(24000)); // already on boundary
     }
 
     #[test]
     fn snap_to_grid_rounds_to_nearest_beat() {
         // 120 BPM, 48kHz => 24000 frames/beat
         // Position 25000 is closer to beat 1 (24000) than beat 2 (48000)
-        let snapped = snap_to_grid(25000, 120.0, 48000);
-        assert_eq!(snapped, 24000);
+        let snapped = snap_to_grid(FramePos(25000), 120.0, 48000);
+        assert_eq!(snapped, FramePos(24000));
     }
 
     #[test]
     fn snap_to_grid_rounds_up_past_halfway() {
         // 120 BPM, 48kHz => 24000 frames/beat
         // Position 36001 is closer to beat 2 (48000) than beat 1 (24000)
-        let snapped = snap_to_grid(36001, 120.0, 48000);
-        assert_eq!(snapped, 48000);
+        let snapped = snap_to_grid(FramePos(36001), 120.0, 48000);
+        assert_eq!(snapped, FramePos(48000));
     }
 
     #[test]
     fn snap_to_grid_position_zero() {
-        let snapped = snap_to_grid(0, 120.0, 48000);
-        assert_eq!(snapped, 0);
+        let snapped = snap_to_grid(FramePos(0), 120.0, 48000);
+        assert_eq!(snapped, FramePos(0));
     }
 
     #[test]
     fn snap_to_grid_invalid_bpm_returns_position() {
-        let snapped = snap_to_grid(1000, 0.0, 48000);
-        assert_eq!(snapped, 1000);
+        let snapped = snap_to_grid(FramePos(1000), 0.0, 48000);
+        assert_eq!(snapped, FramePos(1000));
     }
 
     #[test]
     fn snap_to_grid_invalid_sample_rate_returns_position() {
-        let snapped = snap_to_grid(1000, 120.0, 0);
-        assert_eq!(snapped, 1000);
+        let snapped = snap_to_grid(FramePos(1000), 120.0, 0);
+        assert_eq!(snapped, FramePos(1000));
     }
 
     #[test]
     fn snap_to_grid_different_tempos() {
         // 60 BPM, 48kHz => 48000 frames/beat
-        let snapped = snap_to_grid(30000, 60.0, 48000);
-        assert_eq!(snapped, 48000); // rounds to nearest beat
+        let snapped = snap_to_grid(FramePos(30000), 60.0, 48000);
+        assert_eq!(snapped, FramePos(48000)); // rounds to nearest beat
 
         // 240 BPM, 48kHz => 12000 frames/beat
-        let snapped = snap_to_grid(7000, 240.0, 48000);
-        assert_eq!(snapped, 12000); // rounds up to beat 1
+        let snapped = snap_to_grid(FramePos(7000), 240.0, 48000);
+        assert_eq!(snapped, FramePos(12000)); // rounds up to beat 1
     }
 
     // ---- grid_level_of_detail tests ----
@@ -1043,7 +1051,7 @@ mod tests {
 
     #[test]
     fn clamp_zoom_within_bounds() {
-        let ppf = clamp_zoom(0.01, 480000, 1000.0);
+        let ppf = clamp_zoom(0.01, FramePos(480000), 1000.0);
         assert!((ppf - 0.01).abs() < 1e-10);
     }
 
@@ -1051,26 +1059,26 @@ mod tests {
     fn clamp_zoom_prevents_too_small() {
         // With session_length=480000, view_width=1000
         // min_ppf = 1000 / (480000 * 10) = 0.000208
-        let ppf = clamp_zoom(0.00001, 480000, 1000.0);
+        let ppf = clamp_zoom(0.00001, FramePos(480000), 1000.0);
         assert!(ppf >= 0.000208);
     }
 
     #[test]
     fn clamp_zoom_prevents_too_large() {
-        let ppf = clamp_zoom(10.0, 480000, 1000.0);
+        let ppf = clamp_zoom(10.0, FramePos(480000), 1000.0);
         assert!(ppf <= 1.0);
     }
 
     #[test]
     fn clamp_zoom_empty_session() {
-        let ppf = clamp_zoom(0.01, 0, 1000.0);
+        let ppf = clamp_zoom(0.01, FramePos(0), 1000.0);
         assert!(ppf >= 0.00001);
         assert!(ppf <= 1.0);
     }
 
     #[test]
     fn clamp_zoom_zero_view_width() {
-        let ppf = clamp_zoom(0.01, 480000, 0.0);
+        let ppf = clamp_zoom(0.01, FramePos(480000), 0.0);
         assert!(ppf >= 0.00001);
         assert!(ppf <= 1.0);
     }
@@ -1079,7 +1087,7 @@ mod tests {
 
     #[test]
     fn zoom_to_fit_normal_session() {
-        let result = zoom_to_fit(480000, 1000.0);
+        let result = zoom_to_fit(FramePos(480000), 1000.0);
         assert!(result.is_some());
         let ppf = result.unwrap();
         // 900 / 480000 = 0.001875
@@ -1088,19 +1096,19 @@ mod tests {
 
     #[test]
     fn zoom_to_fit_empty_session() {
-        let result = zoom_to_fit(0, 1000.0);
+        let result = zoom_to_fit(FramePos(0), 1000.0);
         assert!(result.is_none());
     }
 
     #[test]
     fn zoom_to_fit_zero_width() {
-        let result = zoom_to_fit(480000, 0.0);
+        let result = zoom_to_fit(FramePos(480000), 0.0);
         assert!(result.is_none());
     }
 
     #[test]
     fn zoom_to_fit_negative_width() {
-        let result = zoom_to_fit(480000, -100.0);
+        let result = zoom_to_fit(FramePos(480000), -100.0);
         assert!(result.is_none());
     }
 }

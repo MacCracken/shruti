@@ -6,6 +6,7 @@
 
 #![deny(unsafe_code)]
 
+use crate::error::InstrumentError;
 use crate::sampler::{LoopMode, SampleZone};
 
 // ── Public types ────────────────────────────────────────────────────────
@@ -310,22 +311,24 @@ fn pcm16_to_f32(data: &[u8], start_sample: usize, end_sample: usize) -> Vec<f32>
 ///
 /// Returns a list of `Sf2Preset`, each containing resolved `SampleZone`s
 /// with the PCM data extracted and converted to f32.
-pub fn parse_sf2(data: &[u8]) -> Result<Vec<Sf2Preset>, String> {
+pub fn parse_sf2(data: &[u8]) -> Result<Vec<Sf2Preset>, InstrumentError> {
     // ── 1. Validate RIFF/sfbk outer container ───────────────────────
     if data.len() < 12 {
-        return Err("file too small to be a valid SF2".to_string());
+        return Err(InstrumentError::ParseError(
+            "file too small to be a valid SF2".into(),
+        ));
     }
     let riff_id = read_fourcc(data, 0)?;
     if riff_id != *RIFF_ID {
-        return Err("not a RIFF file".to_string());
+        return Err(InstrumentError::ParseError("not a RIFF file".into()));
     }
     let _file_size = read_u32_le(data, 4)?;
     let form_type = read_fourcc(data, 8)?;
     if form_type != *SFBK_ID {
-        return Err(format!(
+        return Err(InstrumentError::ParseError(format!(
             "RIFF form type is {:?}, expected 'sfbk'",
             String::from_utf8_lossy(&form_type)
-        ));
+        )));
     }
 
     // ── 2. Find the three required LIST chunks: INFO, sdta, pdta ────
@@ -833,7 +836,7 @@ mod tests {
         data[4..8].copy_from_slice(&4u32.to_le_bytes());
         data[8..12].copy_from_slice(b"WAVE");
         let err = parse_sf2(&data).unwrap_err();
-        assert!(err.contains("sfbk"));
+        assert!(err.to_string().contains("sfbk"));
     }
 
     #[test]
@@ -844,7 +847,7 @@ mod tests {
         write_u32_le(&mut data, 4);
         data.extend_from_slice(b"sfbk");
         let err = parse_sf2(&data).unwrap_err();
-        assert!(err.contains("missing"));
+        assert!(err.to_string().contains("missing"));
     }
 
     #[test]

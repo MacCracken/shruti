@@ -92,8 +92,8 @@ mod tests {
 
     fn make_event(note: u8, velocity: u8, channel: u8) -> NoteEvent {
         NoteEvent {
-            position: 0,
-            duration: 100,
+            position: shruti_session::FramePos(0),
+            duration: shruti_session::FramePos(100),
             note,
             velocity,
             channel,

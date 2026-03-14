@@ -67,11 +67,16 @@ pub struct ExecutionPlan {
 
 /// Processes an audio graph on the RT thread.
 ///
-/// Holds the current execution plan behind an Arc<Mutex<>>.
-/// The mutex is only locked briefly to swap plans; the RT thread
-/// processes with a local reference.
+/// Uses double-buffered plan swap: the RT thread owns `current_plan` directly
+/// (no lock needed to read it), while the non-RT thread places new plans into
+/// `pending_plan`. On each `process()` call, the RT thread checks for a pending
+/// plan via `try_lock` and swaps it in. On contention, the RT thread continues
+/// using the previous plan as fallback instead of outputting silence.
 pub struct GraphProcessor {
-    plan: Arc<Mutex<Option<ExecutionPlan>>>,
+    /// The plan the RT thread uses directly — no lock needed.
+    current_plan: Option<ExecutionPlan>,
+    /// Where the non-RT thread places new plans for the RT thread to pick up.
+    pending_plan: Arc<Mutex<Option<ExecutionPlan>>>,
     /// Pre-allocated node output buffers, reused across process() calls.
     /// Avoids HashMap + AudioBuffer heap allocation on every audio callback.
     node_outputs: HashMap<NodeId, AudioBuffer>,
@@ -80,7 +85,8 @@ pub struct GraphProcessor {
 impl GraphProcessor {
     pub fn new() -> Self {
         Self {
-            plan: Arc::new(Mutex::new(None)),
+            current_plan: None,
+            pending_plan: Arc::new(Mutex::new(None)),
             node_outputs: HashMap::new(),
         }
     }
@@ -88,27 +94,33 @@ impl GraphProcessor {
     /// Get a handle for swapping in new plans from the non-RT thread.
     pub fn swap_handle(&self) -> GraphSwapHandle {
         GraphSwapHandle {
-            plan: Arc::clone(&self.plan),
+            pending_plan: Arc::clone(&self.pending_plan),
         }
     }
 
     /// Process one buffer cycle. Writes interleaved output into `output`.
     /// Called from the audio callback.
     pub fn process(&mut self, output: &mut [f32], channels: u16, buffer_frames: u32) {
-        let mut guard = match self.plan.try_lock() {
-            Ok(g) => g,
+        // Try to pick up a pending plan. On contention, just keep the current one.
+        match self.pending_plan.try_lock() {
+            Ok(mut guard) => {
+                if let Some(new_plan) = guard.take() {
+                    self.current_plan = Some(new_plan);
+                }
+            }
             Err(std::sync::TryLockError::WouldBlock) => {
-                // Mutex contended — fill with silence rather than block
-                output.fill(0.0);
-                return;
+                // Mutex contended — fall back to current_plan (no silence)
             }
             Err(std::sync::TryLockError::Poisoned(e)) => {
-                eprintln!("shruti-engine: graph plan mutex poisoned, recovering: {e}");
-                e.into_inner()
+                eprintln!("shruti-engine: graph pending plan mutex poisoned, recovering: {e}");
+                let mut guard = e.into_inner();
+                if let Some(new_plan) = guard.take() {
+                    self.current_plan = Some(new_plan);
+                }
             }
-        };
+        }
 
-        let plan = match guard.as_mut() {
+        let plan = match self.current_plan.as_mut() {
             Some(p) => p,
             None => {
                 output.fill(0.0);
@@ -180,29 +192,44 @@ impl GraphProcessor {
     }
 
     /// Check if the last node in the plan is finished.
+    ///
+    /// Checks `current_plan` first. If no current plan exists, peeks at
+    /// `pending_plan` so that a freshly swapped-in plan is visible before the
+    /// next `process()` call.
     pub fn is_finished(&self) -> bool {
-        let guard = match self.plan.try_lock() {
-            Ok(g) => g,
-            Err(std::sync::TryLockError::WouldBlock) => return false,
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                eprintln!(
-                    "shruti-engine: graph plan mutex poisoned in is_finished, recovering: {e}"
-                );
-                e.into_inner()
+        // Helper: check whether a plan's last node is finished.
+        let check = |plan: &ExecutionPlan| -> bool {
+            if let Some(last_id) = plan.order.last() {
+                plan.nodes
+                    .get(last_id)
+                    .map(|n| n.is_finished())
+                    .unwrap_or(true)
+            } else {
+                true
             }
         };
-        match guard.as_ref() {
-            Some(plan) => {
-                if let Some(last_id) = plan.order.last() {
-                    plan.nodes
-                        .get(last_id)
-                        .map(|n| n.is_finished())
-                        .unwrap_or(true)
-                } else {
-                    true
+
+        if let Some(plan) = self.current_plan.as_ref() {
+            return check(plan);
+        }
+
+        // No current plan — try peeking at pending.
+        match self.pending_plan.try_lock() {
+            Ok(guard) => match guard.as_ref() {
+                Some(plan) => check(plan),
+                None => true,
+            },
+            Err(std::sync::TryLockError::WouldBlock) => false,
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                eprintln!(
+                    "shruti-engine: graph pending plan mutex poisoned in is_finished, recovering: {e}"
+                );
+                let guard = e.into_inner();
+                match guard.as_ref() {
+                    Some(plan) => check(plan),
+                    None => true,
                 }
             }
-            None => true,
         }
     }
 }
@@ -215,17 +242,19 @@ impl Default for GraphProcessor {
 
 /// Handle for swapping execution plans from the non-RT thread.
 pub struct GraphSwapHandle {
-    plan: Arc<Mutex<Option<ExecutionPlan>>>,
+    pending_plan: Arc<Mutex<Option<ExecutionPlan>>>,
 }
 
 impl GraphSwapHandle {
     pub fn swap(&self, new_plan: ExecutionPlan) {
-        match self.plan.lock() {
+        match self.pending_plan.lock() {
             Ok(mut guard) => {
                 *guard = Some(new_plan);
             }
             Err(e) => {
-                eprintln!("shruti-engine: graph plan mutex poisoned in swap, recovering: {e}");
+                eprintln!(
+                    "shruti-engine: graph pending plan mutex poisoned in swap, recovering: {e}"
+                );
                 let mut guard = e.into_inner();
                 *guard = Some(new_plan);
             }
@@ -547,12 +576,86 @@ mod tests {
         assert_eq!(format!("{:?}", conn), format!("{:?}", cloned));
     }
 
+    // --- Double-buffered fallback tests ---
+
+    #[test]
+    fn test_fallback_renders_stale_plan_on_contention() {
+        // Install a plan, process once so current_plan is populated,
+        // then hold the pending_plan lock and verify process() still renders.
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+
+        let src = AudioBuffer::from_interleaved(vec![1.0, 1.0, 1.0, 1.0], 1);
+        let player_id = NodeId::next();
+        let gain_id = NodeId::next();
+
+        let mut graph = Graph::new();
+        graph.add_node(player_id, Box::new(FilePlayerNode::new(src, true)));
+        graph.add_node(gain_id, Box::new(GainNode::new(0.5)));
+        graph.connect(player_id, gain_id);
+        handle.swap(graph.compile().unwrap());
+
+        // First process picks up the pending plan into current_plan.
+        let mut output = vec![0.0f32; 1];
+        processor.process(&mut output, 1, 1);
+        assert!((output[0] - 0.5).abs() < 1e-6);
+
+        // Now hold the pending_plan lock via a cloned Arc to simulate contention
+        // without borrowing `processor` immutably (which would conflict with process()).
+        let pending_arc = Arc::clone(&processor.pending_plan);
+        let _guard = pending_arc.lock().unwrap();
+
+        // Process should still render using the current_plan (fallback).
+        let mut output2 = vec![0.0f32; 1];
+        processor.process(&mut output2, 1, 1);
+        assert!(
+            (output2[0] - 0.5).abs() < 1e-6,
+            "expected fallback render, got silence"
+        );
+    }
+
+    #[test]
+    fn test_plan_swap_picks_up_pending() {
+        // Verify that a plan placed in pending_plan gets picked up on next process().
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+
+        // No plan yet — should output silence.
+        let mut output = vec![1.0f32; 2];
+        processor.process(&mut output, 1, 2);
+        assert_eq!(output[0], 0.0);
+        assert_eq!(output[1], 0.0);
+
+        // Swap in a plan.
+        let src = AudioBuffer::from_interleaved(vec![0.7, 0.7], 1);
+        let pid = NodeId::next();
+        let mut graph = Graph::new();
+        graph.add_node(pid, Box::new(FilePlayerNode::new(src, false)));
+        handle.swap(graph.compile().unwrap());
+
+        // Next process should pick it up.
+        let mut output2 = vec![0.0f32; 2];
+        processor.process(&mut output2, 1, 2);
+        assert!((output2[0] - 0.7).abs() < 1e-6);
+        assert!((output2[1] - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_empty_processor_outputs_silence() {
+        let mut processor = GraphProcessor::new();
+        let mut output = vec![1.0f32; 4];
+        processor.process(&mut output, 2, 2);
+        for &s in &output {
+            assert_eq!(s, 0.0);
+        }
+    }
+
     // --- Poisoned mutex recovery tests ---
 
     #[test]
-    fn test_processor_recovers_from_poisoned_mutex() {
-        let processor = GraphProcessor::new();
-        let plan_arc = Arc::clone(&processor.plan);
+    fn test_processor_recovers_from_poisoned_pending_mutex() {
+        let mut processor = GraphProcessor::new();
+        let plan_arc = Arc::clone(&processor.pending_plan);
 
         // Poison the mutex by panicking in a thread that holds the lock.
         let plan_arc2 = Arc::clone(&plan_arc);
@@ -565,17 +668,19 @@ mod tests {
         // Verify mutex is poisoned.
         assert!(plan_arc.lock().is_err());
 
-        // is_finished should recover gracefully (not panic).
-        // With poisoned mutex, it recovers and reads None => true.
-        let result = processor.is_finished();
-        assert!(result);
+        // process() should recover gracefully (not panic), outputting silence.
+        let mut output = vec![1.0f32; 4];
+        processor.process(&mut output, 2, 2);
+        for &s in &output {
+            assert_eq!(s, 0.0);
+        }
     }
 
     #[test]
     fn test_swap_handle_recovers_from_poisoned_mutex() {
         let processor = GraphProcessor::new();
         let handle = processor.swap_handle();
-        let plan_arc = Arc::clone(&processor.plan);
+        let plan_arc = Arc::clone(&processor.pending_plan);
 
         // Poison the mutex.
         let plan_arc2 = Arc::clone(&plan_arc);

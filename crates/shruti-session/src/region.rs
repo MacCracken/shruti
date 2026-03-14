@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::types::FramePos;
+
 /// Unique identifier for a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RegionId(pub Uuid);
@@ -27,17 +29,17 @@ pub struct Region {
     /// ID of the source audio file in the audio pool.
     pub audio_file_id: String,
     /// Position on the timeline in frames (where the region starts playing).
-    pub timeline_pos: u64,
+    pub timeline_pos: FramePos,
     /// Offset into the source audio in frames (where to start reading).
-    pub source_offset: u64,
+    pub source_offset: FramePos,
     /// Duration of the region in frames.
-    pub duration: u64,
+    pub duration: FramePos,
     /// Gain applied to this region (linear, 1.0 = unity).
     pub gain: f32,
     /// Fade-in duration in frames.
-    pub fade_in: u64,
+    pub fade_in: FramePos,
     /// Fade-out duration in frames.
-    pub fade_out: u64,
+    pub fade_out: FramePos,
     /// Whether this region is muted.
     pub muted: bool,
 }
@@ -45,35 +47,35 @@ pub struct Region {
 impl Region {
     pub fn new(
         audio_file_id: String,
-        timeline_pos: u64,
-        source_offset: u64,
-        duration: u64,
+        timeline_pos: impl Into<FramePos>,
+        source_offset: impl Into<FramePos>,
+        duration: impl Into<FramePos>,
     ) -> Self {
         Self {
             id: RegionId::new(),
             audio_file_id,
-            timeline_pos,
-            source_offset,
-            duration,
+            timeline_pos: timeline_pos.into(),
+            source_offset: source_offset.into(),
+            duration: duration.into(),
             gain: 1.0,
-            fade_in: 0,
-            fade_out: 0,
+            fade_in: FramePos::ZERO,
+            fade_out: FramePos::ZERO,
             muted: false,
         }
     }
 
     /// The frame where this region ends on the timeline.
-    pub fn end_pos(&self) -> u64 {
+    pub fn end_pos(&self) -> FramePos {
         self.timeline_pos + self.duration
     }
 
     /// Check if a timeline frame falls within this region.
-    pub fn contains_frame(&self, frame: u64) -> bool {
+    pub fn contains_frame(&self, frame: FramePos) -> bool {
         frame >= self.timeline_pos && frame < self.end_pos()
     }
 
     /// Given a timeline frame, return the corresponding source audio frame.
-    pub fn source_frame_at(&self, timeline_frame: u64) -> Option<u64> {
+    pub fn source_frame_at(&self, timeline_frame: FramePos) -> Option<FramePos> {
         if !self.contains_frame(timeline_frame) {
             return None;
         }
@@ -81,7 +83,7 @@ impl Region {
     }
 
     /// Calculate the fade gain at a given position within the region.
-    pub fn fade_gain_at(&self, timeline_frame: u64) -> f32 {
+    pub fn fade_gain_at(&self, timeline_frame: FramePos) -> f32 {
         if !self.contains_frame(timeline_frame) {
             return 0.0;
         }
@@ -90,15 +92,15 @@ impl Region {
         let mut gain = self.gain;
 
         // Fade in
-        if self.fade_in > 0 && local < self.fade_in {
-            gain *= local as f32 / self.fade_in as f32;
+        if self.fade_in > FramePos::ZERO && local < self.fade_in {
+            gain *= local.as_f32() / self.fade_in.as_f32();
         }
 
         // Fade out
-        if self.fade_out > 0 {
+        if self.fade_out > FramePos::ZERO {
             let remaining = self.duration - local;
             if remaining < self.fade_out {
-                gain *= remaining as f32 / self.fade_out as f32;
+                gain *= remaining.as_f32() / self.fade_out.as_f32();
             }
         }
 
@@ -107,7 +109,7 @@ impl Region {
 
     /// Split this region at the given timeline frame, returning (left, right).
     /// Returns None if the split point is outside the region.
-    pub fn split_at(&self, frame: u64) -> Option<(Region, Region)> {
+    pub fn split_at(&self, frame: FramePos) -> Option<(Region, Region)> {
         if frame <= self.timeline_pos || frame >= self.end_pos() {
             return None;
         }
@@ -124,7 +126,7 @@ impl Region {
             duration: left_duration,
             gain: self.gain,
             fade_in: self.fade_in.min(left_duration),
-            fade_out: 0,
+            fade_out: FramePos::ZERO,
             muted: self.muted,
         };
 
@@ -135,7 +137,7 @@ impl Region {
             source_offset: right_source_offset,
             duration: right_duration,
             gain: self.gain,
-            fade_in: 0,
+            fade_in: FramePos::ZERO,
             fade_out: self.fade_out.min(right_duration),
             muted: self.muted,
         };
@@ -144,7 +146,7 @@ impl Region {
     }
 
     /// Trim the start of the region by moving it forward.
-    pub fn trim_start(&mut self, new_start: u64) {
+    pub fn trim_start(&mut self, new_start: FramePos) {
         if new_start > self.timeline_pos && new_start < self.end_pos() {
             let delta = new_start - self.timeline_pos;
             self.source_offset += delta;
@@ -154,7 +156,7 @@ impl Region {
     }
 
     /// Trim the end of the region.
-    pub fn trim_end(&mut self, new_end: u64) {
+    pub fn trim_end(&mut self, new_end: FramePos) {
         if new_end > self.timeline_pos && new_end < self.end_pos() {
             self.duration = new_end - self.timeline_pos;
         }
@@ -167,58 +169,58 @@ mod tests {
 
     #[test]
     fn test_region_contains() {
-        let r = Region::new("file1".into(), 100, 0, 500);
-        assert!(!r.contains_frame(99));
-        assert!(r.contains_frame(100));
-        assert!(r.contains_frame(599));
-        assert!(!r.contains_frame(600));
+        let r = Region::new("file1".into(), FramePos(100), FramePos(0), FramePos(500));
+        assert!(!r.contains_frame(FramePos(99)));
+        assert!(r.contains_frame(FramePos(100)));
+        assert!(r.contains_frame(FramePos(599)));
+        assert!(!r.contains_frame(FramePos(600)));
     }
 
     #[test]
     fn test_region_source_frame() {
-        let r = Region::new("file1".into(), 100, 50, 500);
-        assert_eq!(r.source_frame_at(100), Some(50));
-        assert_eq!(r.source_frame_at(200), Some(150));
-        assert_eq!(r.source_frame_at(50), None);
+        let r = Region::new("file1".into(), FramePos(100), FramePos(50), FramePos(500));
+        assert_eq!(r.source_frame_at(FramePos(100)), Some(FramePos(50)));
+        assert_eq!(r.source_frame_at(FramePos(200)), Some(FramePos(150)));
+        assert_eq!(r.source_frame_at(FramePos(50)), None);
     }
 
     #[test]
     fn test_region_split() {
-        let r = Region::new("file1".into(), 100, 0, 500);
-        let (left, right) = r.split_at(300).unwrap();
+        let r = Region::new("file1".into(), FramePos(100), FramePos(0), FramePos(500));
+        let (left, right) = r.split_at(FramePos(300)).unwrap();
 
-        assert_eq!(left.timeline_pos, 100);
-        assert_eq!(left.duration, 200);
-        assert_eq!(left.source_offset, 0);
+        assert_eq!(left.timeline_pos, FramePos(100));
+        assert_eq!(left.duration, FramePos(200));
+        assert_eq!(left.source_offset, FramePos(0));
 
-        assert_eq!(right.timeline_pos, 300);
-        assert_eq!(right.duration, 300);
-        assert_eq!(right.source_offset, 200);
+        assert_eq!(right.timeline_pos, FramePos(300));
+        assert_eq!(right.duration, FramePos(300));
+        assert_eq!(right.source_offset, FramePos(200));
     }
 
     #[test]
     fn test_region_trim() {
-        let mut r = Region::new("file1".into(), 100, 0, 500);
+        let mut r = Region::new("file1".into(), FramePos(100), FramePos(0), FramePos(500));
 
-        r.trim_start(200);
-        assert_eq!(r.timeline_pos, 200);
-        assert_eq!(r.source_offset, 100);
-        assert_eq!(r.duration, 400);
+        r.trim_start(FramePos(200));
+        assert_eq!(r.timeline_pos, FramePos(200));
+        assert_eq!(r.source_offset, FramePos(100));
+        assert_eq!(r.duration, FramePos(400));
 
-        r.trim_end(500);
-        assert_eq!(r.duration, 300);
+        r.trim_end(FramePos(500));
+        assert_eq!(r.duration, FramePos(300));
     }
 
     #[test]
     fn test_fade_gain() {
-        let mut r = Region::new("file1".into(), 0, 0, 1000);
-        r.fade_in = 100;
-        r.fade_out = 100;
+        let mut r = Region::new("file1".into(), FramePos(0), FramePos(0), FramePos(1000));
+        r.fade_in = FramePos(100);
+        r.fade_out = FramePos(100);
 
-        assert!((r.fade_gain_at(0) - 0.0).abs() < 1e-6);
-        assert!((r.fade_gain_at(50) - 0.5).abs() < 1e-6);
-        assert!((r.fade_gain_at(100) - 1.0).abs() < 1e-6);
-        assert!((r.fade_gain_at(500) - 1.0).abs() < 1e-6);
-        assert!((r.fade_gain_at(950) - 0.5).abs() < 1e-6);
+        assert!((r.fade_gain_at(FramePos(0)) - 0.0).abs() < 1e-6);
+        assert!((r.fade_gain_at(FramePos(50)) - 0.5).abs() < 1e-6);
+        assert!((r.fade_gain_at(FramePos(100)) - 1.0).abs() < 1e-6);
+        assert!((r.fade_gain_at(FramePos(500)) - 1.0).abs() < 1e-6);
+        assert!((r.fade_gain_at(FramePos(950)) - 0.5).abs() < 1e-6);
     }
 }

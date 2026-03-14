@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::error::PluginError;
 use crate::format::PluginFormat;
 use crate::instance::{PluginInfo, PluginInstance};
 use crate::scanner::{PluginScanner, ScannedPlugin};
@@ -57,7 +58,7 @@ impl PluginHost {
         plugin: &ScannedPlugin,
         sample_rate: f64,
         max_buffer_size: u32,
-    ) -> Result<&dyn PluginInstance, String> {
+    ) -> Result<&dyn PluginInstance, PluginError> {
         let instance = load_plugin(plugin, sample_rate, max_buffer_size)?;
         self.instances.insert(slot.to_string(), instance);
         Ok(self.instances.get(slot).unwrap().as_ref())
@@ -126,7 +127,7 @@ fn load_plugin(
     plugin: &ScannedPlugin,
     sample_rate: f64,
     max_buffer_size: u32,
-) -> Result<Box<dyn PluginInstance>, String> {
+) -> Result<Box<dyn PluginInstance>, PluginError> {
     match plugin.format {
         PluginFormat::Clap => load_clap_plugin(&plugin.path, sample_rate, max_buffer_size),
         PluginFormat::Vst3 => load_vst3_plugin(&plugin.path, sample_rate, max_buffer_size),
@@ -138,14 +139,23 @@ fn load_clap_plugin(
     path: &Path,
     sample_rate: f64,
     max_buffer_size: u32,
-) -> Result<Box<dyn PluginInstance>, String> {
+) -> Result<Box<dyn PluginInstance>, PluginError> {
     // Load the shared library
-    let lib = unsafe { libloading::Library::new(path) }
-        .map_err(|e| format!("failed to load CLAP plugin {}: {e}", path.display()))?;
+    let lib = unsafe { libloading::Library::new(path) }.map_err(|e| {
+        PluginError::LoadError(format!(
+            "failed to load CLAP plugin {}: {e}",
+            path.display()
+        ))
+    })?;
 
     // CLAP entry point: clap_entry
-    let _entry: libloading::Symbol<*const ()> = unsafe { lib.get(b"clap_entry\0") }
-        .map_err(|e| format!("CLAP entry point not found in {}: {e}", path.display()))?;
+    let _entry: libloading::Symbol<*const ()> =
+        unsafe { lib.get(b"clap_entry\0") }.map_err(|e| {
+            PluginError::LoadError(format!(
+                "CLAP entry point not found in {}: {e}",
+                path.display()
+            ))
+        })?;
 
     // Create a stub instance that holds the library handle
     // Full CLAP host protocol implementation would go here
@@ -177,16 +187,25 @@ fn load_vst3_plugin(
     path: &Path,
     sample_rate: f64,
     max_buffer_size: u32,
-) -> Result<Box<dyn PluginInstance>, String> {
+) -> Result<Box<dyn PluginInstance>, PluginError> {
     // VST3 bundles: find the actual shared library inside the bundle
     let lib_path = find_vst3_binary(path)?;
 
-    let lib = unsafe { libloading::Library::new(&lib_path) }
-        .map_err(|e| format!("failed to load VST3 plugin {}: {e}", lib_path.display()))?;
+    let lib = unsafe { libloading::Library::new(&lib_path) }.map_err(|e| {
+        PluginError::LoadError(format!(
+            "failed to load VST3 plugin {}: {e}",
+            lib_path.display()
+        ))
+    })?;
 
     // VST3 entry point: GetPluginFactory
     let _factory: libloading::Symbol<*const ()> = unsafe { lib.get(b"GetPluginFactory\0") }
-        .map_err(|e| format!("VST3 entry point not found in {}: {e}", lib_path.display()))?;
+        .map_err(|e| {
+            PluginError::LoadError(format!(
+                "VST3 entry point not found in {}: {e}",
+                lib_path.display()
+            ))
+        })?;
 
     let info = PluginInfo {
         id: format!("vst3:{}", path.display()),
@@ -216,17 +235,21 @@ fn load_native_plugin(
     path: &Path,
     sample_rate: f64,
     max_buffer_size: u32,
-) -> Result<Box<dyn PluginInstance>, String> {
-    let lib = unsafe { libloading::Library::new(path) }
-        .map_err(|e| format!("failed to load native plugin {}: {e}", path.display()))?;
+) -> Result<Box<dyn PluginInstance>, PluginError> {
+    let lib = unsafe { libloading::Library::new(path) }.map_err(|e| {
+        PluginError::LoadError(format!(
+            "failed to load native plugin {}: {e}",
+            path.display()
+        ))
+    })?;
 
     // Native entry point: shruti_plugin_create
     let _create: libloading::Symbol<*const ()> = unsafe { lib.get(b"shruti_plugin_create\0") }
         .map_err(|e| {
-            format!(
+            PluginError::LoadError(format!(
                 "native plugin entry point not found in {}: {e}",
                 path.display()
-            )
+            ))
         })?;
 
     let info = PluginInfo {
@@ -254,7 +277,7 @@ fn load_native_plugin(
 }
 
 /// Find the platform-specific binary inside a VST3 bundle directory.
-fn find_vst3_binary(bundle: &Path) -> Result<std::path::PathBuf, String> {
+fn find_vst3_binary(bundle: &Path) -> Result<std::path::PathBuf, PluginError> {
     #[cfg(target_os = "linux")]
     let arch_dir = if cfg!(target_arch = "x86_64") {
         "x86_64-linux"
@@ -297,7 +320,10 @@ fn find_vst3_binary(bundle: &Path) -> Result<std::path::PathBuf, String> {
     if binary.exists() {
         Ok(binary)
     } else {
-        Err(format!("VST3 binary not found at {}", binary.display()))
+        Err(PluginError::NotFound(format!(
+            "VST3 binary not found at {}",
+            binary.display()
+        )))
     }
 }
 
@@ -340,7 +366,7 @@ impl PluginInstance for LoadedPlugin {
         &self.info
     }
 
-    fn activate(&mut self, _sample_rate: f64, _max_buffer_size: u32) -> Result<(), String> {
+    fn activate(&mut self, _sample_rate: f64, _max_buffer_size: u32) -> Result<(), PluginError> {
         self.active = true;
         Ok(())
     }
@@ -462,7 +488,12 @@ mod tests {
     fn find_vst3_binary_missing() {
         let result = find_vst3_binary(Path::new("/tmp/nonexistent.vst3"));
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("VST3 binary not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("VST3 binary not found")
+        );
     }
 
     #[test]
@@ -482,7 +513,10 @@ mod tests {
     fn load_clap_nonexistent() {
         let result = load_clap_plugin(Path::new("/nonexistent.clap"), 48000.0, 256);
         match result {
-            Err(msg) => assert!(msg.contains("failed to load CLAP"), "got: {msg}"),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(msg.contains("failed to load CLAP"), "got: {msg}");
+            }
             Ok(_) => panic!("should have failed"),
         }
     }
@@ -497,7 +531,10 @@ mod tests {
     fn load_native_nonexistent() {
         let result = load_native_plugin(Path::new("/nonexistent.so"), 48000.0, 256);
         match result {
-            Err(msg) => assert!(msg.contains("failed to load native"), "got: {msg}"),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(msg.contains("failed to load native"), "got: {msg}");
+            }
             Ok(_) => panic!("should have failed"),
         }
     }

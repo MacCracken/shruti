@@ -341,12 +341,47 @@ impl SamplerVoice {
     }
 }
 
-// Parameter indices
-const PARAM_VOLUME: usize = 0;
-const PARAM_ATTACK: usize = 1;
-const PARAM_DECAY: usize = 2;
-const PARAM_SUSTAIN: usize = 3;
-const PARAM_RELEASE: usize = 4;
+use crate::instrument::ParamIndex;
+
+/// Type-safe parameter indices for [`Sampler`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(usize)]
+pub enum SamplerParam {
+    Volume = 0,
+    Attack = 1,
+    Decay = 2,
+    Sustain = 3,
+    Release = 4,
+}
+
+impl ParamIndex for SamplerParam {
+    fn index(self) -> usize {
+        self as usize
+    }
+    fn count() -> usize {
+        SamplerParam::Release as usize + 1
+    }
+}
+
+impl From<SamplerParam> for usize {
+    fn from(p: SamplerParam) -> usize {
+        p as usize
+    }
+}
+
+impl TryFrom<usize> for SamplerParam {
+    type Error = ();
+    fn try_from(v: usize) -> Result<Self, ()> {
+        match v {
+            0 => Ok(Self::Volume),
+            1 => Ok(Self::Attack),
+            2 => Ok(Self::Decay),
+            3 => Ok(Self::Sustain),
+            4 => Ok(Self::Release),
+            _ => Err(()),
+        }
+    }
+}
 
 const MAX_VOICES: usize = 16;
 
@@ -394,6 +429,16 @@ impl Sampler {
         }
     }
 
+    /// Get a parameter value using a type-safe [`SamplerParam`] key.
+    pub fn get_param(&self, param: SamplerParam) -> f32 {
+        self.params[param.index()].value
+    }
+
+    /// Set a parameter value using a type-safe [`SamplerParam`] key.
+    pub fn set_param(&mut self, param: SamplerParam, value: f32) {
+        self.params[param.index()].set(value);
+    }
+
     pub fn add_zone(&mut self, zone: SampleZone) {
         self.zones.push(zone);
     }
@@ -409,10 +454,10 @@ impl Sampler {
 
     fn current_adsr(&self) -> AdsrParams {
         AdsrParams {
-            attack: self.params[PARAM_ATTACK].value,
-            decay: self.params[PARAM_DECAY].value,
-            sustain: self.params[PARAM_SUSTAIN].value,
-            release: self.params[PARAM_RELEASE].value,
+            attack: self.params[SamplerParam::Attack.index()].value,
+            decay: self.params[SamplerParam::Decay.index()].value,
+            sustain: self.params[SamplerParam::Sustain.index()].value,
+            release: self.params[SamplerParam::Release.index()].value,
         }
     }
 
@@ -430,7 +475,7 @@ impl Sampler {
     fn render_voices(&mut self, note_events: &[NoteEvent], output: &mut AudioBuffer) {
         let frames = output.frames() as usize;
         let channels = output.channels();
-        let volume = self.params[PARAM_VOLUME].value;
+        let volume = self.params[SamplerParam::Volume.index()].value;
 
         for event in note_events {
             self.note_on(event.note, event.velocity, event.channel);
@@ -1451,5 +1496,52 @@ mod tests {
         let zone = SampleZone::new("Test", 60, vec![0.5; 10000], 44100);
         let zones = zone.slice_to_zones(60);
         assert!(zones.is_empty());
+    }
+
+    // ── SamplerParam enum tests ────────────────────────────────────────
+
+    #[test]
+    fn sampler_param_round_trip() {
+        for i in 0..SamplerParam::count() {
+            let param = SamplerParam::try_from(i).expect("valid index");
+            assert_eq!(usize::from(param), i);
+            assert_eq!(param.index(), i);
+        }
+    }
+
+    #[test]
+    fn sampler_param_count_matches_params_vec() {
+        let sampler = Sampler::new(44100.0);
+        assert_eq!(
+            SamplerParam::count(),
+            sampler.params().len(),
+            "SamplerParam::count() must match actual params length"
+        );
+    }
+
+    #[test]
+    fn sampler_param_all_indices_distinct() {
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..SamplerParam::count() {
+            let param = SamplerParam::try_from(i).unwrap();
+            assert!(
+                seen.insert(param.index()),
+                "duplicate index {}",
+                param.index()
+            );
+        }
+    }
+
+    #[test]
+    fn sampler_param_out_of_range_returns_err() {
+        assert!(SamplerParam::try_from(SamplerParam::count()).is_err());
+        assert!(SamplerParam::try_from(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn sampler_get_set_param_typed() {
+        let mut sampler = Sampler::new(44100.0);
+        sampler.set_param(SamplerParam::Volume, 0.55);
+        assert!((sampler.get_param(SamplerParam::Volume) - 0.55).abs() < 1e-6);
     }
 }

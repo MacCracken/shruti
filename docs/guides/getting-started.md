@@ -2,20 +2,20 @@
 
 ## Prerequisites
 
-- **Rust 1.75+** — Install via [rustup](https://rustup.rs)
+- **Rust 1.85+** — Install via [rustup](https://rustup.rs)
 - **Platform audio libraries** — See below
 - **Git** — For cloning the repo
 
 ### Linux (AGNOS / Arch)
 
 ```sh
-sudo pacman -S alsa-lib pipewire-audio jack2
+sudo pacman -S alsa-lib pipewire-audio
 ```
 
 ### Linux (Debian / Ubuntu)
 
 ```sh
-sudo apt install libasound2-dev libpipewire-0.3-dev libjack-jackd2-dev
+sudo apt install libasound2-dev
 ```
 
 ### macOS
@@ -39,25 +39,42 @@ cargo build --release
 ## Running
 
 ```sh
-# Run the DAW
+# Launch the DAW
 cargo run --release
 
-# Run tests
-cargo test
+# Headless playback
+cargo run --release --bin shruti-play -- file.wav
 
-# Run with verbose logging
-RUST_LOG=debug cargo run --release
+# HTTP server for agent integration
+cargo run --release -- serve --port 8050
+
+# Run tests
+cargo test --workspace
+
+# Lint
+cargo clippy --workspace
 ```
 
-## Project Layout
+## Crate Layout
 
-| Path | Description |
-|------|-------------|
-| `crates/shruti-engine/` | Real-time audio engine |
-| `crates/shruti-dsp/` | DSP primitives and effects |
-| `crates/shruti-plugin/` | Plugin hosting (VST3, CLAP) |
-| `crates/shruti-ui/` | GPU-accelerated UI |
-| `crates/shruti-session/` | Project and session management |
-| `crates/shruti-ai/` | AI agent integration (AGNOS) |
-| `src/` | Main application entry point |
-| `docs/` | Documentation |
+| Crate | Description |
+|-------|-------------|
+| `shruti-engine` | Real-time audio engine, cpal backend, lock-free graph, MIDI I/O |
+| `shruti-dsp` | Audio buffers, format I/O (WAV/FLAC/AIFF/OGG), DSP effects, metering |
+| `shruti-session` | Session, tracks, regions, timeline, transport, undo/redo, preferences |
+| `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust |
+| `shruti-instruments` | Built-in instruments: subtractive synth, drum machine, sampler |
+| `shruti-ui` | GPU-accelerated DAW UI (egui + eframe) |
+| `shruti-ai` | Agent API, MCP tools, analysis, voice control |
+| `src/` | Main binary entry point and CLI |
+| `tests/` | Cross-crate integration tests |
+| `docs/` | Architecture, guides, decisions, development docs |
+
+## Documentation
+
+| Path | Contents |
+|------|----------|
+| `docs/architecture/` | System design: [overview](../architecture/overview.md), [audio engine](../architecture/audio-engine.md) |
+| `docs/decisions/` | Architecture Decision Records (ADRs) |
+| `docs/development/` | [Contributing](../development/contributing.md), [roadmap](../development/roadmap.md) |
+| `docs/guides/` | This getting started guide |

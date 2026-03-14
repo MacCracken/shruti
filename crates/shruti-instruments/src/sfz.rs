@@ -7,6 +7,7 @@
 
 #![deny(unsafe_code)]
 
+use crate::error::InstrumentError;
 use crate::sampler::LoopMode;
 
 /// A parsed SFZ `<region>` with all supported opcodes.
@@ -341,7 +342,7 @@ fn parse_opcodes(chunk: &str) -> Vec<(&str, &str)> {
 /// `<group>` opcodes serve as defaults for all subsequent `<region>`
 /// blocks until the next `<group>` (or `<global>`).  `<global>` opcodes
 /// serve as defaults for every region in the file.
-pub fn parse_sfz(content: &str) -> Result<Vec<SfzRegion>, String> {
+pub fn parse_sfz(content: &str) -> Result<Vec<SfzRegion>, InstrumentError> {
     let mut global = OpcodeSet::default();
     let mut group = OpcodeSet::default();
     let mut current_region: Option<OpcodeSet> = None;
