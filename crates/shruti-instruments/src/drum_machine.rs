@@ -1379,4 +1379,99 @@ mod tests {
         dm.set_param(DrumMachineParam::Volume, 0.6);
         assert!((dm.get_param(DrumMachineParam::Volume) - 0.6).abs() < 1e-6);
     }
+
+    #[test]
+    fn drum_machine_set_sample_rate() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![1.0; 100], 44100);
+        dm.set_sample_rate(96000.0);
+        // Should not panic
+        dm.note_on(36, 100, 0);
+        let mut buf = AudioBuffer::new(2, 64);
+        dm.process(&[], &[], &mut buf);
+    }
+
+    #[test]
+    fn drum_machine_info() {
+        let dm = DrumMachine::new(44100.0);
+        let info = dm.info();
+        assert_eq!(info.name, "Drum Machine");
+        assert_eq!(info.category, "Drums");
+    }
+
+    #[test]
+    fn drum_machine_note_off_oneshot_continues() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![0.5; 100], 44100);
+        dm.pads[0].play_mode = PlayMode::OneShot;
+        dm.note_on(36, 100, 0);
+        assert!(dm.pads[0].is_playing());
+        dm.note_off(36, 0);
+        // OneShot ignores note_off
+        assert!(dm.pads[0].is_playing());
+    }
+
+    #[test]
+    fn drum_machine_note_off_looped_stops() {
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(vec![0.5; 100], 44100);
+        dm.pads[0].play_mode = PlayMode::Looped;
+        dm.note_on(36, 100, 0);
+        assert!(dm.pads[0].is_playing());
+        dm.note_off(36, 0);
+        assert!(!dm.pads[0].is_playing());
+    }
+
+    #[test]
+    fn drum_machine_out_of_range_note() {
+        let mut dm = DrumMachine::new(44100.0);
+        // Note 36+16 = 52 is outside NUM_PADS range
+        dm.note_on(52, 100, 0);
+        assert_eq!(dm.active_voices(), 0);
+    }
+
+    #[test]
+    fn drum_machine_params_length() {
+        let dm = DrumMachine::new(44100.0);
+        assert!(!dm.params().is_empty());
+    }
+
+    #[test]
+    fn pad_decay_envelope_attenuates() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![1.0; 100], 44100);
+        pad.decay = 1.0; // high decay = fast attenuation
+        pad.trigger(127);
+
+        let (first_l, _) = pad.tick();
+        // Tick several times
+        for _ in 0..50 {
+            pad.tick();
+        }
+        let (late_l, _) = pad.tick();
+        // With decay, later samples should be quieter
+        assert!(
+            late_l.abs() < first_l.abs(),
+            "decay should attenuate: first={first_l}, late={late_l}"
+        );
+    }
+
+    #[test]
+    fn drum_machine_process_with_control_changes() {
+        use shruti_session::midi::ControlChange;
+        let mut dm = DrumMachine::new(44100.0);
+        dm.pads[0].load_sample(make_sine_sample(1000), 44100);
+
+        let cc = vec![ControlChange {
+            position: shruti_session::FramePos(0),
+            controller: 1,
+            value: 64,
+            channel: 0,
+        }];
+
+        dm.note_on(36, 100, 0);
+        let mut buf = AudioBuffer::new(2, 64);
+        dm.process(&[], &cc, &mut buf);
+        // Should not panic; CC handling is a no-op but shouldn't crash
+    }
 }

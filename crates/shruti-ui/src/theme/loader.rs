@@ -195,4 +195,70 @@ mod tests {
         std::fs::remove_file(&path).ok();
         std::fs::remove_dir(&dir).ok();
     }
+
+    // ---- serialization roundtrip ----
+
+    #[test]
+    fn json_roundtrip_preserves_all_fields() {
+        let original = Theme::default();
+        let json = serde_json::to_string(&original).expect("serialize");
+        let restored: Theme = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.name, original.name);
+        assert_eq!(restored.colors.bg_primary, original.colors.bg_primary);
+        assert_eq!(restored.colors.bg_secondary, original.colors.bg_secondary);
+        assert_eq!(restored.colors.bg_tertiary, original.colors.bg_tertiary);
+        assert_eq!(restored.colors.text_primary, original.colors.text_primary);
+        assert_eq!(
+            restored.colors.text_secondary,
+            original.colors.text_secondary
+        );
+        assert_eq!(restored.colors.accent, original.colors.accent);
+        assert_eq!(restored.colors.surface, original.colors.surface);
+        assert_eq!(restored.colors.separator, original.colors.separator);
+        assert_eq!(restored.colors.grid, original.colors.grid);
+        assert_eq!(restored.colors.playhead, original.colors.playhead);
+        assert_eq!(restored.colors.waveform, original.colors.waveform);
+    }
+
+    #[test]
+    fn validate_custom_theme_valid() {
+        let theme = Theme {
+            name: "Custom Theme".into(),
+            ..Theme::default()
+        };
+        assert!(theme.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_non_zero_alpha() {
+        let mut theme = Theme::default();
+        theme.colors.bg_primary = [0, 0, 0, 1]; // minimal alpha but non-zero
+        assert!(theme.validate().is_ok());
+    }
+
+    #[test]
+    fn save_creates_valid_json() {
+        let dir = std::env::temp_dir().join("shruti_test_save_json");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("save_test.json");
+
+        let theme = Theme::default();
+        theme.save(&path).expect("save should succeed");
+
+        let content = std::fs::read_to_string(&path).expect("read saved file");
+        let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+        assert_eq!(parsed["name"], "Shruti Dark");
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn default_theme_colors_have_full_alpha() {
+        let theme = Theme::default();
+        // All critical colors should have alpha = 255
+        assert_eq!(theme.colors.bg_primary[3], 255);
+        assert_eq!(theme.colors.text_primary[3], 255);
+        assert_eq!(theme.colors.accent[3], 255);
+    }
 }

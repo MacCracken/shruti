@@ -128,4 +128,79 @@ mod tests {
         assert_eq!(restored.params[&1], 0.8);
         assert_eq!(restored.chunk, vec![0xDE, 0xAD, 0xBE, 0xEF]);
     }
+
+    #[test]
+    fn test_new_defaults() {
+        let state = PluginState::new("test.plugin".into());
+        assert_eq!(state.plugin_id, "test.plugin");
+        assert!(state.params.is_empty());
+        assert!(state.chunk.is_empty());
+    }
+
+    #[test]
+    fn test_serialization_empty_chunk() {
+        let state = PluginState::new("empty.chunk".into());
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: PluginState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.plugin_id, "empty.chunk");
+        assert!(restored.chunk.is_empty());
+        assert!(restored.params.is_empty());
+    }
+
+    #[test]
+    fn test_validate_exactly_three_bytes() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0x01, 0x02, 0x03]; // 3 bytes, below minimum of 4
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("too small"));
+    }
+
+    #[test]
+    fn test_validate_exactly_four_bytes() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0x01, 0x02, 0x03, 0x04]; // exactly 4 bytes, valid
+        assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_one_byte() {
+        let mut state = PluginState::new("test".into());
+        state.chunk = vec![0xFF];
+        assert!(state.validate().is_err());
+    }
+
+    #[test]
+    fn test_serialization_roundtrip_many_params() {
+        let mut state = PluginState::new("multi.params".into());
+        for i in 0..50 {
+            state.params.insert(i, i as f64 * 0.01);
+        }
+        state.chunk = vec![0xCA, 0xFE, 0xBA, 0xBE, 0x00];
+
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: PluginState = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.params.len(), 50);
+        assert!((restored.params[&25] - 0.25).abs() < 1e-10);
+        assert_eq!(restored.chunk, vec![0xCA, 0xFE, 0xBA, 0xBE, 0x00]);
+    }
+
+    #[test]
+    fn test_clone() {
+        let mut state = PluginState::new("clone.test".into());
+        state.params.insert(0, 1.0);
+        state.chunk = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+        let cloned = state.clone();
+        assert_eq!(cloned.plugin_id, state.plugin_id);
+        assert_eq!(cloned.params, state.params);
+        assert_eq!(cloned.chunk, state.chunk);
+    }
+
+    #[test]
+    fn test_debug_impl() {
+        let state = PluginState::new("debug.test".into());
+        let debug = format!("{state:?}");
+        assert!(debug.contains("debug.test"));
+    }
 }

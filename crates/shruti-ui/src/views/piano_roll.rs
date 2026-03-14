@@ -532,4 +532,113 @@ mod tests {
         // Monotonically increasing.
         assert!(velocity_alpha(50) < velocity_alpha(100));
     }
+
+    // ---- extended note_name coverage ----
+
+    #[test]
+    fn note_name_all_twelve_in_octave_4() {
+        let expected = [
+            "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4",
+        ];
+        for (i, &name) in expected.iter().enumerate() {
+            assert_eq!(note_name(60 + i as u8), name);
+        }
+    }
+
+    #[test]
+    fn note_name_octave_minus_one() {
+        // Notes 0-11 are octave -1
+        assert_eq!(note_name(0), "C-1");
+        assert_eq!(note_name(11), "B-1");
+    }
+
+    #[test]
+    fn note_name_octave_boundaries() {
+        // Each C should increment octave
+        assert_eq!(note_name(12), "C0");
+        assert_eq!(note_name(24), "C1");
+        assert_eq!(note_name(36), "C2");
+        assert_eq!(note_name(48), "C3");
+        assert_eq!(note_name(60), "C4");
+        assert_eq!(note_name(72), "C5");
+        assert_eq!(note_name(84), "C6");
+        assert_eq!(note_name(96), "C7");
+        assert_eq!(note_name(108), "C8");
+        assert_eq!(note_name(120), "C9");
+    }
+
+    // ---- extended drum_name coverage ----
+
+    #[test]
+    fn drum_name_all_gm() {
+        let expected = [
+            (36, "Kick"),
+            (37, "Side Stick"),
+            (38, "Snare"),
+            (39, "Clap"),
+            (40, "E Snare"),
+            (41, "Low Tom"),
+            (42, "Closed HH"),
+            (43, "Low Tom 2"),
+            (44, "Pedal HH"),
+            (45, "Mid Tom"),
+            (46, "Open HH"),
+            (47, "Mid Tom 2"),
+            (48, "Hi Tom"),
+            (49, "Crash 1"),
+            (50, "Hi Tom 2"),
+            (51, "Ride"),
+        ];
+        for (note, name) in expected {
+            assert_eq!(drum_name(note), name, "drum_name({note}) should be {name}");
+        }
+    }
+
+    // ---- velocity_alpha boundary ----
+
+    #[test]
+    fn velocity_alpha_monotonic_full_range() {
+        let mut prev = velocity_alpha(0);
+        for v in 1..=127 {
+            let cur = velocity_alpha(v);
+            assert!(
+                cur >= prev,
+                "velocity_alpha should be monotonically non-decreasing: v={v}"
+            );
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn velocity_alpha_range_bounds() {
+        for v in 0..=127 {
+            let a = velocity_alpha(v);
+            assert!(a >= 0.3, "alpha should be >= 0.3 for v={v}");
+            assert!(a <= 1.0, "alpha should be <= 1.0 for v={v}");
+        }
+    }
+
+    // ---- beat_grid_x with negative scroll ----
+
+    #[test]
+    fn beat_grid_x_large_frame() {
+        use shruti_session::FramePos;
+        // Large frame value, ensure no overflow issues
+        let x = beat_grid_x(FramePos(10_000_000), 0.001, 0.0);
+        assert!((x - 10_000.0).abs() < 0.1);
+    }
+
+    // ---- note_row_y ordering ----
+
+    #[test]
+    fn note_row_y_decreasing_order() {
+        // Higher MIDI notes should have lower Y values (closer to top)
+        for note in 1..128u8 {
+            assert!(
+                note_row_y(note) < note_row_y(note - 1),
+                "note_row_y({note}) should be < note_row_y({})",
+                note - 1
+            );
+        }
+    }
 }

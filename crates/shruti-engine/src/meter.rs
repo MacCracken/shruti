@@ -266,4 +266,78 @@ mod tests {
 
         handle.join().unwrap();
     }
+
+    #[test]
+    fn test_atomic_stereo_level_default_trait() {
+        let level = AtomicStereoLevel::default();
+        assert_eq!(level.load(), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_meter_levels_set_active_to_zero() {
+        let meters = MeterLevels::new(5);
+        meters.store(0, 0.5, 0.5);
+        meters.set_active(0);
+        assert!(meters.is_empty());
+        assert_eq!(meters.len(), 0);
+        let all = meters.read_all();
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn test_meter_levels_store_at_last_index() {
+        let meters = MeterLevels::new(4);
+        // Store at the boundary index (capacity - 1)
+        meters.store(3, 0.9, 0.8);
+        assert_eq!(meters.load(3), [0.9, 0.8]);
+        // One past boundary is out of bounds
+        meters.store(4, 1.0, 1.0);
+        assert_eq!(meters.load(4), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_meter_levels_read_all_after_resize() {
+        let meters = MeterLevels::new(4);
+        meters.store(0, 0.1, 0.2);
+        meters.store(1, 0.3, 0.4);
+        meters.store(2, 0.5, 0.6);
+        meters.store(3, 0.7, 0.8);
+
+        meters.set_active(2);
+        let all = meters.read_all();
+        assert_eq!(all.len(), 2);
+        assert!((all[0][0] - 0.1).abs() < 1e-7);
+        assert!((all[1][0] - 0.3).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_meter_levels_store_in_deactivated_range() {
+        let meters = MeterLevels::new(4);
+        meters.set_active(2);
+        // Store in slot 3 which is deactivated but still within capacity
+        meters.store(3, 0.9, 0.9);
+        // The value is stored (capacity allows it) but read_all won't include it
+        assert_eq!(meters.load(3), [0.9, 0.9]);
+        let all = meters.read_all();
+        assert_eq!(all.len(), 2); // only active slots
+    }
+
+    #[test]
+    fn test_meter_levels_set_active_grow_back() {
+        let meters = MeterLevels::new(4);
+        meters.set_active(1);
+        assert_eq!(meters.len(), 1);
+        meters.set_active(4);
+        assert_eq!(meters.len(), 4);
+    }
+
+    #[test]
+    fn test_shared_meter_levels_arc_count() {
+        let shared = shared_meter_levels(3);
+        assert_eq!(Arc::strong_count(&shared), 1);
+        let clone = Arc::clone(&shared);
+        assert_eq!(Arc::strong_count(&shared), 2);
+        drop(clone);
+        assert_eq!(Arc::strong_count(&shared), 1);
+    }
 }

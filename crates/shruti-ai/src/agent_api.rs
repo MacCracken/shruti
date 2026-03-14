@@ -1540,4 +1540,94 @@ mod tests {
         assert!(!r.success);
         assert_eq!(r.message, "failed to save session");
     }
+
+    // --- Path traversal validation ---
+
+    #[test]
+    fn test_validate_path_rejects_parent_dir() {
+        let r = AgentApi::validate_path("/tmp/../etc/passwd");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_validate_path_allows_normal_path() {
+        let r = AgentApi::validate_path("/tmp/my_session.shruti");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_open_session_rejects_path_traversal() {
+        let mut api = AgentApi::new();
+        let r = api.open_session("/tmp/../etc/passwd");
+        assert!(!r.success);
+        assert!(r.message.contains("path traversal"));
+    }
+
+    #[test]
+    fn test_save_session_rejects_path_traversal() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        let r = api.save_session("/tmp/../etc/malicious.shruti");
+        assert!(!r.success);
+        assert!(r.message.contains("path traversal"));
+    }
+
+    #[test]
+    fn test_export_wav_rejects_path_traversal() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        let r = api.export_wav("/tmp/../etc/malicious.wav");
+        assert!(!r.success);
+        assert!(r.message.contains("path traversal"));
+    }
+
+    #[test]
+    fn test_export_audio_rejects_path_traversal() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        let r = api.export_audio("/tmp/../etc/malicious.wav", "wav", "16");
+        assert!(!r.success);
+        assert!(r.message.contains("path traversal"));
+    }
+
+    #[test]
+    fn test_add_region_rejects_path_traversal() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        api.add_track("Drums", "audio");
+        let r = api.add_region("Drums", "/tmp/../etc/audio.wav", 0);
+        assert!(!r.success);
+        assert!(r.message.contains("path traversal"));
+    }
+
+    #[test]
+    fn test_analyze_spectrum_invalid_fft_size() {
+        let api = api_with_audio_track();
+        let r = api.analyze_spectrum("Drums", 1000); // not power of 2
+        assert!(!r.success);
+        assert!(r.message.contains("FFT size"));
+    }
+
+    #[test]
+    fn test_export_audio_empty_session_flac() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        let r = api.export_audio("/tmp/test.flac", "flac", "16");
+        assert!(!r.success);
+        assert_eq!(r.message, "session is empty");
+    }
+
+    #[test]
+    fn test_api_result_serialization() {
+        let r = ApiResult::ok_with_data("test", serde_json::json!({"key": "val"}));
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("test"));
+        assert!(json.contains("key"));
+
+        let r2 = ApiResult::err("bad");
+        let json2 = serde_json::to_string(&r2).unwrap();
+        assert!(json2.contains("bad"));
+        // data field should be absent (skip_serializing_if)
+        assert!(!json2.contains("data"));
+    }
 }

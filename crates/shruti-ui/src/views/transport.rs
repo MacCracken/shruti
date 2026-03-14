@@ -4,6 +4,38 @@ use crate::state::UiState;
 use crate::theme::ThemeColors;
 use shruti_session::TransportState;
 
+/// Format frame position as (hours, minutes, seconds).
+pub(crate) fn format_time(position_frames: u64, sample_rate: u32) -> (u32, u32, f64) {
+    if sample_rate == 0 {
+        return (0, 0, 0.0);
+    }
+    let total_secs = position_frames as f64 / sample_rate as f64;
+    let hours = (total_secs / 3600.0) as u32;
+    let minutes = ((total_secs % 3600.0) / 60.0) as u32;
+    let seconds = total_secs % 60.0;
+    (hours, minutes, seconds)
+}
+
+/// Format frame position as (bar, beat, tick).
+///
+/// `time_sig_num` is the number of beats per bar (e.g. 4 for 4/4 time).
+pub(crate) fn format_bar_beat(
+    position_frames: u64,
+    sample_rate: u32,
+    bpm: f64,
+    time_sig_num: u8,
+) -> (u32, u32, u32) {
+    if sample_rate == 0 || bpm <= 0.0 || time_sig_num == 0 {
+        return (1, 1, 0);
+    }
+    let frames_per_beat = sample_rate as f64 * 60.0 / bpm;
+    let total_beats = position_frames as f64 / frames_per_beat;
+    let bar = (total_beats / time_sig_num as f64) as u32 + 1;
+    let beat = (total_beats % time_sig_num as f64) as u32 + 1;
+    let tick = ((total_beats.fract()) * 960.0) as u32;
+    (bar, beat, tick)
+}
+
 /// Draw the transport bar at the top of the window.
 pub fn transport_bar(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
     ui.horizontal(|ui| {
@@ -138,11 +170,7 @@ fn position_display(ui: &mut Ui, state: &UiState, colors: &ThemeColors) {
     let bpm = state.session.transport.bpm;
 
     // Time display (hh:mm:ss.ms)
-    let total_secs = pos.as_f64() / sr as f64;
-    let hours = (total_secs / 3600.0) as u32;
-    let minutes = ((total_secs % 3600.0) / 60.0) as u32;
-    let seconds = total_secs % 60.0;
-
+    let (hours, minutes, seconds) = format_time(pos.0, sr);
     let time_str = format!("{hours:02}:{minutes:02}:{seconds:06.3}");
 
     ui.label(
@@ -155,12 +183,8 @@ fn position_display(ui: &mut Ui, state: &UiState, colors: &ThemeColors) {
     ui.add_space(8.0);
 
     // Bar:Beat display
-    let frames_per_beat = (sr as f64 * 60.0) / bpm;
-    let total_beats = pos.as_f64() / frames_per_beat;
-    let bar = (total_beats / 4.0).floor() as u32 + 1;
-    let beat = (total_beats % 4.0).floor() as u32 + 1;
-    let tick = ((total_beats % 1.0) * 960.0) as u32;
-
+    let time_sig_num = state.session.transport.time_sig_num;
+    let (bar, beat, tick) = format_bar_beat(pos.0, sr, bpm, time_sig_num);
     let bar_str = format!("{bar:>3}.{beat}.{tick:03}");
 
     ui.label(
@@ -223,5 +247,149 @@ fn loop_toggle(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) {
         .clicked()
     {
         state.session.transport.loop_enabled = !state.session.transport.loop_enabled;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- format_time tests ----
+
+    #[test]
+    fn format_time_zero() {
+        let (h, m, s) = format_time(0, 48000);
+        assert_eq!(h, 0);
+        assert_eq!(m, 0);
+        assert!(s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn format_time_one_second() {
+        let (h, m, s) = format_time(48000, 48000);
+        assert_eq!(h, 0);
+        assert_eq!(m, 0);
+        assert!((s - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn format_time_one_minute() {
+        let (h, m, s) = format_time(48000 * 60, 48000);
+        assert_eq!(h, 0);
+        assert_eq!(m, 1);
+        assert!(s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn format_time_one_hour() {
+        let (h, m, s) = format_time(48000 * 3600, 48000);
+        assert_eq!(h, 1);
+        assert_eq!(m, 0);
+        assert!(s.abs() < 1e-9);
+    }
+
+    #[test]
+    fn format_time_complex() {
+        // 1 hour, 23 minutes, 45 seconds = 5025 seconds
+        let frames = 48000u64 * 5025;
+        let (h, m, s) = format_time(frames, 48000);
+        assert_eq!(h, 1);
+        assert_eq!(m, 23);
+        assert!((s - 45.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn format_time_44100_sample_rate() {
+        let (h, m, s) = format_time(44100, 44100);
+        assert_eq!(h, 0);
+        assert_eq!(m, 0);
+        assert!((s - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn format_time_zero_sample_rate() {
+        let (h, m, s) = format_time(48000, 0);
+        assert_eq!(h, 0);
+        assert_eq!(m, 0);
+        assert!(s.abs() < 1e-9);
+    }
+
+    // ---- format_bar_beat tests ----
+
+    #[test]
+    fn format_bar_beat_at_zero() {
+        let (bar, beat, tick) = format_bar_beat(0, 48000, 120.0, 4);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_one_beat() {
+        // 120 BPM, 48kHz => 24000 frames/beat
+        let (bar, beat, tick) = format_bar_beat(24000, 48000, 120.0, 4);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 2);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_one_bar() {
+        // 120 BPM, 4/4 time => 4 beats/bar => 96000 frames/bar
+        let (bar, beat, tick) = format_bar_beat(96000, 48000, 120.0, 4);
+        assert_eq!(bar, 2);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_three_four_time() {
+        // 120 BPM, 3/4 time => 3 beats/bar => 72000 frames/bar
+        let (bar, beat, tick) = format_bar_beat(72000, 48000, 120.0, 3);
+        assert_eq!(bar, 2);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_half_beat_tick() {
+        // Half a beat at 120 BPM = 12000 frames
+        let (bar, beat, tick) = format_bar_beat(12000, 48000, 120.0, 4);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 480); // half beat = 480 ticks
+    }
+
+    #[test]
+    fn format_bar_beat_60_bpm() {
+        // 60 BPM, 48kHz => 48000 frames/beat
+        let (bar, beat, tick) = format_bar_beat(48000, 48000, 60.0, 4);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 2);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_zero_bpm() {
+        let (bar, beat, tick) = format_bar_beat(48000, 48000, 0.0, 4);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_zero_sample_rate() {
+        let (bar, beat, tick) = format_bar_beat(48000, 0, 120.0, 4);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 0);
+    }
+
+    #[test]
+    fn format_bar_beat_zero_time_sig() {
+        let (bar, beat, tick) = format_bar_beat(48000, 48000, 120.0, 0);
+        assert_eq!(bar, 1);
+        assert_eq!(beat, 1);
+        assert_eq!(tick, 0);
     }
 }

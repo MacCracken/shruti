@@ -252,6 +252,7 @@ All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 
 | Pri | Item | Notes |
 |-----|------|-------|
+| M | Test coverage to 65%+ | Currently 64% (5409/8450); need ~83 more lines — target plugin (76%), engine (82%), AI (90%) gaps |
 | M | Shared test utilities crate | Deduplicate `generate_sine()`, `rms_of_buffer()` helpers |
 | M | Integration test crate | Cross-crate tests: synth→filter→delay→output pipeline |
 | M | Centralize magic numbers | Config module for hardcoded values (window size, max delay, frequency ranges) |
@@ -276,31 +277,30 @@ All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 
 ---
 
-## Test Coverage Roadmap (59% → 80%)
+## Test Coverage
 
-**Current:** 723 tests, 59.4% line coverage (2956/4973 lines, excluding vendor).
-**Tool:** `cargo tarpaulin` with `tarpaulin.toml` excluding `vendor/*`.
+**Current:** 1603 tests, 64% line coverage (5409/8450 lines, excluding vendor and binaries).
+**Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
+**CI threshold:** 50% (fails build if coverage drops below).
 
 ### Per-Crate Status
 
-| Crate | Tests | Coverage | Lines | Gap |
-|-------|-------|----------|-------|-----|
-| shruti-dsp | 168 | 91% | 595/654 | 59 lines — meter LUFS edge cases, delay stereo, limiter above-ceiling |
-| shruti-session | 137 | 95% | 663/699 | 36 lines — session.rs add_track variants, timeline bus overflow |
-| shruti-instruments | 120 | 88% | 654/746 | 92 lines — drum_machine looped playback, synth modulation paths, sampler loop modes |
-| shruti-engine | 55 | 77% | 208/271 | 63 lines — cpal_backend (needs mock), midi_io enumerate |
-| shruti-ai | 103 | 89% | 489/552 | 63 lines — voice.rs command parsing, agent_api error paths |
-| shruti-plugin | 19 | 55% | 119/215 | 96 lines — host.rs load/unload/save_state (needs mock PluginInstance) |
-| shruti-ui | 121 | 22% | 228/841 | **613 lines** — views, widgets, app.rs, engine.rs, style.rs |
-| **Total** | **723** | **59.4%** | **2956/4973** | **2017 lines to 100%** |
+| Crate | Coverage | Lines | Remaining gap |
+|-------|----------|-------|---------------|
+| shruti-dsp | 96.9% | 622/642 | 20 lines — meter LUFS edge cases, limiter |
+| shruti-session | 95.4% | 1088/1140 | 52 lines — store error paths, add_track variants |
+| shruti-instruments | 94.0% | 2014/2142 | 128 lines — drum looped playback, sampler loop modes |
+| shruti-ai | 90.6% | 671/741 | 70 lines — MCP dispatch, serve.rs |
+| shruti-engine | 82.5% | 288/349 | 61 lines — cpal_backend (needs mock), midi_io |
+| shruti-plugin | 76.3% | 235/308 | 73 lines — host.rs plugin loading (needs .so/.clap files) |
+| shruti-ui | 15.7% | 491/3128 | 2637 lines — mostly egui rendering (not unit-testable) |
 
-### Roadmap to 80% (need ~1022 more lines covered)
+### Path to 80%
 
-| Phase | Target | Lines | Focus | Strategy |
-|-------|--------|-------|-------|----------|
-| **T1: Low-hanging fruit** | 65% | +275 | shruti-instruments gaps (drum looped, synth mod paths, sampler loops), shruti-plugin mock PluginInstance, shruti-ai voice commands | Unit tests with existing test patterns |
-| **T2: Engine mocking** | 70% | +250 | cpal_backend mock (struct implementing AudioHost/AudioStream traits), midi_io with mock midir, engine.rs transport/callback logic | Create `MockBackend` implementing `AudioHost` for test-only use |
-| **T3: UI data logic** | 75% | +250 | app.rs action dispatch (extract pure functions from `handle_action`), state.rs transitions, theme/style.rs (test struct construction not rendering), shortcuts.rs | Extract testable logic from egui callbacks; test state machines |
-| **T4: UI widget math** | 80% | +250 | fader dB↔linear conversion, knob angle math, meter peak decay, timeline_ruler grid calculation, waveform zoom level selection | Test pure computation functions; skip egui `Ui` painting code |
+| Phase | Target | Focus | Strategy |
+|-------|--------|-------|----------|
+| Engine mocking | 70% | cpal_backend mock, midi_io mock, engine callback logic | `MockBackend` implementing `AudioHost` |
+| UI data logic | 75% | app.rs action dispatch, state transitions, theme construction | Extract pure functions from egui callbacks |
+| UI widget math | 80% | fader dB math, knob angles, meter decay, grid calculations | Test computation functions, skip painting code |
 
 *Last Updated: 2026-03-14*

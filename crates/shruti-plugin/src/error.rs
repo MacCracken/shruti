@@ -161,4 +161,36 @@ mod tests {
         assert!(debug.contains("NotFound"));
         assert!(debug.contains("test.clap"));
     }
+
+    #[test]
+    fn from_io_error_preserves_kind() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
+        let err: PluginError = io_err.into();
+        match &err {
+            PluginError::Io(inner) => {
+                assert_eq!(inner.kind(), std::io::ErrorKind::TimedOut);
+            }
+            _ => panic!("expected Io variant"),
+        }
+    }
+
+    #[test]
+    fn display_io_includes_inner_message() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broken");
+        let err = PluginError::Io(io_err);
+        let msg = err.to_string();
+        assert!(msg.contains("pipe broken"), "got: {msg}");
+    }
+
+    #[test]
+    fn from_string_empty() {
+        let err: PluginError = String::new().into();
+        assert!(matches!(err, PluginError::LoadError(ref s) if s.is_empty()));
+    }
+
+    #[test]
+    fn error_trait_is_implemented() {
+        fn assert_error<T: std::error::Error>() {}
+        assert_error::<PluginError>();
+    }
 }

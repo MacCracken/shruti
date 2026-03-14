@@ -159,4 +159,75 @@ mod tests {
 
         let _ = fs::remove_dir_all(&tmp);
     }
+
+    #[test]
+    fn test_session_open_nonexistent() {
+        let result = SessionStore::open(Path::new("/nonexistent/session.shruti"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_audio_dir() {
+        let tmp = std::env::temp_dir().join("shruti_test_audio_dir");
+        let _ = fs::remove_dir_all(&tmp);
+
+        let session = Session::new("Test", 48000, 256);
+        let store = SessionStore::create(&tmp, &session).unwrap();
+        assert_eq!(store.audio_dir(), tmp.join("audio"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_save_audio_pool() {
+        let tmp = std::env::temp_dir().join("shruti_test_audio_pool");
+        let _ = fs::remove_dir_all(&tmp);
+
+        let session = Session::new("Test", 48000, 256);
+        let store = SessionStore::create(&tmp, &session).unwrap();
+        let pool = crate::audio_pool::AudioPool::new();
+        store.save_audio_pool(&pool, 48000).unwrap();
+
+        let manifest_path = tmp.join("audio").join("manifest.json");
+        assert!(manifest_path.exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_session_overwrite_save() {
+        let tmp = std::env::temp_dir().join("shruti_test_overwrite");
+        let _ = fs::remove_dir_all(&tmp);
+
+        let mut session = Session::new("First", 48000, 256);
+        let store = SessionStore::create(&tmp, &session).unwrap();
+
+        session.name = "Second".to_string();
+        store.save(&session).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.name, "Second");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_session_with_all_track_types() {
+        let tmp = std::env::temp_dir().join("shruti_test_all_tracks");
+        let _ = fs::remove_dir_all(&tmp);
+
+        let mut session = Session::new("Full", 48000, 256);
+        session.add_audio_track("Audio");
+        session.add_midi_track("MIDI");
+        session.add_bus_track("FX Bus");
+        session.add_instrument_track("Synth", Some("SubtractiveSynth".to_string()));
+        session.add_drum_machine_track("Drums", Some("TR-808".to_string()));
+        session.add_sampler_track("Piano", None);
+
+        let store = SessionStore::create(&tmp, &session).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.track_count(), 7); // 6 tracks + master
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }

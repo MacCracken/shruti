@@ -137,4 +137,61 @@ mod tests {
         assert!(debug.contains("Backend"));
         assert!(debug.contains("test"));
     }
+
+    #[test]
+    fn from_io_error_preserves_kind() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::WouldBlock, "would block");
+        let err: EngineError = io_err.into();
+        match &err {
+            EngineError::Io(inner) => {
+                assert_eq!(inner.kind(), std::io::ErrorKind::WouldBlock);
+            }
+            _ => panic!("expected Io variant"),
+        }
+    }
+
+    #[test]
+    fn display_io_includes_inner_message() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file gone");
+        let err = EngineError::Io(io_err);
+        let msg = err.to_string();
+        assert!(msg.contains("file gone"), "got: {msg}");
+    }
+
+    #[test]
+    fn from_boxed_io_error() {
+        let io_err: Box<dyn std::error::Error> =
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, "io boxed"));
+        let err: EngineError = io_err.into();
+        assert!(matches!(err, EngineError::Backend(_)));
+        assert!(err.to_string().contains("io boxed"));
+    }
+
+    #[test]
+    fn error_trait_is_implemented() {
+        fn assert_error<T: std::error::Error>() {}
+        assert_error::<EngineError>();
+    }
+
+    #[test]
+    fn source_io_chain() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "inner cause");
+        let err = EngineError::Io(io_err);
+        let source = std::error::Error::source(&err).unwrap();
+        assert!(source.to_string().contains("inner cause"));
+    }
+
+    #[test]
+    fn debug_all_variants() {
+        let cases: Vec<EngineError> = vec![
+            EngineError::Backend("b".into()),
+            EngineError::Graph("g".into()),
+            EngineError::Recording("r".into()),
+            EngineError::Io(std::io::Error::other("i")),
+        ];
+        for err in &cases {
+            let debug = format!("{err:?}");
+            assert!(!debug.is_empty());
+        }
+    }
 }

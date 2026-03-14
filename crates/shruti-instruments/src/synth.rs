@@ -1390,6 +1390,70 @@ mod tests {
     }
 
     #[test]
+    fn synth_with_effect_chain_produces_output() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.params_mut()[SynthParam::Waveform.index()].set(1.0); // saw
+        // Add a distortion effect to the chain
+        use crate::effect_chain::{InstrumentEffect, InstrumentEffectType};
+        let mut dist = InstrumentEffect::new(InstrumentEffectType::Distortion, 48000.0);
+        dist.mix = 0.5;
+        synth.effect_chain.add(dist);
+
+        synth.note_on(69, 127, 0);
+        let mut buf = AudioBuffer::new(2, 1024);
+        synth.process(&[], &[], &mut buf);
+
+        let mut has_nonzero = false;
+        for i in 0..1024 {
+            if buf.get(i, 0).abs() > 0.001 {
+                has_nonzero = true;
+                break;
+            }
+        }
+        assert!(has_nonzero, "synth with effect chain should produce output");
+    }
+
+    #[test]
+    fn synth_process_with_note_events() {
+        use shruti_session::midi::NoteEvent;
+        let mut synth = SubtractiveSynth::new(48000.0);
+
+        let events = vec![NoteEvent {
+            position: shruti_session::FramePos(0),
+            duration: shruti_session::FramePos(10000),
+            note: 60,
+            velocity: 100,
+            channel: 0,
+        }];
+
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.process(&events, &[], &mut buf);
+
+        let has_nonzero = (0..256).any(|i| buf.get(i, 0).abs() > 0.001);
+        assert!(has_nonzero, "synth should respond to NoteEvent in process");
+    }
+
+    #[test]
+    fn synth_note_off_releases_correct_voice() {
+        let mut synth = SubtractiveSynth::new(48000.0);
+        synth.note_on(60, 100, 0);
+        synth.note_on(64, 100, 0);
+        assert_eq!(synth.active_voices(), 2);
+
+        synth.note_off(60, 0);
+        // Voice should still be active (in release phase)
+        assert_eq!(synth.active_voices(), 2);
+
+        // Process enough frames for release to complete
+        for _ in 0..200 {
+            let mut buf = AudioBuffer::new(2, 256);
+            synth.process(&[], &[], &mut buf);
+        }
+        // After release, the voice for note 60 should be idle
+        assert!(synth.active_voices() <= 1);
+    }
+
+    #[test]
     fn multi_osc_reset_clears_phases() {
         let mut synth = SubtractiveSynth::new(48000.0);
         synth.params_mut()[SynthParam::Osc2Enable.index()].set(1.0);

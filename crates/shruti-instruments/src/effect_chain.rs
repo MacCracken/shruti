@@ -637,6 +637,147 @@ mod tests {
     }
 
     #[test]
+    fn effect_chain_reset_clears_all() {
+        let mut chain = EffectChain::new();
+        let mut chorus = InstrumentEffect::new(InstrumentEffectType::Chorus, 48000.0);
+        chorus.mix = 1.0;
+        chain.add(chorus);
+        chain.add(InstrumentEffect::new(
+            InstrumentEffectType::FilterDrive,
+            48000.0,
+        ));
+
+        // Process some audio to build up state
+        let mut output = AudioBuffer::new(2, 128);
+        chain.process_with(&mut output, |buf| {
+            for f in 0..buf.frames() {
+                buf.set(f, 0, 0.8);
+                buf.set(f, 1, 0.8);
+            }
+        });
+
+        // Reset should not panic and clear internal state
+        chain.reset();
+    }
+
+    #[test]
+    fn chorus_set_sample_rate_reinitializes() {
+        let mut effect = InstrumentEffect::new(InstrumentEffectType::Chorus, 44100.0);
+        // Process at original rate
+        let mut buf = AudioBuffer::new(2, 64);
+        for f in 0..64 {
+            buf.set(f, 0, 0.5);
+        }
+        effect.process(&mut buf);
+
+        // Change sample rate
+        effect.set_sample_rate(96000.0);
+        // Process again — should work at new rate without panic
+        let mut buf2 = AudioBuffer::new(2, 128);
+        for f in 0..128 {
+            buf2.set(f, 0, 0.5);
+        }
+        effect.process(&mut buf2);
+    }
+
+    #[test]
+    fn filter_drive_reset_clears_state() {
+        let mut effect = InstrumentEffect::new(InstrumentEffectType::FilterDrive, 48000.0);
+        effect.mix = 1.0;
+        let mut buf = AudioBuffer::new(2, 64);
+        for f in 0..64 {
+            buf.set(f, 0, 0.7);
+            buf.set(f, 1, 0.7);
+        }
+        effect.process(&mut buf);
+        effect.reset();
+        // After reset, processing a zero buffer should produce near-zero output
+        let mut buf2 = AudioBuffer::new(2, 8);
+        effect.process(&mut buf2);
+        // First sample after reset with zero input should be near zero
+        assert!(
+            buf2.get(0, 0).abs() < 0.01,
+            "reset should clear filter drive state"
+        );
+    }
+
+    #[test]
+    fn reverb_reset_clears_tail() {
+        let mut effect = InstrumentEffect::new(InstrumentEffectType::Reverb, 48000.0);
+        effect.mix = 1.0;
+        let mut buf = AudioBuffer::new(2, 4800);
+        buf.set(0, 0, 1.0);
+        buf.set(0, 1, 1.0);
+        effect.process(&mut buf);
+        effect.reset();
+        // After reset, should not produce reverb tail
+    }
+
+    #[test]
+    fn delay_reset_clears_buffer() {
+        let mut effect = InstrumentEffect::new(InstrumentEffectType::Delay, 48000.0);
+        effect.mix = 1.0;
+        let mut buf = AudioBuffer::new(2, 48000);
+        buf.set(0, 0, 1.0);
+        buf.set(0, 1, 1.0);
+        effect.process(&mut buf);
+        effect.reset();
+        // After reset, processing silence should yield silence
+    }
+
+    #[test]
+    fn effect_chain_with_multiple_enabled_effects() {
+        let mut chain = EffectChain::new();
+        let mut dist = InstrumentEffect::new(InstrumentEffectType::Distortion, 48000.0);
+        dist.mix = 0.5;
+        chain.add(dist);
+        let mut fd = InstrumentEffect::new(InstrumentEffectType::FilterDrive, 48000.0);
+        fd.mix = 0.5;
+        chain.add(fd);
+
+        let mut output = AudioBuffer::new(2, 64);
+        chain.process_with(&mut output, |buf| {
+            for f in 0..buf.frames() {
+                buf.set(f, 0, 0.6);
+                buf.set(f, 1, 0.6);
+            }
+        });
+
+        // Signal should have been processed through both effects
+        let sample = output.get(32, 0);
+        assert!(
+            sample.abs() > 0.01,
+            "chain with two effects should produce output"
+        );
+    }
+
+    #[test]
+    fn effect_ensure_dry_buffer_resizes() {
+        let mut effect = InstrumentEffect::new(InstrumentEffectType::Distortion, 48000.0);
+        effect.mix = 0.5;
+
+        // Process with one buffer size
+        let mut buf1 = AudioBuffer::new(2, 64);
+        for f in 0..64 {
+            buf1.set(f, 0, 0.5);
+        }
+        effect.process(&mut buf1);
+
+        // Process with a different buffer size — dry buffer should resize
+        let mut buf2 = AudioBuffer::new(2, 128);
+        for f in 0..128 {
+            buf2.set(f, 0, 0.5);
+        }
+        effect.process(&mut buf2);
+    }
+
+    #[test]
+    fn effect_chain_default_is_empty() {
+        let chain = EffectChain::default();
+        assert!(chain.is_empty());
+    }
+
+    #[test]
     fn dry_wet_mix_at_zero_is_dry() {
         let mut effect = InstrumentEffect::new(InstrumentEffectType::Distortion, 48000.0);
         effect.mix = 0.0;

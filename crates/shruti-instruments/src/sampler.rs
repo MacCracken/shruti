@@ -1544,4 +1544,89 @@ mod tests {
         sampler.set_param(SamplerParam::Volume, 0.55);
         assert!((sampler.get_param(SamplerParam::Volume) - 0.55).abs() < 1e-6);
     }
+
+    #[test]
+    fn sampler_info() {
+        let sampler = Sampler::new(44100.0);
+        let info = sampler.info();
+        assert_eq!(info.name, "Sampler");
+    }
+
+    #[test]
+    fn sampler_set_sample_rate() {
+        let mut sampler = Sampler::new(44100.0);
+        sampler.add_zone(make_test_zone(60));
+        sampler.set_sample_rate(96000.0);
+        // Should not panic and pitch ratio should account for new rate
+        sampler.note_on(60, 100, 0);
+        let ratio = sampler.voices[0].pitch_ratio;
+        let expected = 44100.0 / 96000.0;
+        assert!(
+            (ratio - expected).abs() < 1e-6,
+            "after set_sample_rate, pitch ratio should update: got {ratio}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn sampler_process_with_note_events() {
+        use shruti_session::midi::NoteEvent;
+        let mut sampler = Sampler::new(44100.0);
+        sampler.add_zone(make_test_zone(60));
+
+        let events = vec![NoteEvent {
+            position: shruti_session::FramePos(0),
+            duration: shruti_session::FramePos(4000),
+            note: 60,
+            velocity: 100,
+            channel: 0,
+        }];
+
+        let mut buf = AudioBuffer::new(2, 256);
+        sampler.process(&events, &[], &mut buf);
+
+        let has_nonzero = (0..256).any(|i| buf.get(i, 0).abs() > 0.001);
+        assert!(has_nonzero, "sampler should respond to NoteEvent");
+    }
+
+    #[test]
+    fn sampler_zones_accessor() {
+        let mut sampler = Sampler::new(44100.0);
+        assert!(sampler.zones.is_empty());
+        sampler.add_zone(make_test_zone(60));
+        assert_eq!(sampler.zones.len(), 1);
+    }
+
+    #[test]
+    fn sampler_remove_zone() {
+        let mut sampler = Sampler::new(44100.0);
+        sampler.add_zone(make_test_zone(60));
+        sampler.add_zone(make_test_zone(72));
+        assert_eq!(sampler.zones.len(), 2);
+
+        sampler.remove_zone(0);
+        assert_eq!(sampler.zones.len(), 1);
+    }
+
+    #[test]
+    fn sampler_silence_when_no_zones() {
+        let mut sampler = Sampler::new(44100.0);
+        sampler.note_on(60, 100, 0);
+        assert_eq!(sampler.active_voices(), 0);
+
+        let mut buf = AudioBuffer::new(2, 64);
+        sampler.process(&[], &[], &mut buf);
+        for i in 0..64 {
+            assert_eq!(buf.get(i, 0), 0.0);
+        }
+    }
+
+    #[test]
+    fn zone_serialization_roundtrip() {
+        let zone = SampleZone::new("Piano C4", 60, vec![], 44100);
+        let json = serde_json::to_string(&zone).unwrap();
+        let restored: SampleZone = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.name, "Piano C4");
+        assert_eq!(restored.root_key, 60);
+        assert_eq!(restored.loop_mode, LoopMode::NoLoop);
+    }
 }

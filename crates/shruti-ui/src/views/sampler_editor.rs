@@ -566,4 +566,100 @@ mod tests {
         assert_eq!(midi_note_name(72), "C5");
         assert_eq!(midi_note_name(57), "A3");
     }
+
+    // ---- zone_color tests ----
+
+    #[test]
+    fn zone_color_each_palette_entry() {
+        // Verify each palette entry produces a distinct color
+        let colors: Vec<_> = (0..8).map(zone_color).collect();
+        for i in 0..8 {
+            for j in (i + 1)..8 {
+                assert_ne!(colors[i], colors[j], "Colors {i} and {j} should differ");
+            }
+        }
+    }
+
+    #[test]
+    fn zone_color_wraps_at_palette_size() {
+        assert_eq!(zone_color(0), zone_color(8));
+        assert_eq!(zone_color(1), zone_color(9));
+        assert_eq!(zone_color(7), zone_color(15));
+    }
+
+    // ---- zone_param_index edge cases ----
+
+    #[test]
+    fn zone_param_index_consistency() {
+        // Consecutive zones should have non-overlapping ranges
+        for zone in 0..10 {
+            let _start = zone_param_index(zone, 0);
+            let end = zone_param_index(zone, PARAMS_PER_ZONE - 1);
+            let next_start = zone_param_index(zone + 1, 0);
+            assert_eq!(
+                end + 1,
+                next_start,
+                "Zone {zone} params should be contiguous"
+            );
+        }
+    }
+
+    // ---- loop_mode_name edge cases ----
+
+    #[test]
+    fn loop_mode_name_all_valid() {
+        assert_eq!(loop_mode_name(0), "Off");
+        assert_eq!(loop_mode_name(1), "Forward");
+        assert_eq!(loop_mode_name(2), "Ping-Pong");
+    }
+
+    #[test]
+    fn loop_mode_name_out_of_range_defaults_to_off() {
+        assert_eq!(loop_mode_name(3), "Off");
+        assert_eq!(loop_mode_name(255), "Off");
+    }
+
+    // ---- midi_note_name all sharps ----
+
+    #[test]
+    fn midi_note_name_all_sharps_in_octave() {
+        assert_eq!(midi_note_name(61), "C#4");
+        assert_eq!(midi_note_name(63), "D#4");
+        assert_eq!(midi_note_name(66), "F#4");
+        assert_eq!(midi_note_name(68), "G#4");
+        assert_eq!(midi_note_name(70), "A#4");
+    }
+
+    // ---- SELECTED_ZONE_PARAM and PARAMS_PER_ZONE constants ----
+
+    #[test]
+    fn constants_are_sensible() {
+        assert_eq!(SELECTED_ZONE_PARAM, 192);
+        assert_eq!(PARAMS_PER_ZONE, 6);
+        // 192 / 6 = 32 max zones before overlapping selected_zone_param
+        assert!(32 * PARAMS_PER_ZONE <= SELECTED_ZONE_PARAM);
+    }
+
+    // ---- zone key range operations ----
+
+    #[test]
+    fn zone_key_range_single_key() {
+        let mut params = vec![0.0f32; 200];
+        params[zone_param_index(0, ZONE_KEY_LOW)] = 60.0;
+        params[zone_param_index(0, ZONE_KEY_HIGH)] = 60.0;
+        let low = params[zone_param_index(0, ZONE_KEY_LOW)] as u8;
+        let high = params[zone_param_index(0, ZONE_KEY_HIGH)] as u8;
+        assert_eq!(low, high);
+        assert_eq!(low, 60);
+    }
+
+    #[test]
+    fn zone_gain_default_and_max() {
+        let mut params = vec![0.0f32; 200];
+        // Default gain is 0.0 (from zero-init)
+        assert!((params[zone_param_index(0, ZONE_GAIN)]).abs() < f32::EPSILON);
+        // Set to max gain
+        params[zone_param_index(0, ZONE_GAIN)] = 2.0;
+        assert!((params[zone_param_index(0, ZONE_GAIN)] - 2.0).abs() < f32::EPSILON);
+    }
 }

@@ -1,4 +1,10 @@
 [default]
-exclude-files = ["vendor/*"]
+exclude-files = [
+    "vendor/*",
+    # Binary entry points — not unit testable
+    "src/main.rs",
+    "src/bin/*",
+]
 workspace = true
 skip-clean = true
+fail-under = 50

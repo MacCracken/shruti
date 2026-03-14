@@ -458,4 +458,180 @@ mod tests {
         let back: VoiceIntent = serde_json::from_str(&json).unwrap();
         assert_eq!(back.action, intent.action);
     }
+
+    #[test]
+    fn parse_pause() {
+        let intent = parse_voice_input("pause");
+        assert_eq!(
+            intent.action,
+            VoiceAction::Transport(TransportCommand::Pause)
+        );
+    }
+
+    #[test]
+    fn parse_go_to_end() {
+        let intent = parse_voice_input("go to the end");
+        assert_eq!(intent.action, VoiceAction::Seek(SeekTarget::End));
+    }
+
+    #[test]
+    fn parse_jump_to_bar() {
+        let intent = parse_voice_input("jump to bar 32");
+        assert_eq!(intent.action, VoiceAction::Seek(SeekTarget::Bar(32)));
+    }
+
+    #[test]
+    fn parse_skip_to_bar() {
+        let intent = parse_voice_input("skip to bar 4");
+        assert_eq!(intent.action, VoiceAction::Seek(SeekTarget::Bar(4)));
+    }
+
+    #[test]
+    fn parse_unmute() {
+        let intent = parse_voice_input("unmute drums");
+        assert_eq!(
+            intent.action,
+            VoiceAction::TrackControl(TrackCommand::Unmute("drums".into()))
+        );
+    }
+
+    #[test]
+    fn parse_unsolo() {
+        let intent = parse_voice_input("unsolo vocals");
+        assert_eq!(
+            intent.action,
+            VoiceAction::TrackControl(TrackCommand::Unsolo("vocals".into()))
+        );
+    }
+
+    #[test]
+    fn parse_quieter() {
+        let intent = parse_voice_input("quieter on the bass");
+        match &intent.action {
+            VoiceAction::TrackControl(TrackCommand::Volume { track, direction }) => {
+                assert_eq!(track, "bass");
+                assert_eq!(*direction, Direction::Down);
+            }
+            other => panic!("expected Volume Down, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_turn_down() {
+        let intent = parse_voice_input("turn down the guitar");
+        match &intent.action {
+            VoiceAction::TrackControl(TrackCommand::Volume { direction, .. }) => {
+                assert_eq!(*direction, Direction::Down);
+            }
+            other => panic!("expected Volume Down, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pan_right() {
+        let intent = parse_voice_input("pan right on the keys");
+        match &intent.action {
+            VoiceAction::TrackControl(TrackCommand::Pan { track, direction }) => {
+                assert_eq!(track, "keys");
+                assert_eq!(*direction, PanDirection::Right);
+            }
+            other => panic!("expected Pan Right, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pan_center() {
+        let intent = parse_voice_input("pan center on the vocals");
+        match &intent.action {
+            VoiceAction::TrackControl(TrackCommand::Pan { direction, .. }) => {
+                assert_eq!(*direction, PanDirection::Center);
+            }
+            other => panic!("expected Pan Center, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_slower() {
+        let intent = parse_voice_input("slower");
+        assert_eq!(intent.action, VoiceAction::Tempo(TempoCommand::Slower));
+    }
+
+    #[test]
+    fn parse_set_bpm() {
+        let intent = parse_voice_input("set bpm to 90");
+        assert_eq!(intent.action, VoiceAction::Tempo(TempoCommand::Set(90.0)));
+    }
+
+    #[test]
+    fn parse_automix() {
+        let intent = parse_voice_input("automix");
+        assert_eq!(intent.action, VoiceAction::Mix(MixCommand::AutoMix));
+    }
+
+    #[test]
+    fn parse_analyze_dynamics() {
+        let intent = parse_voice_input("analyze the dynamics on bass");
+        match &intent.action {
+            VoiceAction::Analyze(AnalyzeCommand::Dynamics(track)) => {
+                assert_eq!(track, "bass");
+            }
+            other => panic!("expected Dynamics, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_analyze_full_mix() {
+        let intent = parse_voice_input("analyze the mix");
+        assert_eq!(intent.action, VoiceAction::Analyze(AnalyzeCommand::FullMix));
+    }
+
+    #[test]
+    fn parse_preserves_original() {
+        let intent = parse_voice_input("  Play  ");
+        assert_eq!(intent.original, "  Play  ");
+    }
+
+    #[test]
+    fn parse_hit_play() {
+        let intent = parse_voice_input("hit play");
+        assert_eq!(
+            intent.action,
+            VoiceAction::Transport(TransportCommand::Play)
+        );
+    }
+
+    #[test]
+    fn parse_hit_stop() {
+        let intent = parse_voice_input("hit stop");
+        assert_eq!(
+            intent.action,
+            VoiceAction::Transport(TransportCommand::Stop)
+        );
+    }
+
+    #[test]
+    fn parse_hit_record() {
+        let intent = parse_voice_input("hit record");
+        assert_eq!(
+            intent.action,
+            VoiceAction::Transport(TransportCommand::Record)
+        );
+    }
+
+    #[test]
+    fn parse_rewind_back_to_start() {
+        let intent = parse_voice_input("back to start");
+        assert_eq!(intent.action, VoiceAction::Seek(SeekTarget::Beginning));
+    }
+
+    #[test]
+    fn parse_check_levels() {
+        let intent = parse_voice_input("check the levels on vocals");
+        match &intent.action {
+            VoiceAction::Analyze(AnalyzeCommand::Dynamics(track)) => {
+                assert_eq!(track, "vocals");
+            }
+            other => panic!("expected Dynamics, got {:?}", other),
+        }
+    }
 }

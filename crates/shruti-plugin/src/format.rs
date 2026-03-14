@@ -121,3 +121,75 @@ fn native_search_paths() -> Vec<String> {
 
     paths
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_clap() {
+        assert_eq!(PluginFormat::Clap.extension(), "clap");
+    }
+
+    #[test]
+    fn extension_vst3() {
+        assert_eq!(PluginFormat::Vst3.extension(), "vst3");
+    }
+
+    #[test]
+    fn extension_native() {
+        assert_eq!(PluginFormat::Native.extension(), "so");
+    }
+
+    #[test]
+    fn search_paths_clap_non_empty() {
+        let paths = PluginFormat::Clap.search_paths();
+        assert!(!paths.is_empty(), "CLAP search paths should not be empty");
+    }
+
+    #[test]
+    fn search_paths_vst3_non_empty() {
+        let paths = PluginFormat::Vst3.search_paths();
+        assert!(!paths.is_empty(), "VST3 search paths should not be empty");
+    }
+
+    #[test]
+    fn search_paths_native_non_empty() {
+        let paths = PluginFormat::Native.search_paths();
+        assert!(!paths.is_empty(), "Native search paths should not be empty");
+    }
+
+    #[test]
+    fn format_serialization_roundtrip() {
+        for fmt in [PluginFormat::Clap, PluginFormat::Vst3, PluginFormat::Native] {
+            let json = serde_json::to_string(&fmt).unwrap();
+            let restored: PluginFormat = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, fmt);
+        }
+    }
+
+    #[test]
+    fn format_debug_impl() {
+        let debug = format!("{:?}", PluginFormat::Clap);
+        assert!(debug.contains("Clap"));
+    }
+
+    #[test]
+    fn format_clone_and_copy() {
+        let fmt = PluginFormat::Vst3;
+        let cloned = fmt;
+        assert_eq!(fmt, cloned);
+    }
+
+    #[test]
+    fn format_hash_works() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(PluginFormat::Clap);
+        set.insert(PluginFormat::Vst3);
+        set.insert(PluginFormat::Native);
+        assert_eq!(set.len(), 3);
+        set.insert(PluginFormat::Clap);
+        assert_eq!(set.len(), 3);
+    }
+}

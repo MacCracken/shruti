@@ -231,4 +231,117 @@ mod tests {
         assert!(all[0].is_input);
         assert!(!all[0].is_output);
     }
+
+    #[test]
+    fn test_all_devices_only_outputs() {
+        let host = MockHost {
+            outputs: vec![DeviceInfo {
+                name: "Speaker".to_string(),
+                is_default: true,
+                is_input: false,
+                is_output: true,
+                max_channels: 2,
+                supported_sample_rates: vec![48000],
+            }],
+            inputs: vec![],
+        };
+        let all = host.all_devices();
+        assert_eq!(all.len(), 1);
+        assert!(!all[0].is_input);
+        assert!(all[0].is_output);
+    }
+
+    #[test]
+    fn test_mock_host_open_output_stream_errors() {
+        let host = MockHost {
+            outputs: vec![],
+            inputs: vec![],
+        };
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 2,
+            buffer_size: 256,
+        };
+        let result = host.open_output_stream(None, format, Box::new(|_| {}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mock_host_open_input_stream_errors() {
+        let host = MockHost {
+            outputs: vec![],
+            inputs: vec![],
+        };
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 1,
+            buffer_size: 128,
+        };
+        let result = host.open_input_stream(None, format, Box::new(|_| {}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_device_info_default_fields() {
+        let info = DeviceInfo {
+            name: String::new(),
+            is_default: false,
+            is_input: false,
+            is_output: false,
+            max_channels: 0,
+            supported_sample_rates: vec![],
+        };
+        assert!(info.name.is_empty());
+        assert!(!info.is_default);
+        assert_eq!(info.max_channels, 0);
+        assert!(info.supported_sample_rates.is_empty());
+    }
+
+    #[test]
+    fn test_all_devices_multiple_inputs_multiple_outputs() {
+        let host = MockHost {
+            outputs: vec![
+                DeviceInfo {
+                    name: "Speakers".to_string(),
+                    is_default: true,
+                    is_input: false,
+                    is_output: true,
+                    max_channels: 2,
+                    supported_sample_rates: vec![44100, 48000],
+                },
+                DeviceInfo {
+                    name: "Headphones".to_string(),
+                    is_default: false,
+                    is_input: false,
+                    is_output: true,
+                    max_channels: 2,
+                    supported_sample_rates: vec![48000],
+                },
+            ],
+            inputs: vec![
+                DeviceInfo {
+                    name: "Speakers".to_string(), // same name as output, should merge
+                    is_default: false,
+                    is_input: true,
+                    is_output: false,
+                    max_channels: 2,
+                    supported_sample_rates: vec![44100],
+                },
+                DeviceInfo {
+                    name: "Line In".to_string(),
+                    is_default: false,
+                    is_input: true,
+                    is_output: false,
+                    max_channels: 2,
+                    supported_sample_rates: vec![96000],
+                },
+            ],
+        };
+
+        let all = host.all_devices();
+        assert_eq!(all.len(), 3); // Speakers (merged), Headphones, Line In
+        let speakers = all.iter().find(|d| d.name == "Speakers").unwrap();
+        assert!(speakers.is_input);
+        assert!(speakers.is_output);
+    }
 }

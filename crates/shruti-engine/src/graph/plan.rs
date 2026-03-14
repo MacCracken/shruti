@@ -736,6 +736,58 @@ mod tests {
     }
 
     #[test]
+    fn test_is_finished_with_pending_plan_no_current() {
+        // Place a plan in pending but don't call process() to pick it up.
+        // is_finished() should peek at the pending plan.
+        let processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+
+        let src = AudioBuffer::from_interleaved(vec![1.0, 1.0, 1.0, 1.0], 2);
+        let player_id = NodeId::next();
+        let mut graph = Graph::new();
+        graph.add_node(player_id, Box::new(FilePlayerNode::new(src, false)));
+        handle.swap(graph.compile().unwrap());
+
+        // current_plan is None, but pending has a plan with an active player
+        assert!(!processor.is_finished());
+    }
+
+    #[test]
+    fn test_is_finished_empty_plan_order() {
+        // An empty plan has no last node — is_finished should return true.
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        let graph = Graph::new();
+        handle.swap(graph.compile().unwrap());
+
+        // Pick up the plan
+        let mut output = vec![0.0f32; 4];
+        processor.process(&mut output, 2, 2);
+        assert!(processor.is_finished());
+    }
+
+    #[test]
+    fn test_processor_multiple_consecutive_processes() {
+        let src = AudioBuffer::from_interleaved(vec![0.5; 8], 1);
+        let player_id = NodeId::next();
+
+        let mut graph = Graph::new();
+        graph.add_node(player_id, Box::new(FilePlayerNode::new(src, true)));
+        let plan = graph.compile().unwrap();
+
+        let mut processor = GraphProcessor::new();
+        let handle = processor.swap_handle();
+        handle.swap(plan);
+
+        // Process multiple times — should not panic
+        for _ in 0..5 {
+            let mut output = vec![0.0f32; 4];
+            processor.process(&mut output, 1, 4);
+            assert!(output.iter().any(|&s| s.abs() > 0.01));
+        }
+    }
+
+    #[test]
     fn test_output_larger_than_rendered_fills_silence() {
         // Even if the output slice is larger than what any node produces,
         // the remainder should be zero-filled.

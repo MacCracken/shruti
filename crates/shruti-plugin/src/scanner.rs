@@ -451,4 +451,125 @@ mod tests {
         let path = default_cache_path();
         assert!(path.ends_with("shruti/plugin_scan_cache.json"));
     }
+
+    #[test]
+    fn test_scan_cache_default_is_empty() {
+        let cache = ScanCache::default();
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn test_scanner_default() {
+        let scanner = PluginScanner::default();
+        // Should be equivalent to new()
+        let _ = scanner;
+    }
+
+    #[test]
+    fn test_is_shared_lib_so() {
+        assert!(is_shared_lib(Path::new("/usr/lib/test.so")));
+    }
+
+    #[test]
+    fn test_is_shared_lib_dylib() {
+        assert!(is_shared_lib(Path::new("/usr/lib/test.dylib")));
+    }
+
+    #[test]
+    fn test_is_shared_lib_dll() {
+        assert!(is_shared_lib(Path::new("C:\\test.dll")));
+    }
+
+    #[test]
+    fn test_is_shared_lib_clap() {
+        assert!(!is_shared_lib(Path::new("/usr/lib/test.clap")));
+    }
+
+    #[test]
+    fn test_is_shared_lib_no_ext() {
+        assert!(!is_shared_lib(Path::new("/usr/lib/test")));
+    }
+
+    #[test]
+    fn test_scan_cache_get_nonexistent_dir() {
+        let cache = ScanCache::new();
+        assert!(cache.get(Path::new("/nonexistent/dir")).is_none());
+    }
+
+    #[test]
+    fn test_scan_cache_update_nonexistent_dir() {
+        let mut cache = ScanCache::new();
+        // Updating with a nonexistent directory should store mtime 0
+        cache.update(
+            Path::new("/nonexistent/dir/for/test"),
+            vec![ScannedPlugin {
+                path: PathBuf::from("/fake.clap"),
+                format: PluginFormat::Clap,
+                name: "fake".into(),
+            }],
+        );
+        let entry = &cache.entries[Path::new("/nonexistent/dir/for/test")];
+        assert_eq!(entry.mtime_secs, 0);
+        assert_eq!(entry.plugins.len(), 1);
+    }
+
+    #[test]
+    fn test_scan_cache_save_creates_parent_dirs() {
+        let tmp = std::env::temp_dir().join("shruti_test_cache_mkdir");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let nested = tmp.join("a").join("b").join("cache.json");
+
+        let cache = ScanCache::new();
+        cache.save(&nested).unwrap();
+        assert!(nested.exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_format_vst3_nonexistent() {
+        let mut scanner = PluginScanner::new();
+        scanner.add_path("/nonexistent/vst3/path");
+        let results = scanner.scan_format(PluginFormat::Vst3);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scan_format_native_nonexistent() {
+        let mut scanner = PluginScanner::new();
+        scanner.add_path("/nonexistent/native/path");
+        let results = scanner.scan_format(PluginFormat::Native);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scan_format_native_finds_so_files() {
+        let tmp = std::env::temp_dir().join("shruti_test_native_scan");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let fake = tmp.join("my_plugin.so");
+        std::fs::write(&fake, b"fake").unwrap();
+
+        let mut scanner = PluginScanner::new();
+        scanner.add_path(&tmp);
+        let results = scanner.scan_format(PluginFormat::Native);
+        assert!(results.iter().any(|p| p.name == "my_plugin"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scanned_plugin_serialization() {
+        let plugin = ScannedPlugin {
+            path: PathBuf::from("/test/plugin.clap"),
+            format: PluginFormat::Clap,
+            name: "TestPlugin".into(),
+        };
+        let json = serde_json::to_string(&plugin).unwrap();
+        let restored: ScannedPlugin = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.name, "TestPlugin");
+        assert_eq!(restored.path, PathBuf::from("/test/plugin.clap"));
+        assert_eq!(restored.format, PluginFormat::Clap);
+    }
 }

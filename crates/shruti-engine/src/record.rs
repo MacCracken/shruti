@@ -181,4 +181,66 @@ mod tests {
         rm.push_samples(&data);
         // Should not panic — overflow samples are silently dropped
     }
+
+    #[test]
+    fn test_push_overflow_then_finish() {
+        // Overflow the buffer, then finish — should produce a valid WAV
+        // (with only the samples that fit).
+        let mut rm = RecordManager::new(8);
+        let data: Vec<f32> = (0..20).map(|i| i as f32 * 0.05).collect();
+        rm.push_samples(&data);
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("shruti_test_overflow_record.wav");
+
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 1,
+            buffer_size: 256,
+        };
+
+        rm.finish(&path, &format).unwrap();
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_accumulate_samples_large_batch() {
+        let (mut producer, consumer) = rtrb::RingBuffer::new(4096);
+        let handle = thread::spawn(move || accumulate_samples(consumer));
+
+        let samples: Vec<f32> = (0..1000).map(|i| i as f32 / 1000.0).collect();
+        for &s in &samples {
+            let _ = producer.push(s);
+        }
+        drop(producer);
+
+        let result = handle.join().unwrap();
+        assert_eq!(result.len(), 1000);
+        assert!((result[0] - 0.0).abs() < 1e-7);
+        assert!((result[999] - 0.999).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_finish_stereo_recording() {
+        let mut rm = RecordManager::new(2048);
+        // Push stereo interleaved: L R L R ...
+        let samples: Vec<f32> = (0..200)
+            .map(|i| if i % 2 == 0 { 0.5 } else { -0.5 })
+            .collect();
+        rm.push_samples(&samples);
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("shruti_test_stereo_record.wav");
+
+        let format = AudioFormat {
+            sample_rate: 48000,
+            channels: 2,
+            buffer_size: 512,
+        };
+
+        rm.finish(&path, &format).unwrap();
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
 }

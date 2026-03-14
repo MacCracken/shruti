@@ -1111,4 +1111,97 @@ mod tests {
         let result = zoom_to_fit(FramePos(480000), -100.0);
         assert!(result.is_none());
     }
+
+    // ---- additional snap_to_grid edge cases ----
+
+    #[test]
+    fn snap_to_grid_negative_bpm() {
+        let snapped = snap_to_grid(FramePos(1000), -120.0, 48000);
+        assert_eq!(snapped, FramePos(1000));
+    }
+
+    #[test]
+    fn snap_to_grid_very_high_bpm() {
+        // 300 BPM, 48kHz => 9600 frames/beat
+        let snapped = snap_to_grid(FramePos(5000), 300.0, 48000);
+        assert_eq!(snapped, FramePos(9600)); // rounds to nearest beat
+    }
+
+    #[test]
+    fn snap_to_grid_large_position() {
+        // 120 BPM, 48kHz => 24000 frames/beat
+        // Position at exactly 100 beats = 2_400_000
+        let snapped = snap_to_grid(FramePos(2_400_000), 120.0, 48000);
+        assert_eq!(snapped, FramePos(2_400_000));
+    }
+
+    #[test]
+    fn snap_to_grid_44100_sample_rate() {
+        // 120 BPM, 44100Hz => 22050 frames/beat
+        let snapped = snap_to_grid(FramePos(22050), 120.0, 44100);
+        assert_eq!(snapped, FramePos(22050));
+    }
+
+    // ---- additional clamp_zoom edge cases ----
+
+    #[test]
+    fn clamp_zoom_exactly_at_max() {
+        let ppf = clamp_zoom(1.0, FramePos(480000), 1000.0);
+        assert!((ppf - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn clamp_zoom_negative_view_width() {
+        let ppf = clamp_zoom(0.01, FramePos(480000), -100.0);
+        assert!(ppf >= 0.00001);
+        assert!(ppf <= 1.0);
+    }
+
+    #[test]
+    fn clamp_zoom_very_short_session() {
+        // Very short session: 1000 frames
+        let ppf = clamp_zoom(0.5, FramePos(1000), 800.0);
+        assert!(ppf <= 1.0);
+        assert!(ppf >= 0.00001);
+    }
+
+    // ---- additional zoom_to_fit edge cases ----
+
+    #[test]
+    fn zoom_to_fit_very_long_session() {
+        // 10 million frames, 1000px wide
+        let result = zoom_to_fit(FramePos(10_000_000), 1000.0);
+        assert!(result.is_some());
+        let ppf = result.unwrap();
+        assert!(ppf > 0.0);
+        assert!(ppf < 0.001);
+    }
+
+    #[test]
+    fn zoom_to_fit_very_short_session() {
+        // 100 frames, 1000px wide
+        let result = zoom_to_fit(FramePos(100), 1000.0);
+        assert!(result.is_some());
+        let ppf = result.unwrap();
+        // 900 / 100 = 9.0 but clamped by clamp_zoom if used
+        assert!((ppf - 9.0).abs() < 1e-10);
+    }
+
+    // ---- GridLod additional ----
+
+    #[test]
+    fn grid_lod_high_bpm() {
+        // 300 BPM => frames_per_beat = 9600, frames_per_bar = 38400
+        // At ppf=0.01, pixels_per_bar = 384, pixels_per_beat = 96
+        let lod = grid_level_of_detail(0.01, 48000, 300.0, 5.0);
+        assert_eq!(lod, GridLod::BarsAndBeats);
+    }
+
+    #[test]
+    fn grid_lod_different_min_spacing() {
+        // With larger min_spacing, need higher zoom for beats
+        let lod = grid_level_of_detail(0.001, 48000, 120.0, 100.0);
+        // pixels_per_beat = 24, pixels_per_bar = 96, both < 100
+        assert_eq!(lod, GridLod::None);
+    }
 }

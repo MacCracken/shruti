@@ -575,4 +575,56 @@ mod tests {
         assert!(result.is_err());
         assert!(host.active_slots().is_empty());
     }
+
+    #[test]
+    fn load_all_states_skips_missing_slot() {
+        let mut host = PluginHost::new();
+        // No instances loaded, so slot "missing" doesn't exist.
+        // A valid state should be silently skipped (no error, no crash).
+        let mut states = HashMap::new();
+        let state = PluginState::new("some_plugin".into());
+        states.insert("missing".to_string(), state);
+        let errors = host.load_all_states(&states);
+        // Empty chunk passes validation, but slot doesn't exist — no error reported
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn load_plugin_vst3_format() {
+        let fake = ScannedPlugin {
+            name: "FakeVST3".into(),
+            path: "/tmp/nonexistent.vst3".into(),
+            format: PluginFormat::Vst3,
+        };
+        let result = load_plugin(&fake, 48000.0, 256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_plugin_native_format() {
+        let fake = ScannedPlugin {
+            name: "FakeNative".into(),
+            path: "/tmp/nonexistent.so".into(),
+            format: PluginFormat::Native,
+        };
+        let result = load_plugin(&fake, 48000.0, 256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn find_vst3_binary_extracts_name() {
+        // Verify the error message contains the expected path components
+        let result = find_vst3_binary(Path::new("/tmp/MyPlugin.vst3"));
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("MyPlugin"), "got: {err_msg}");
+    }
+
+    #[test]
+    fn scan_with_nonexistent_extra_path() {
+        let mut host = PluginHost::new();
+        host.add_search_path("/nonexistent/path/for/testing");
+        let results = host.scan();
+        // Should not panic, may return whatever system has
+        let _ = results.len();
+    }
 }

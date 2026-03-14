@@ -102,3 +102,89 @@ pub trait InstrumentNode: Send {
     /// Number of currently active voices.
     fn active_voices(&self) -> usize;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn param_new_defaults_value_to_default() {
+        let p = InstrumentParam::new("Volume", 0.0, 1.0, 0.75, "dB");
+        assert_eq!(p.name, "Volume");
+        assert_eq!(p.min, 0.0);
+        assert_eq!(p.max, 1.0);
+        assert_eq!(p.default, 0.75);
+        assert_eq!(p.value, 0.75);
+        assert_eq!(p.unit, "dB");
+    }
+
+    #[test]
+    fn param_set_clamps_to_range() {
+        let mut p = InstrumentParam::new("Gain", 0.0, 1.0, 0.5, "");
+        p.set(2.0);
+        assert_eq!(p.value, 1.0);
+        p.set(-1.0);
+        assert_eq!(p.value, 0.0);
+        p.set(0.5);
+        assert_eq!(p.value, 0.5);
+    }
+
+    #[test]
+    fn param_normalized_returns_correct_range() {
+        let p = InstrumentParam::new("Cutoff", 20.0, 20000.0, 1000.0, "Hz");
+        let n = p.normalized();
+        let expected = (1000.0 - 20.0) / (20000.0 - 20.0);
+        assert!((n - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn param_normalized_at_min_is_zero() {
+        let mut p = InstrumentParam::new("Test", 0.0, 100.0, 50.0, "");
+        p.set(0.0);
+        assert!((p.normalized() - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn param_normalized_at_max_is_one() {
+        let mut p = InstrumentParam::new("Test", 0.0, 100.0, 50.0, "");
+        p.set(100.0);
+        assert!((p.normalized() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn param_normalized_same_min_max_returns_zero() {
+        let p = InstrumentParam::new("Fixed", 5.0, 5.0, 5.0, "");
+        assert_eq!(p.normalized(), 0.0);
+    }
+
+    #[test]
+    fn param_set_normalized_maps_correctly() {
+        let mut p = InstrumentParam::new("Freq", 20.0, 20000.0, 1000.0, "Hz");
+        p.set_normalized(0.0);
+        assert!((p.value - 20.0).abs() < 1e-3);
+        p.set_normalized(1.0);
+        assert!((p.value - 20000.0).abs() < 1e-3);
+        p.set_normalized(0.5);
+        let expected = 20.0 + 0.5 * (20000.0 - 20.0);
+        assert!((p.value - expected).abs() < 1e-3);
+    }
+
+    #[test]
+    fn param_set_normalized_clamps_input() {
+        let mut p = InstrumentParam::new("Test", 0.0, 10.0, 5.0, "");
+        p.set_normalized(2.0);
+        assert_eq!(p.value, 10.0);
+        p.set_normalized(-1.0);
+        assert_eq!(p.value, 0.0);
+    }
+
+    #[test]
+    fn param_roundtrip_normalized() {
+        let mut p = InstrumentParam::new("Test", 0.0, 100.0, 50.0, "");
+        p.set(73.0);
+        let n = p.normalized();
+        p.set(0.0);
+        p.set_normalized(n);
+        assert!((p.value - 73.0).abs() < 0.01);
+    }
+}
