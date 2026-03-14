@@ -78,7 +78,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list \
     && apt-get update && apt-get install -y --no-install-recommends caddy \
     && apt-get install -y --no-install-recommends gettext-base \
-    && apt-get purge -y gnupg debian-keyring debian-archive-keyring apt-transport-https \
+    && apt-get purge -y gnupg debian-keyring apt-transport-https \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
