@@ -1,6 +1,6 @@
 [package]
 name = "shruti-ui"
-version = "2026.3.14"
+version = "2026.3.14-1"
 edition = "2024"
 description = "GPU-accelerated UI for Shruti"
 license = "GPL-3.0"

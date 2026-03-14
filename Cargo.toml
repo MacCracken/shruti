@@ -36,7 +36,7 @@ winit = { path = "vendor/winit-0.30.13-patched" }
 
 [package]
 name = "shruti"
-version = "2026.3.14"
+version = "2026.3.14-1"
 edition = "2024"
 description = "A Rust-native Digital Audio Workstation"
 license = "GPL-3.0"

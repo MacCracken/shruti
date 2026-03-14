@@ -1,6 +1,6 @@
 [package]
 name = "shruti-ai"
-version = "2026.3.14"
+version = "2026.3.14-1"
 edition = "2024"
 description = "AI agent integration for Shruti (AGNOS)"
 license = "GPL-3.0"

@@ -1,6 +1,6 @@
 [package]
 name = "shruti-plugin"
-version = "2026.3.14"
+version = "2026.3.14-1"
 edition = "2024"
 description = "Plugin hosting (VST3, CLAP, native Rust) for Shruti"
 license = "GPL-3.0"
