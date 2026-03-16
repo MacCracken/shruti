@@ -5,9 +5,14 @@ edition = "2024"
 description = "DSP primitives and effects for Shruti"
 license = "GPL-3.0"
 
+[features]
+default = []
+tarang = ["dep:tarang-audio", "dep:tarang-core", "dep:bytes"]
+
 [dependencies]
-tarang-audio = { workspace = true }
-tarang-core = { workspace = true }
+tarang-audio = { workspace = true, optional = true }
+tarang-core = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 hound = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

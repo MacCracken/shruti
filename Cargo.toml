@@ -15,6 +15,8 @@ cpal = "0.15"
 rtrb = "0.3"
 tarang-audio = { path = "../tarang/crates/tarang-audio" }
 tarang-core = { path = "../tarang/crates/tarang-core" }
+tarang-ai = { path = "../tarang/crates/tarang-ai" }
+bytes = "1"
 hound = "3.5"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -41,6 +43,10 @@ version = "2026.3.14-1"
 edition = "2024"
 description = "A Rust-native Digital Audio Workstation"
 license = "GPL-3.0"
+
+[features]
+default = ["tarang"]
+tarang = ["shruti-dsp/tarang", "shruti-ai/tarang"]
 
 [dependencies]
 shruti-engine = { path = "crates/shruti-engine" }

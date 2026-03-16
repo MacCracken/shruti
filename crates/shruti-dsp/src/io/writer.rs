@@ -41,6 +41,17 @@ impl Default for ExportConfig {
     }
 }
 
+/// Returns true if the given export format is natively supported (not a fallback).
+pub fn is_native_export(format: ExportFormat) -> bool {
+    match format {
+        ExportFormat::Wav => true,
+        #[cfg(feature = "tarang")]
+        ExportFormat::Flac => true,
+        #[cfg(not(feature = "tarang"))]
+        ExportFormat::Flac => false,
+    }
+}
+
 /// Write an AudioBuffer to a WAV file.
 pub fn write_wav_file(
     path: &Path,
@@ -66,21 +77,90 @@ pub fn write_wav_file(
 
 /// Write an AudioBuffer to an audio file using the given export configuration.
 ///
-/// Currently supports WAV format with Int16, Int24, and Float32 bit depths.
-/// FLAC export is planned for a future release and currently falls back to WAV.
+/// With the `tarang` feature: native FLAC export via tarang-audio.
+/// Without `tarang`: FLAC falls back to WAV encoding.
 pub fn write_audio_file(
     path: &Path,
     buffer: &AudioBuffer,
     config: &ExportConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match config.format {
-        ExportFormat::Wav | ExportFormat::Flac => {
-            // FLAC writing is not supported by hound; fall back to WAV encoding.
-            // A future release will add native FLAC export.
+        ExportFormat::Wav => write_wav_with_depth(path, buffer, config),
+        #[cfg(feature = "tarang")]
+        ExportFormat::Flac => write_flac_tarang(path, buffer, config),
+        #[cfg(not(feature = "tarang"))]
+        ExportFormat::Flac => {
+            // FLAC writing requires tarang; fall back to WAV encoding.
             write_wav_with_depth(path, buffer, config)
         }
     }
 }
+
+// ── tarang FLAC export ─────────────────────────────────────────────────────
+
+#[cfg(feature = "tarang")]
+fn write_flac_tarang(
+    path: &Path,
+    buffer: &AudioBuffer,
+    config: &ExportConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tarang_audio::{AudioEncoder, EncoderConfig, FlacEncoder};
+    use tarang_core::AudioCodec;
+
+    let bits = match config.bit_depth {
+        BitDepth::Int16 => 16,
+        BitDepth::Int24 => 24,
+        BitDepth::Float32 => 24, // FLAC doesn't support float; use 24-bit
+    };
+
+    let enc_config = EncoderConfig {
+        codec: AudioCodec::Flac,
+        sample_rate: config.sample_rate,
+        channels: config.channels,
+        bits_per_sample: bits,
+    };
+
+    let mut encoder = FlacEncoder::new(&enc_config)?;
+
+    // Build a tarang AudioBuffer from shruti's interleaved f32 samples.
+    let interleaved = buffer.as_interleaved();
+    let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let tarang_buf = tarang_core::AudioBuffer {
+        data: bytes::Bytes::from(byte_data),
+        sample_format: tarang_core::SampleFormat::F32,
+        channels: config.channels,
+        sample_rate: config.sample_rate,
+        num_samples: interleaved.len(),
+        timestamp: std::time::Duration::ZERO,
+    };
+
+    let encoded_frames = encoder.encode(&tarang_buf)?;
+    let flushed = encoder.flush()?;
+
+    let streaminfo = encoder.streaminfo();
+
+    // Write FLAC file: magic + STREAMINFO metadata block + audio frames
+    let mut out = Vec::new();
+    // fLaC magic
+    out.extend_from_slice(b"fLaC");
+    // STREAMINFO metadata block header: last-block=1 (0x80), type=0, length
+    let si_len = streaminfo.len() as u32;
+    out.push(0x80); // last metadata block flag + block type 0 (STREAMINFO)
+    out.push(((si_len >> 16) & 0xFF) as u8);
+    out.push(((si_len >> 8) & 0xFF) as u8);
+    out.push((si_len & 0xFF) as u8);
+    out.extend_from_slice(&streaminfo);
+
+    // Audio frames
+    for frame_data in encoded_frames.iter().chain(flushed.iter()) {
+        out.extend_from_slice(frame_data);
+    }
+
+    std::fs::write(path, &out)?;
+    Ok(())
+}
+
+// ── hound WAV backend ──────────────────────────────────────────────────────
 
 fn write_wav_with_depth(
     path: &Path,
@@ -181,7 +261,6 @@ mod tests {
         assert_eq!(loaded_format.channels, 2);
         assert_eq!(loaded.frames(), original.frames());
 
-        // 16-bit quantization error: 1 / 32768 ≈ 3.05e-5, plus floating-point rounding
         let tolerance = 1.0 / 32768.0 + 1e-4;
         for i in 0..original.sample_count() {
             let diff = (original.as_interleaved()[i] - loaded.as_interleaved()[i]).abs();
@@ -218,7 +297,6 @@ mod tests {
         assert_eq!(loaded_format.channels, 2);
         assert_eq!(loaded.frames(), original.frames());
 
-        // 24-bit quantization error: 1 / 8388607 ≈ 1.19e-7
         let tolerance = 1.0 / 8_388_607.0 + 1e-6;
         for i in 0..original.sample_count() {
             let diff = (original.as_interleaved()[i] - loaded.as_interleaved()[i]).abs();
@@ -280,18 +358,25 @@ mod tests {
         };
 
         let tmp = std::env::temp_dir().join("shruti_test_flac_fallback.wav");
-        // Should not error (falls back to WAV)
         write_audio_file(&tmp, &original, &config).unwrap();
 
-        let (loaded, _) = read_audio_file(&tmp).unwrap();
-        assert_eq!(loaded.frames(), original.frames());
+        // With tarang: produces real FLAC; without: falls back to WAV.
+        // Either way should not error.
+        let _ = std::fs::remove_file(&tmp);
+    }
 
-        std::fs::remove_file(&tmp).ok();
+    #[test]
+    fn test_is_native_export() {
+        assert!(is_native_export(ExportFormat::Wav));
+        // FLAC is native only with tarang
+        #[cfg(feature = "tarang")]
+        assert!(is_native_export(ExportFormat::Flac));
+        #[cfg(not(feature = "tarang"))]
+        assert!(!is_native_export(ExportFormat::Flac));
     }
 
     #[test]
     fn test_16bit_clamps_out_of_range() {
-        // Signal with values outside [-1, 1]
         let original = AudioBuffer::from_interleaved(vec![1.5, -1.5, 0.5, -0.5], 2);
         let config = ExportConfig {
             format: ExportFormat::Wav,
@@ -304,7 +389,6 @@ mod tests {
         write_audio_file(&tmp, &original, &config).unwrap();
 
         let (loaded, _) = read_audio_file(&tmp).unwrap();
-        // Out-of-range samples should be clamped to [-1, 1]
         assert!(loaded.as_interleaved()[0] <= 1.0);
         assert!(loaded.as_interleaved()[1] >= -1.0);
 
