@@ -106,9 +106,12 @@ pub async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(Mutex::new(shared));
     let app = app(state);
 
-    // Bind to localhost only — the agent API should not be exposed to the
-    // network.  Use a reverse proxy if remote access is needed.
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    // Default to localhost; override with SHRUTI_HOST=0.0.0.0 for Docker.
+    let host: std::net::IpAddr = std::env::var("SHRUTI_HOST")
+        .ok()
+        .and_then(|h| h.parse().ok())
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+    let addr = std::net::SocketAddr::from((host, port));
     eprintln!("shruti serve listening on http://{addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
