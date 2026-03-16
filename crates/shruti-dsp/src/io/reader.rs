@@ -1,29 +1,29 @@
-use std::fs::File;
 use std::path::Path;
 
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
+use tarang_audio::FileDecoder;
 
 use crate::buffer::AudioBuffer;
 use crate::format::AudioFormat;
 
 /// Supported audio file extensions for reading.
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "flac", "aiff", "aif", "ogg"];
-
-/// Read an audio file (WAV, FLAC, AIFF, OGG/Vorbis) into an AudioBuffer.
 ///
-/// Wraps symphonia decoding in `catch_unwind` to safely handle malformed files
+/// Powered by tarang-audio (symphonia backend): lossless (WAV, FLAC, AIFF),
+/// lossy (OGG/Vorbis, MP3, AAC/M4A, ALAC), and Opus.
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "wav", "flac", "aiff", "aif", "ogg", "mp3", "m4a", "aac", "alac", "opus",
+];
+
+/// Read an audio file into an AudioBuffer using tarang-audio.
+///
+/// Supports WAV, FLAC, AIFF, OGG/Vorbis, MP3, AAC, ALAC, and Opus.
+/// Wraps decoding in `catch_unwind` to safely handle malformed files
 /// that might cause panics in the decoder, returning an error instead.
 pub fn read_audio_file(
     path: &Path,
 ) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
     let path = path.to_path_buf();
     // Wrap the entire decoding pipeline in catch_unwind to handle malformed files
-    // that may cause panics in symphonia's decoders.
+    // that may cause panics in symphonia's decoders (via tarang-audio).
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         read_audio_file_inner(&path)
     }));
@@ -43,67 +43,36 @@ pub fn read_audio_file(
     }
 }
 
-/// Inner implementation of audio file reading (may panic on malformed input).
+/// Inner implementation using tarang-audio's FileDecoder.
 fn read_audio_file_inner(
     path: &Path,
 ) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut decoder = FileDecoder::open_path(path)?;
 
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
+    let sample_rate = decoder.sample_rate();
+    let channels = decoder.channels();
 
-    let probed = symphonia::default::get_probe().format(
-        &hint,
-        mss,
-        &FormatOptions::default(),
-        &MetadataOptions::default(),
-    )?;
-
-    let mut format = probed.format;
-    let track = format.tracks().first().ok_or("no audio tracks found")?;
-
-    let channels = track
-        .codec_params
-        .channels
-        .map(|c| c.count() as u16)
-        .unwrap_or(2);
-    let sample_rate = track.codec_params.sample_rate.unwrap_or(48000);
-
-    let mut decoder =
-        symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
-
-    let track_id = track.id;
-    let mut all_samples: Vec<f32> = Vec::new();
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(symphonia::core::errors::Error::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        if packet.track_id() != track_id {
-            continue;
+    let tarang_buf = match decoder.decode_all() {
+        Ok(buf) => buf,
+        Err(tarang_core::TarangError::DecodeError(ref msg)) if msg == "no audio decoded" => {
+            // Empty file — return an empty buffer
+            let audio_format = AudioFormat::new(sample_rate, channels, 0);
+            let buffer = AudioBuffer::new(channels, 0);
+            return Ok((buffer, audio_format));
         }
+        Err(e) => return Err(e.into()),
+    };
 
-        let decoded = decoder.decode(&packet)?;
-        let spec = *decoded.spec();
-        let duration = decoded.capacity();
-
-        let mut sample_buf = SampleBuffer::<f32>::new(duration as u64, spec);
-        sample_buf.copy_interleaved_ref(decoded);
-        all_samples.extend_from_slice(sample_buf.samples());
+    // Convert tarang's AudioBuffer (Bytes of f32) to shruti's AudioBuffer (Vec<f32>)
+    let float_bytes = &tarang_buf.data;
+    let num_floats = float_bytes.len() / 4;
+    let mut samples = Vec::with_capacity(num_floats);
+    for chunk in float_bytes.chunks_exact(4) {
+        samples.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
     }
 
     let audio_format = AudioFormat::new(sample_rate, channels, 0);
-    let buffer = AudioBuffer::from_interleaved(all_samples, channels);
+    let buffer = AudioBuffer::from_interleaved(samples, channels);
 
     Ok((buffer, audio_format))
 }
@@ -128,10 +97,14 @@ mod tests {
         assert!(is_supported_extension("aiff"));
         assert!(is_supported_extension("aif"));
         assert!(is_supported_extension("ogg"));
+        assert!(is_supported_extension("mp3"));
+        assert!(is_supported_extension("m4a"));
+        assert!(is_supported_extension("aac"));
+        assert!(is_supported_extension("alac"));
+        assert!(is_supported_extension("opus"));
         assert!(is_supported_extension("WAV"));
         assert!(is_supported_extension("OGG"));
-        assert!(!is_supported_extension("mp3"));
-        assert!(!is_supported_extension("m4a"));
+        assert!(is_supported_extension("MP3"));
     }
 
     #[test]
@@ -177,8 +150,6 @@ mod tests {
 
     #[test]
     fn read_truncated_wav_returns_error_not_panic() {
-        // Write a file with a valid WAV header but truncated/corrupt data.
-        // This tests that catch_unwind protects against decoder panics.
         let dir = std::env::temp_dir().join("shruti_reader_truncated");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("truncated.wav");
@@ -186,25 +157,24 @@ mod tests {
         // Minimal WAV header (44 bytes) with data size claiming more data than exists
         let mut header = vec![0u8; 44];
         header[0..4].copy_from_slice(b"RIFF");
-        let file_size: u32 = 10000; // claims large file
+        let file_size: u32 = 10000;
         header[4..8].copy_from_slice(&file_size.to_le_bytes());
         header[8..12].copy_from_slice(b"WAVE");
         header[12..16].copy_from_slice(b"fmt ");
-        header[16..20].copy_from_slice(&16u32.to_le_bytes()); // chunk size
+        header[16..20].copy_from_slice(&16u32.to_le_bytes());
         header[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
         header[22..24].copy_from_slice(&1u16.to_le_bytes()); // mono
-        header[24..28].copy_from_slice(&44100u32.to_le_bytes()); // sample rate
-        header[28..32].copy_from_slice(&(44100u32 * 2).to_le_bytes()); // byte rate
-        header[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
-        header[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
+        header[24..28].copy_from_slice(&44100u32.to_le_bytes());
+        header[28..32].copy_from_slice(&(44100u32 * 2).to_le_bytes());
+        header[32..34].copy_from_slice(&2u16.to_le_bytes());
+        header[34..36].copy_from_slice(&16u16.to_le_bytes());
         header[36..40].copy_from_slice(b"data");
-        header[40..44].copy_from_slice(&9000u32.to_le_bytes()); // data size (but file ends here)
+        header[40..44].copy_from_slice(&9000u32.to_le_bytes());
 
         std::fs::write(&path, &header).unwrap();
 
         // Should return an error, not panic
         let result = read_audio_file(&path);
-        // It may succeed with 0 samples or return an error -- either is fine, no panic
         assert!(
             result.is_ok() || result.is_err(),
             "Should not panic on truncated file"
@@ -216,7 +186,6 @@ mod tests {
 
     #[test]
     fn read_random_bytes_returns_error_not_panic() {
-        // Write random-looking bytes that could trigger decoder edge cases
         let dir = std::env::temp_dir().join("shruti_reader_random");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("random.wav");
@@ -224,7 +193,6 @@ mod tests {
         let garbage: Vec<u8> = (0..1024).map(|i| (i * 37 + 13) as u8).collect();
         std::fs::write(&path, &garbage).unwrap();
 
-        // Should return an error, not panic
         let result = read_audio_file(&path);
         assert!(result.is_err(), "Random bytes should produce an error");
 

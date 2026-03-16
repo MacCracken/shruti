@@ -3,6 +3,18 @@
 All notable changes to Shruti are documented here.
 Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 
+## 2026.3.16 — Tarang Audio Backend Integration
+
+### Audio Decoding via tarang-audio
+- Replaced direct symphonia dependency in shruti-dsp with tarang-audio (`FileDecoder`)
+- All audio file reading now goes through tarang-audio's decode pipeline
+- Removed `symphonia` workspace dependency — symphonia is now a transitive dep via tarang
+- **New format support**: MP3, AAC (M4A), ALAC, Opus — in addition to existing WAV, FLAC, AIFF, OGG/Vorbis
+- `SUPPORTED_EXTENSIONS` expanded: `mp3`, `m4a`, `aac`, `alac`, `opus`
+- Empty file handling: gracefully returns zero-frame buffer when tarang reports no audio decoded
+- `catch_unwind` safety wrapper retained for malformed file protection
+- Writer unchanged (hound for WAV export) — will migrate to tarang once M5 (Audio Encoding) lands
+
 ## 2026.3.14 — Engineering Backlog (High Priority)
 
 ### Newtypes for Domain IDs

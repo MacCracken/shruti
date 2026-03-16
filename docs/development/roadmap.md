@@ -126,12 +126,11 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 ## Post-MVP
 
 ### Tarang Media Backend Integration
-- Adopt **tarang** (`/home/macro/Repos/tarang`) as unified media I/O layer
-- `tarang-audio` for format decoding — already uses symphonia (same as shruti-dsp's current WAV/FLAC/AIFF/OGG I/O)
+- ~~`tarang-audio` for format decoding~~ — **Done** (2026-03-16): shruti-dsp reads via `FileDecoder`, symphonia removed as direct dep
+- `tarang-audio` for encoding — replaces hound WAV writer once tarang M5 (Audio Encoding) lands
 - `tarang-demux` for container-aware import (MP4 audio tracks, MKV, WebM)
 - `tarang-ai` for audio analysis (content classification, transcription for vocal alignment)
-- **Benefit**: Shared decode codebase with Tazama and AGNOS media player, wider format support, no ffmpeg dep
-- **Effort**: Low-Medium — shruti-dsp already uses symphonia; mostly wrapping tarang-audio instead of direct symphonia calls
+- **Benefit**: Shared decode/encode codebase with Tazama and AGNOS media player, wider format support, no ffmpeg dep
 
 ### Synthesizers
 
