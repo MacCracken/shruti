@@ -4,6 +4,7 @@
 
 pub mod analysis;
 pub mod buffer;
+pub mod constants;
 pub mod effects;
 pub mod error;
 pub mod format;

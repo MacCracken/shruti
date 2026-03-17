@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.14 | **Last Updated**: 2026-03-14
-> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog (high priority resolved) + code audit R8 — MVP v1 + instruments + full AGNOS integration + audit fixes
-> **Tests**: 1381 passing (184 dsp, 89 engine, 383 instruments, 251 session, 47 plugin, 134 ai, 263 ui + 7 shruti + 23 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
+> **Version**: 2026.3.17 | **Last Updated**: 2026-03-17
+> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog (high + medium priority resolved) + code audit R8 — MVP v1 + instruments + full AGNOS integration + audit fixes + constants refactor + setter patterns + undo COW + drag UX + 4-point PolyBLEP
+> **Tests**: 1395 passing (190 dsp, 89 engine, 426 instruments, 257 session, 47 plugin, 134 ai, 263 ui + 7 shruti + 23 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -30,6 +30,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — Live Recording | Audio capture | Input stream wiring, start/stop recording, buffer→pool→region pipeline, configurable RecordingConfig (44.1–192 kHz, 1–8 ch) |
 | 8A — Instrument Engine | Built-in instruments | `shruti-instruments` crate, InstrumentNode trait, VoiceManager, Oscillator (PolyBLEP), ADSR Envelope, SubtractiveSynth |
 | — Code Audit (R1-6) | Security, perf, memory, correctness, concurrency | Pre-allocated audio buffers, filter coeff caching, FFT validation, path traversal guard, export overflow guard, record buffer cap, transport loop fix, Acquire/Release atomics, atomic session update |
+| — Engineering (Med) | Constants, setters, undo COW, drag UX, PolyBLEP | Named constants in dsp+instruments, consistent setter patterns, Box-based undo history, drag ghost/cursor feedback, 4-point PolyBLEP oscillator |
 
 ---
 
@@ -226,7 +227,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Engineering Backlog
 
-All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
+All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
 
 ### DSP
 
@@ -238,21 +239,18 @@ All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| M | PolyBLEP rising edge correction | Sawtooth only corrects trailing edge; add phase=0 correction for better anti-aliasing |
 | L | InstrumentPreset clone overhead | Use `Cow` or `Arc` for shared preset data |
 
 ### Session
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| M | Undo history delta/COW | Current stores full command copies; reduce memory for large sessions |
 | L | SmallString for Track names | Interning or SmallString for hot-path string fields |
 
 ### UI / UX
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| M | Drag visual feedback | Ghost/opacity on dragged regions; cursor hints on interactive elements |
 | L | Theme JSON validation | Reject malformed theme files gracefully |
 
 ### Code Quality
@@ -262,8 +260,7 @@ All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 | M | Test coverage to 65%+ | Currently 64% (5409/8450); need ~83 more lines — target plugin (76%), engine (82%), AI (90%) gaps |
 | M | Shared test utilities crate | Deduplicate `generate_sine()`, `rms_of_buffer()` helpers |
 | M | Integration test crate | Cross-crate tests: synth→filter→delay→output pipeline |
-| M | Centralize magic numbers | Config module for hardcoded values (window size, max delay, frequency ranges) |
-| M | Consistent setter patterns | Standardize on setter methods or public fields in instruments, not both |
+
 | L | Unnecessary `to_vec()` in AI analysis | Pass slice references instead of cloning |
 | L | StereoPanner reuse | Reuse panner instances instead of creating per-track per-buffer |
 
@@ -286,7 +283,7 @@ All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 
 ## Test Coverage
 
-**Current:** 1603 tests, 64% line coverage (5409/8450 lines, excluding vendor and binaries).
+**Current:** 1617 tests, 64% line coverage (5409/8450 lines, excluding vendor and binaries).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 50% (fails build if coverage drops below).
 
@@ -310,4 +307,4 @@ All CRITICAL/HIGH issues resolved. Remaining MEDIUM/LOW items grouped by domain.
 | UI data logic | 75% | app.rs action dispatch, state transitions, theme construction | Extract pure functions from egui callbacks |
 | UI widget math | 80% | fader dB math, knob angles, meter decay, grid calculations | Test computation functions, skip painting code |
 
-*Last Updated: 2026-03-14*
+*Last Updated: 2026-03-17*

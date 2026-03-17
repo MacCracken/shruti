@@ -1,4 +1,8 @@
 use crate::buffer::AudioBuffer;
+use crate::constants::{
+    DB_FLOOR, DEFAULT_COMPRESSOR_ATTACK, DEFAULT_COMPRESSOR_KNEE, DEFAULT_COMPRESSOR_RATIO,
+    DEFAULT_COMPRESSOR_RELEASE, DEFAULT_COMPRESSOR_THRESHOLD, LINEAR_FLOOR,
+};
 use crate::format::Sample;
 
 /// Dynamic range compressor with adjustable threshold, ratio, attack, and release.
@@ -24,12 +28,12 @@ pub struct Compressor {
 impl Compressor {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            threshold_db: -20.0,
-            ratio: 4.0,
-            attack: 0.01,
-            release: 0.1,
+            threshold_db: DEFAULT_COMPRESSOR_THRESHOLD,
+            ratio: DEFAULT_COMPRESSOR_RATIO,
+            attack: DEFAULT_COMPRESSOR_ATTACK,
+            release: DEFAULT_COMPRESSOR_RELEASE,
             makeup_db: 0.0,
-            knee_db: 6.0,
+            knee_db: DEFAULT_COMPRESSOR_KNEE,
             sample_rate,
             envelope: 0.0,
         }
@@ -141,8 +145,8 @@ fn fast_db_to_linear(db: f32) -> f32 {
 /// Maximum error ~0.3% for typical audio levels.
 #[inline]
 fn fast_linear_to_db(linear: f32) -> f32 {
-    if linear < 1e-10 {
-        return -200.0;
+    if linear < LINEAR_FLOOR {
+        return DB_FLOOR;
     }
     // Fast log2 via IEEE 754 bit manipulation
     let bits = linear.to_bits();

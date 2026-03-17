@@ -1,4 +1,5 @@
 use crate::AudioBuffer;
+use crate::constants::{DB_FLOOR, LINEAR_FLOOR, MAX_FFT_SIZE, SPECTRAL_ROLLOFF_THRESHOLD};
 
 /// Result of spectral analysis on a buffer.
 #[derive(Debug, Clone)]
@@ -20,9 +21,6 @@ pub struct SpectralAnalysis {
     /// Spectral rolloff frequency in Hz (95% energy threshold).
     pub spectral_rolloff: f32,
 }
-
-/// Maximum allowed FFT size to prevent excessive memory allocation.
-const MAX_FFT_SIZE: usize = 65536;
 
 /// Perform spectral analysis on an AudioBuffer.
 /// Analyzes the specified channel (default 0).
@@ -63,10 +61,10 @@ pub fn analyze_spectrum(
     for i in 0..num_bins {
         let mag = (real[i] * real[i] + imag[i] * imag[i]).sqrt() as f32;
         magnitudes_linear.push(mag);
-        let db = if mag > 1e-10 {
+        let db = if mag > LINEAR_FLOOR {
             20.0 * mag.log10()
         } else {
-            -200.0
+            DB_FLOOR
         };
         magnitude_db.push(db);
     }
@@ -80,15 +78,15 @@ pub fn analyze_spectrum(
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or((0, &0.0));
     let peak_frequency = peak_bin as f32 * frequency_resolution;
-    let peak_magnitude_db = if peak_mag > 1e-10 {
+    let peak_magnitude_db = if peak_mag > LINEAR_FLOOR {
         20.0 * peak_mag.log10()
     } else {
-        -200.0
+        DB_FLOOR
     };
 
     // Spectral centroid: weighted mean of frequencies by magnitude
     let total_mag: f32 = magnitudes_linear.iter().sum();
-    let spectral_centroid = if total_mag > 1e-10 {
+    let spectral_centroid = if total_mag > LINEAR_FLOOR {
         magnitudes_linear
             .iter()
             .enumerate()
@@ -101,7 +99,7 @@ pub fn analyze_spectrum(
 
     // Spectral rolloff: frequency below which 95% of spectral energy is concentrated
     let total_energy: f32 = magnitudes_linear.iter().map(|m| m * m).sum();
-    let threshold = total_energy * 0.95;
+    let threshold = total_energy * SPECTRAL_ROLLOFF_THRESHOLD;
     let mut cumulative = 0.0f32;
     let mut rolloff_bin = num_bins - 1;
     for (i, &m) in magnitudes_linear.iter().enumerate() {

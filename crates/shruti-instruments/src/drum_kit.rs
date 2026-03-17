@@ -50,7 +50,7 @@ impl DrumKitPad {
             midi_note: pad.midi_note,
             pitch: pad.pitch,
             gain: pad.gain,
-            pan: pad.pan,
+            pan: pad.pan(),
             decay: pad.decay,
             play_mode: pad.play_mode,
             filter_cutoff: pad.effects.filter_cutoff,
@@ -67,7 +67,7 @@ impl DrumKitPad {
         pad.midi_note = self.midi_note;
         pad.pitch = self.pitch;
         pad.gain = self.gain;
-        pad.pan = self.pan;
+        pad.set_pan(self.pan);
         pad.decay = self.decay;
         pad.play_mode = self.play_mode;
         pad.effects.filter_cutoff = self.filter_cutoff;
@@ -134,7 +134,7 @@ mod tests {
         dm.pads[0].name = "Custom Kick".to_string();
         dm.pads[0].pitch = 0.8;
         dm.pads[0].gain = 0.9;
-        dm.pads[0].pan = -0.3;
+        dm.pads[0].set_pan(-0.3);
         dm.pads[0].decay = 0.5;
         dm.pads[0].play_mode = PlayMode::Looped;
         dm.pads[1].name = "Custom Snare".to_string();
@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(kit.pads[0].name, "Custom Kick");
         assert!((kit.pads[0].pitch - 0.8).abs() < f32::EPSILON);
         assert!((kit.pads[0].gain - 0.9).abs() < f32::EPSILON);
-        assert!((kit.pads[0].pan - (-0.3)).abs() < f32::EPSILON);
+        assert!((kit.pads[0].pan - (-0.3)).abs() < f32::EPSILON); // DrumKitPad.pan is a plain field
         assert_eq!(kit.pads[0].play_mode, PlayMode::Looped);
         assert_eq!(kit.pads[1].name, "Custom Snare");
     }
@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(fresh_dm.pads[0].name, "Custom Kick");
         assert!((fresh_dm.pads[0].pitch - 0.8).abs() < f32::EPSILON);
         assert!((fresh_dm.pads[0].gain - 0.9).abs() < f32::EPSILON);
-        assert!((fresh_dm.pads[0].pan - (-0.3)).abs() < f32::EPSILON);
+        assert!((fresh_dm.pads[0].pan() - (-0.3)).abs() < f32::EPSILON);
         assert_eq!(fresh_dm.pads[0].play_mode, PlayMode::Looped);
         assert_eq!(fresh_dm.pads[1].name, "Custom Snare");
     }

@@ -3,6 +3,38 @@
 All notable changes to Shruti are documented here.
 Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 
+## 2026.3.17 — Engineering Backlog (Medium Priority)
+
+### Centralized Constants
+- New `constants` module in `shruti-dsp`: DB_FLOOR, LINEAR_FLOOR, LUFS_OFFSET, reverb defaults (Freeverb reference rate, feedback/damping coefficients), delay defaults, compressor defaults, limiter defaults, meter constants (LUFS block duration, peak decay, max blocks), spectral analysis constants (MAX_FFT_SIZE, rolloff threshold)
+- New `constants` module in `shruti-instruments`: musical constants (A4_FREQUENCY, A4_MIDI_NOTE, SEMITONES_PER_OCTAVE, CENTS_PER_OCTAVE), filter range (MIN/MAX_CUTOFF_HZ, NYQUIST_RATIO), envelope defaults, polyphony limits, RNG seeds, LFO/sampler constants
+- All inline magic numbers replaced with named constants across reverb, delay, compressor, limiter, meter, spectral, dynamics, oscillator, filter, envelope, LFO, voice, synth, sampler
+- 8 new tests validating constant ranges and relationships
+
+### Consistent Instrument Setter Patterns
+- `DrumPad.pan` made private with `pan()` getter and `set_pan()` setter — automatically recomputes cached stereo gains, eliminating the `update_pan_gains()` footgun
+- `Envelope.state` and `Envelope.level` made private with `state()` and `level()` getters — state machine managed only through `trigger()`, `release()`, `reset()`
+- All callers updated across drum_machine, drum_kit, synth, and test code
+
+### Undo History Memory Optimization
+- Heavy data (`Region`, `TrackGroup`) in `EditCommand` variants boxed via `Box<>` — reduces enum size so lightweight variants (trims, gains, toggles) don't pay the size cost of the largest variant
+- Affected variants: AddRegion, RemoveRegion, MoveRegionToTrack, SplitRegion, CreateGroup, RemoveGroup
+- Removed TODO(perf) comment — optimization implemented
+- New test: `edit_command_enum_is_compact` validates enum stays smaller than Region
+
+### Drag Visual Feedback
+- Region move: dashed outline at original position + ghost overlay at dragged position
+- Trim operations (start/end): amber outline showing current region bounds during trim
+- Grab cursor on region center hover, ResizeHorizontal on edge handles
+- Grabbing cursor during active region move and track reorder drags
+- Grab cursor on track header hover for reorder affordance
+
+### 4-Point PolyBLEP Anti-Aliasing
+- Upgraded oscillator from 2-point to 4-point PolyBLEP (integrated cubic residual)
+- Wider correction window (2 samples each side vs 1) for better aliasing suppression at high frequencies
+- Output clamped to [-1, 1] to prevent minor overshoot from wider kernel
+- 3 new tests: outer sample correction, boundary continuity, high-frequency output range
+
 ## 2026.3.16 — Tarang Audio Backend Integration
 
 ### Audio Decoding via tarang-audio

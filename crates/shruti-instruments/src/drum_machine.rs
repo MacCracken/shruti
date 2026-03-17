@@ -115,7 +115,7 @@ pub struct DrumPad {
     pub sample_rate: u32,
     pub pitch: f32,
     pub gain: f32,
-    pub pan: f32,
+    pan: f32,
     pub decay: f32,
     pub play_mode: PlayMode,
     pub midi_note: u8,
@@ -164,9 +164,19 @@ impl DrumPad {
         }
     }
 
+    /// Get the current pan value (-1.0 = left, 0.0 = center, 1.0 = right).
+    pub fn pan(&self) -> f32 {
+        self.pan
+    }
+
+    /// Set pan and automatically recompute cached stereo gains.
+    pub fn set_pan(&mut self, pan: f32) {
+        self.pan = pan.clamp(-1.0, 1.0);
+        self.update_pan_gains();
+    }
+
     /// Recompute cached pan gains from the current `pan` value.
-    /// Call this after changing `pan`.
-    pub fn update_pan_gains(&mut self) {
+    fn update_pan_gains(&mut self) {
         let pan_normalized = (self.pan + 1.0) * 0.5;
         let angle = pan_normalized * std::f32::consts::FRAC_PI_2;
         self.pan_gain_l = angle.cos();
@@ -618,8 +628,7 @@ mod tests {
         let mut pad = DrumPad::new("Kick", 36);
         pad.load_sample(vec![1.0; 100], 44100);
         pad.decay = 0.0;
-        pad.pan = -1.0; // full left
-        pad.update_pan_gains();
+        pad.set_pan(-1.0); // full left
         pad.trigger(127);
 
         let (l, r) = pad.tick();
@@ -635,8 +644,7 @@ mod tests {
         let mut pad = DrumPad::new("HH", 42);
         pad.load_sample(vec![1.0; 100], 44100);
         pad.decay = 0.0;
-        pad.pan = 1.0; // full right
-        pad.update_pan_gains();
+        pad.set_pan(1.0); // full right
         pad.trigger(127);
 
         let (l, r) = pad.tick();
@@ -652,8 +660,7 @@ mod tests {
         let mut pad = DrumPad::new("Snare", 38);
         pad.load_sample(vec![1.0; 100], 44100);
         pad.decay = 0.0;
-        pad.pan = 0.0;
-        pad.update_pan_gains();
+        pad.set_pan(0.0);
         pad.trigger(127);
 
         let (l, r) = pad.tick();

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{A4_FREQUENCY, A4_MIDI_NOTE, SEMITONES_PER_OCTAVE};
+
 /// Voice state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceState {
@@ -68,7 +70,7 @@ impl Voice {
 
     /// Frequency in Hz for this voice's MIDI note.
     pub fn frequency(&self) -> f64 {
-        440.0 * 2.0f64.powf((self.note as f64 - 69.0) / 12.0)
+        A4_FREQUENCY * 2.0f64.powf((self.note as f64 - A4_MIDI_NOTE) / SEMITONES_PER_OCTAVE)
     }
 }
 

@@ -1,5 +1,6 @@
 //! Built-in virtual instruments for Shruti.
 
+pub mod constants;
 pub mod drum_kit;
 pub mod drum_machine;
 pub mod effect_chain;

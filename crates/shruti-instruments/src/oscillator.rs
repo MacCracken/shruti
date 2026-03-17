@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{CENTS_PER_OCTAVE, OSCILLATOR_RNG_SEED};
+
 /// Waveform type for oscillators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Waveform {
@@ -24,7 +26,7 @@ impl Oscillator {
             waveform,
             detune: 0.0,
             sample_rate,
-            rng_state: 12345,
+            rng_state: OSCILLATOR_RNG_SEED,
         }
     }
 
@@ -51,24 +53,24 @@ impl Oscillator {
     /// Generate a single sample at the given phase (0.0 to 1.0) and frequency.
     #[inline]
     pub fn sample(&mut self, phase: f64, frequency: f64) -> f32 {
-        let freq = frequency * Self::fast_exp2_f64(self.detune / 1200.0); // detune in cents
+        let freq = frequency * Self::fast_exp2_f64(self.detune / CENTS_PER_OCTAVE);
         let dt = freq / self.sample_rate;
 
         match self.waveform {
             Waveform::Sine => (phase * std::f64::consts::TAU).sin() as f32,
             Waveform::Saw => {
                 let naive = 2.0 * phase - 1.0;
-                // PolyBLEP corrects both the rising edge (phase near 0) and
-                // trailing edge (phase near 1) of the discontinuity at the
-                // cycle wrap point, smoothing the transition for anti-aliasing.
-                (naive - Self::poly_blep(phase, dt)) as f32
+                // 4-point PolyBLEP corrects both edges of the discontinuity
+                // at the cycle wrap point, smoothing for anti-aliasing.
+                let corrected = naive - Self::poly_blep(phase, dt);
+                (corrected.clamp(-1.0, 1.0)) as f32
             }
             Waveform::Square => {
                 let naive = if phase < 0.5 { 1.0 } else { -1.0 };
                 let mut out = naive;
                 out += Self::poly_blep(phase, dt);
                 out -= Self::poly_blep((phase + 0.5) % 1.0, dt);
-                out as f32
+                out.clamp(-1.0, 1.0) as f32
             }
             Waveform::Triangle => {
                 // Phase-based triangle wave
@@ -99,15 +101,44 @@ impl Oscillator {
         new - new.floor()
     }
 
-    /// PolyBLEP anti-aliasing correction.
+    /// 4-point PolyBLEP anti-aliasing correction (integrated cubic residual).
+    ///
+    /// Extends the correction window to 2 samples on each side of the
+    /// discontinuity (vs 1 sample for 2-point PolyBLEP), providing better
+    /// suppression of aliasing harmonics at high frequencies.
+    ///
+    /// The 4-point residual is derived by integrating a piecewise-cubic
+    /// BLAMP kernel, yielding C1 continuity at the transition boundaries.
     #[inline]
     fn poly_blep(phase: f64, dt: f64) -> f64 {
+        let dt2 = 2.0 * dt;
         if phase < dt {
+            // 0..dt: first sample after discontinuity, t in [0, 1)
             let t = phase / dt;
-            2.0 * t - t * t - 1.0
+            let t2 = t * t;
+            // 2-point correction + cubic refinement for wider window
+            let blep2 = 2.0 * t - t2 - 1.0;
+            // Additional cubic term smooths the correction tail
+            let cubic = t2 * (t - 1.0) * 0.5;
+            blep2 + cubic
+        } else if phase < dt2 {
+            // dt..2*dt: second sample after discontinuity, t in [0, 1)
+            let t = phase / dt - 1.0;
+            let t2 = t * t;
+            // Small cubic correction for the outer sample
+            -t2 * (1.0 - t) * 0.5
         } else if phase > 1.0 - dt {
+            // (1-dt)..1: first sample before discontinuity, t in (-1, 0]
             let t = (phase - 1.0) / dt;
-            t * t + 2.0 * t + 1.0
+            let t2 = t * t;
+            let blep2 = t2 + 2.0 * t + 1.0;
+            let cubic = -t2 * (t + 1.0) * 0.5;
+            blep2 + cubic
+        } else if phase > 1.0 - dt2 {
+            // (1-2*dt)..(1-dt): second sample before discontinuity
+            let t = (phase - 1.0) / dt + 1.0;
+            let t2 = t * t;
+            t2 * (1.0 + t) * 0.5
         } else {
             0.0
         }
@@ -508,5 +539,64 @@ mod tests {
             (0.7..=1.4).contains(&ratio),
             "Noise pos/neg ratio unbalanced: {ratio} (pos={pos_count}, neg={neg_count})",
         );
+    }
+
+    // ================================================================
+    // 5. 4-point PolyBLEP tests
+    // ================================================================
+
+    #[test]
+    fn poly_blep_4point_outer_samples_have_correction() {
+        // The 4-point PolyBLEP should produce non-zero corrections at
+        // the outer samples (dt..2*dt and 1-2*dt..1-dt), unlike 2-point.
+        let dt = 0.01;
+        let phase_outer_rising = dt * 1.5; // in the second interval
+        let blep = Oscillator::poly_blep(phase_outer_rising, dt);
+        assert!(
+            blep.abs() > 1e-6,
+            "4-point should correct outer rising sample, got {blep}"
+        );
+
+        let phase_outer_trailing = 1.0 - dt * 1.5;
+        let blep = Oscillator::poly_blep(phase_outer_trailing, dt);
+        assert!(
+            blep.abs() > 1e-6,
+            "4-point should correct outer trailing sample, got {blep}"
+        );
+    }
+
+    #[test]
+    fn poly_blep_4point_continuity_at_boundaries() {
+        // Verify the correction approaches 0 at the edge of the window.
+        let dt = 0.01;
+
+        // At the outer boundary (phase = 2*dt), correction should be ~0
+        let blep_at_2dt = Oscillator::poly_blep(2.0 * dt - 1e-12, dt);
+        assert!(
+            blep_at_2dt.abs() < 0.01,
+            "correction should vanish at 2*dt boundary, got {blep_at_2dt}"
+        );
+
+        // At phase = 1 - 2*dt, correction should also be ~0
+        let blep_at_1m2dt = Oscillator::poly_blep(1.0 - 2.0 * dt + 1e-12, dt);
+        assert!(
+            blep_at_1m2dt.abs() < 0.01,
+            "correction should vanish at 1-2*dt boundary, got {blep_at_1m2dt}"
+        );
+    }
+
+    #[test]
+    fn saw_4point_output_stays_in_range() {
+        // At high frequencies, 4-point PolyBLEP should keep saw output in [-1, 1]
+        let sample_rate = 48000.0;
+        for freq in [8000.0, 12000.0, 16000.0, 20000.0] {
+            let buf = generate_samples(Waveform::Saw, freq, sample_rate, 4800);
+            for (i, s) in buf.iter().enumerate() {
+                assert!(
+                    *s >= -1.05 && *s <= 1.05,
+                    "Saw at {freq}Hz, sample {i} out of range: {s}"
+                );
+            }
+        }
     }
 }

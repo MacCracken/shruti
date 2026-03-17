@@ -1,4 +1,8 @@
 use crate::buffer::AudioBuffer;
+use crate::constants::{
+    DB_FLOOR, LINEAR_FLOOR, LUFS_BLOCK_DURATION, LUFS_OFFSET, MAX_LUFS_BLOCKS,
+    PEAK_DECAY_COEFFICIENT,
+};
 
 /// Audio level meter with peak, RMS, and LUFS measurements.
 #[derive(Debug, Clone)]
@@ -27,15 +31,15 @@ impl Meter {
         Self {
             peak: vec![0.0; channels],
             rms: vec![0.0; channels],
-            lufs: -200.0,
+            lufs: DB_FLOOR,
             channels,
             rms_sum: vec![0.0; channels],
             rms_count: 0,
             lufs_blocks: Vec::new(),
-            lufs_buffer: vec![0.0; (sample_rate * 0.4) as usize], // 400ms blocks
+            lufs_buffer: vec![0.0; (sample_rate * LUFS_BLOCK_DURATION) as usize],
             lufs_buffer_pos: 0,
             peak_hold: vec![0.0; channels],
-            peak_decay: 0.9995,
+            peak_decay: PEAK_DECAY_COEFFICIENT,
         }
     }
 
@@ -115,13 +119,9 @@ impl Meter {
     /// Uses in-place iteration to avoid temporary Vec allocations.
     fn compute_lufs(&mut self) {
         if self.lufs_blocks.is_empty() {
-            self.lufs = -200.0;
+            self.lufs = DB_FLOOR;
             return;
         }
-
-        // Cap lufs_blocks to prevent unbounded growth.
-        // Keep the most recent blocks (roughly 10 minutes of 400ms blocks = 1500).
-        const MAX_LUFS_BLOCKS: usize = 1500;
         if self.lufs_blocks.len() > MAX_LUFS_BLOCKS {
             let drain_count = self.lufs_blocks.len() - MAX_LUFS_BLOCKS;
             self.lufs_blocks.drain(..drain_count);
@@ -141,7 +141,7 @@ impl Meter {
         }
 
         if gated_count == 0 {
-            self.lufs = -200.0;
+            self.lufs = DB_FLOOR;
             return;
         }
 
@@ -160,12 +160,12 @@ impl Meter {
         }
 
         if final_count == 0 {
-            self.lufs = -200.0;
+            self.lufs = DB_FLOOR;
             return;
         }
 
         let integrated = final_sum / final_count as f64;
-        self.lufs = (-0.691 + 10.0 * integrated.log10()) as f32;
+        self.lufs = (LUFS_OFFSET + 10.0 * integrated.log10()) as f32;
     }
 
     /// Get peak level in dB for a channel.
@@ -187,7 +187,7 @@ impl Meter {
     pub fn reset(&mut self) {
         self.peak.fill(0.0);
         self.rms.fill(0.0);
-        self.lufs = -200.0;
+        self.lufs = DB_FLOOR;
         self.rms_sum.fill(0.0);
         self.rms_count = 0;
         self.lufs_blocks.clear();
@@ -198,8 +198,8 @@ impl Meter {
 }
 
 fn linear_to_db(linear: f32) -> f32 {
-    if linear < 1e-10 {
-        -200.0
+    if linear < LINEAR_FLOOR {
+        DB_FLOOR
     } else {
         20.0 * linear.log10()
     }

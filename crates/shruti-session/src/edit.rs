@@ -5,16 +5,23 @@ use crate::track::{TrackGroup, TrackGroupId, TrackId};
 use crate::types::{FramePos, TrackSlot};
 
 /// An editing command that can be applied and undone.
+///
+/// Heavy data (Region, TrackGroup) is boxed to keep the enum small.
+/// This reduces memory per undo entry — lightweight variants (trims,
+/// gain changes, toggles) no longer pay the size cost of the largest variant.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EditCommand {
     /// Add a region to a track.
-    AddRegion { track_id: TrackId, region: Region },
+    AddRegion {
+        track_id: TrackId,
+        region: Box<Region>,
+    },
     /// Remove a region from a track.
     RemoveRegion {
         track_id: TrackId,
         region_id: RegionId,
         /// The removed region, stored for undo.
-        region: Option<Region>,
+        region: Option<Box<Region>>,
     },
     /// Move a region to a new timeline position.
     MoveRegion {
@@ -31,7 +38,7 @@ pub enum EditCommand {
         old_pos: FramePos,
         new_pos: FramePos,
         /// Stored for undo.
-        region: Option<Region>,
+        region: Option<Box<Region>>,
     },
     /// Split a region at a frame position, replacing it with two new regions.
     SplitRegion {
@@ -39,7 +46,7 @@ pub enum EditCommand {
         region_id: RegionId,
         split_frame: FramePos,
         /// The original region before split, stored for undo.
-        original: Option<Region>,
+        original: Option<Box<Region>>,
         /// The two resulting regions after split.
         left_id: Option<RegionId>,
         right_id: Option<RegionId>,
@@ -114,13 +121,13 @@ pub enum EditCommand {
         group_id: TrackGroupId,
         name: String,
         /// Stored for undo (the full group after creation).
-        group: Option<TrackGroup>,
+        group: Option<Box<TrackGroup>>,
     },
     /// Remove a track group.
     RemoveGroup {
         group_id: TrackGroupId,
         /// Stored for undo (the removed group with its members).
-        group: Option<TrackGroup>,
+        group: Option<Box<TrackGroup>>,
     },
     /// Add a track to a group.
     AddTrackToGroup {

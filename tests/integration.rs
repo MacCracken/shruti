@@ -576,7 +576,7 @@ fn undo_redo_comprehensive_12_operations() {
     undo.execute(
         EditCommand::AddRegion {
             track_id,
-            region: region.clone(),
+            region: Box::new(region.clone()),
         },
         &mut session,
     );
@@ -588,7 +588,7 @@ fn undo_redo_comprehensive_12_operations() {
     undo.execute(
         EditCommand::AddRegion {
             track_id,
-            region: region2.clone(),
+            region: Box::new(region2.clone()),
         },
         &mut session,
     );
@@ -711,7 +711,7 @@ fn undo_redo_comprehensive_12_operations() {
     undo.execute(
         EditCommand::AddRegion {
             track_id: track2_id,
-            region: region3,
+            region: Box::new(region3),
         },
         &mut session,
     );

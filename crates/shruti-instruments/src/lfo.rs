@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::LFO_RNG_SEED;
+
 /// LFO waveform shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LfoShape {
@@ -33,7 +35,7 @@ impl Lfo {
             phase: 0.0,
             sample_rate,
             sh_value: 0.0,
-            rng_state: 0x1234_5678,
+            rng_state: LFO_RNG_SEED,
         }
     }
 
@@ -93,7 +95,7 @@ impl Lfo {
     pub fn reset(&mut self) {
         self.phase = 0.0;
         self.sh_value = 0.0;
-        self.rng_state = 0x1234_5678;
+        self.rng_state = LFO_RNG_SEED;
     }
 }
 

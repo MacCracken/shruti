@@ -5,9 +5,9 @@ use crate::session::Session;
 
 /// Manages undo/redo history using the command pattern.
 ///
-/// TODO(perf): Each `EditCommand` stores full copies of regions/groups. For
-/// large sessions, consider using delta-based or copy-on-write representations
-/// (e.g. `Arc<Region>`) to reduce memory pressure when undo history is deep.
+/// Heavy data (Region, TrackGroup) in EditCommand variants is heap-allocated
+/// via `Box`, keeping the enum small so lightweight variants (trims, gain
+/// changes, toggles) don't pay the size cost of the largest variant.
 pub struct UndoManager {
     undo_stack: VecDeque<EditCommand>,
     redo_stack: Vec<EditCommand>,
@@ -88,7 +88,7 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
     match cmd {
         EditCommand::AddRegion { track_id, region } => {
             if let Some(track) = session.track_mut(*track_id) {
-                track.add_region(region.clone());
+                track.add_region((**region).clone());
             }
         }
         EditCommand::RemoveRegion {
@@ -97,7 +97,7 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
             region,
         } => {
             if let Some(track) = session.track_mut(*track_id) {
-                *region = track.remove_region(*region_id);
+                *region = track.remove_region(*region_id).map(Box::new);
             }
         }
         EditCommand::MoveRegion {
@@ -121,9 +121,10 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
             ..
         } => {
             if let Some(track) = session.track_mut(*from_track) {
-                *region = track.remove_region(*region_id);
+                *region = track.remove_region(*region_id).map(Box::new);
             }
-            if let Some(mut r) = region.clone() {
+            if let Some(r) = region.as_ref() {
+                let mut r = (**r).clone();
                 r.timeline_pos = *new_pos;
                 if let Some(track) = session.track_mut(*to_track) {
                     track.add_region(r);
@@ -145,7 +146,7 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
                 if let Some((left, right)) = r_clone.split_at(*split_frame) {
                     *left_id = Some(left.id);
                     *right_id = Some(right.id);
-                    *original = track.remove_region(*region_id);
+                    *original = track.remove_region(*region_id).map(Box::new);
                     track.add_region(left);
                     track.add_region(right);
                 }
@@ -265,11 +266,11 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
             let mut new_group = crate::track::TrackGroup::new(name.clone());
             new_group.id = *group_id;
             session.groups.push(new_group.clone());
-            *group = Some(new_group);
+            *group = Some(Box::new(new_group));
         }
         EditCommand::RemoveGroup { group_id, group } => {
             if let Some(pos) = session.groups.iter().position(|g| g.id == *group_id) {
-                *group = Some(session.groups.remove(pos));
+                *group = Some(Box::new(session.groups.remove(pos)));
             }
         }
         EditCommand::AddTrackToGroup { group_id, track_id } => {
@@ -325,7 +326,7 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
             if let Some(r) = region
                 && let Some(track) = session.track_mut(*track_id)
             {
-                track.add_region(r.clone());
+                track.add_region((**r).clone());
             }
         }
         EditCommand::MoveRegion {
@@ -351,7 +352,8 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
             if let Some(track) = session.track_mut(*to_track) {
                 track.remove_region(*region_id);
             }
-            if let Some(mut r) = region.clone() {
+            if let Some(r) = region.as_ref() {
+                let mut r = (**r).clone();
                 r.timeline_pos = *old_pos;
                 if let Some(track) = session.track_mut(*from_track) {
                     track.add_region(r);
@@ -373,7 +375,7 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
                     track.remove_region(*rid);
                 }
                 if let Some(orig) = original {
-                    track.add_region(orig.clone());
+                    track.add_region((**orig).clone());
                 }
             }
         }
@@ -496,7 +498,7 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
         EditCommand::RemoveGroup { group, .. } => {
             // Undo remove = re-insert
             if let Some(g) = group {
-                session.groups.push(g.clone());
+                session.groups.push((**g).clone());
             }
         }
         EditCommand::AddTrackToGroup { group_id, track_id } => {
@@ -559,6 +561,20 @@ mod tests {
         Region::new("audio.wav".into(), pos, 0u64, duration)
     }
 
+    #[test]
+    fn edit_command_enum_is_compact() {
+        // With heavy data boxed, EditCommand should be no larger than Region.
+        // Lightweight variants (trims, gains, toggles) no longer pay the size
+        // cost of inlining the full Region struct.
+        let cmd_size = std::mem::size_of::<EditCommand>();
+        let region_size = std::mem::size_of::<Region>();
+        assert!(
+            cmd_size <= region_size,
+            "EditCommand ({cmd_size} bytes) should be <= Region ({region_size} bytes) \
+             thanks to boxing heavy variants"
+        );
+    }
+
     // ---------------------------------------------------------------
     // 1. UndoManager creation and default state
     // ---------------------------------------------------------------
@@ -595,7 +611,7 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: region.clone(),
+                region: Box::new(region.clone()),
             },
             &mut session,
         );
@@ -629,14 +645,14 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: r1,
+                region: Box::new(r1),
             },
             &mut session,
         );
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: r2,
+                region: Box::new(r2),
             },
             &mut session,
         );
@@ -678,7 +694,7 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: region.clone(),
+                region: Box::new(region.clone()),
             },
             &mut session,
         );
@@ -718,7 +734,7 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: r1,
+                region: Box::new(r1),
             },
             &mut session,
         );
@@ -731,7 +747,7 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: r2,
+                region: Box::new(r2),
             },
             &mut session,
         );
@@ -1204,11 +1220,11 @@ mod tests {
                 commands: vec![
                     EditCommand::AddRegion {
                         track_id,
-                        region: r1,
+                        region: Box::new(r1),
                     },
                     EditCommand::AddRegion {
                         track_id,
-                        region: r2,
+                        region: Box::new(r2),
                     },
                 ],
             },
@@ -1243,7 +1259,7 @@ mod tests {
             um.execute(
                 EditCommand::AddRegion {
                     track_id,
-                    region: r,
+                    region: Box::new(r),
                 },
                 &mut session,
             );
@@ -1312,7 +1328,7 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: r,
+                region: Box::new(r),
             },
             &mut session,
         );
@@ -1341,7 +1357,7 @@ mod tests {
         um.execute(
             EditCommand::AddRegion {
                 track_id,
-                region: r,
+                region: Box::new(r),
             },
             &mut session,
         );
@@ -1485,7 +1501,7 @@ mod tests {
                 commands: vec![
                     EditCommand::AddRegion {
                         track_id,
-                        region: region.clone(),
+                        region: Box::new(region.clone()),
                     },
                     EditCommand::MoveTrack {
                         from_index: TrackSlot(0),

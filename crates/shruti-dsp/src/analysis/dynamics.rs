@@ -1,4 +1,5 @@
 use crate::AudioBuffer;
+use crate::constants::{DB_FLOOR, LINEAR_FLOOR, LINEAR_FLOOR_F64, LUFS_OFFSET};
 
 /// Result of dynamics analysis on a buffer.
 #[derive(Debug, Clone)]
@@ -78,7 +79,13 @@ pub fn analyze_dynamics(buffer: &AudioBuffer, _sample_rate: u32) -> DynamicsAnal
         })
         .collect();
 
-    let to_db = |x: f32| -> f32 { if x > 1e-10 { 20.0 * x.log10() } else { -200.0 } };
+    let to_db = |x: f32| -> f32 {
+        if x > LINEAR_FLOOR {
+            20.0 * x.log10()
+        } else {
+            DB_FLOOR
+        }
+    };
 
     let peak_db: Vec<f32> = peak.iter().map(|&p| to_db(p)).collect();
     let rms_db: Vec<f32> = rms.iter().map(|&r| to_db(r)).collect();
@@ -87,15 +94,21 @@ pub fn analyze_dynamics(buffer: &AudioBuffer, _sample_rate: u32) -> DynamicsAnal
     let crest_factor_db: Vec<f32> = peak
         .iter()
         .zip(rms.iter())
-        .map(|(&p, &r)| if r > 1e-10 { to_db(p) - to_db(r) } else { 0.0 })
+        .map(|(&p, &r)| {
+            if r > LINEAR_FLOOR {
+                to_db(p) - to_db(r)
+            } else {
+                0.0
+            }
+        })
         .collect();
 
     // Simplified LUFS (mono/stereo mean RMS in LUFS scale)
     let mean_rms_sq: f64 = rms_sum.iter().sum::<f64>() / (channels as f64 * frames.max(1) as f64);
-    let lufs = if mean_rms_sq > 1e-20 {
-        -0.691 + 10.0 * (mean_rms_sq as f32).log10()
+    let lufs = if mean_rms_sq > LINEAR_FLOOR_F64 {
+        LUFS_OFFSET as f32 + 10.0 * (mean_rms_sq as f32).log10()
     } else {
-        -200.0
+        DB_FLOOR
     };
 
     // Dynamic range: max peak dB - mean RMS dB
@@ -103,7 +116,7 @@ pub fn analyze_dynamics(buffer: &AudioBuffer, _sample_rate: u32) -> DynamicsAnal
     let mean_rms_db = if !rms_db.is_empty() {
         rms_db.iter().sum::<f32>() / rms_db.len() as f32
     } else {
-        -200.0
+        DB_FLOOR
     };
     let dynamic_range_db = max_peak_db - mean_rms_db;
 

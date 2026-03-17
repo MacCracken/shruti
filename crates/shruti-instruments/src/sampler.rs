@@ -97,7 +97,7 @@ impl SampleZone {
             return;
         }
 
-        let hop = 512_usize;
+        let hop = crate::constants::ONSET_HOP_SIZE;
         let window = 1024_usize;
         let min_gap = 2048_usize;
         let factor = 1.0 + threshold * 9.0;

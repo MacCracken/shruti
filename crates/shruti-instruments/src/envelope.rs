@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{DEFAULT_ATTACK, DEFAULT_DECAY, DEFAULT_RELEASE, DEFAULT_SUSTAIN};
+
 /// ADSR envelope parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdsrParams {
@@ -16,10 +18,10 @@ pub struct AdsrParams {
 impl Default for AdsrParams {
     fn default() -> Self {
         Self {
-            attack: 0.01,
-            decay: 0.1,
-            sustain: 0.7,
-            release: 0.3,
+            attack: DEFAULT_ATTACK,
+            decay: DEFAULT_DECAY,
+            sustain: DEFAULT_SUSTAIN,
+            release: DEFAULT_RELEASE,
         }
     }
 }
@@ -36,9 +38,9 @@ pub enum EnvelopeState {
 
 /// ADSR envelope generator.
 pub struct Envelope {
-    pub state: EnvelopeState,
+    state: EnvelopeState,
     pub params: AdsrParams,
-    pub level: f32,
+    level: f32,
     sample_rate: f32,
     /// Position within the current stage (in samples).
     stage_pos: u64,
@@ -56,6 +58,16 @@ impl Envelope {
             stage_pos: 0,
             release_start_level: 0.0,
         }
+    }
+
+    /// Current envelope state.
+    pub fn state(&self) -> EnvelopeState {
+        self.state
+    }
+
+    /// Current envelope level (0.0–1.0).
+    pub fn level(&self) -> f32 {
+        self.level
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -150,8 +162,8 @@ mod tests {
     #[test]
     fn envelope_starts_idle() {
         let env = Envelope::new(AdsrParams::default(), 48000.0);
-        assert_eq!(env.state, EnvelopeState::Idle);
-        assert_eq!(env.level, 0.0);
+        assert_eq!(env.state(), EnvelopeState::Idle);
+        assert_eq!(env.level(), 0.0);
     }
 
     #[test]
@@ -188,8 +200,8 @@ mod tests {
         for _ in 0..500 {
             env.tick();
         }
-        assert_eq!(env.state, EnvelopeState::Sustain);
-        assert!((env.level - 0.6).abs() < 0.01);
+        assert_eq!(env.state(), EnvelopeState::Sustain);
+        assert!((env.level() - 0.6).abs() < 0.01);
     }
 
     #[test]
@@ -206,12 +218,12 @@ mod tests {
             env.tick();
         }
         env.release();
-        assert_eq!(env.state, EnvelopeState::Release);
+        assert_eq!(env.state(), EnvelopeState::Release);
         for _ in 0..1000 {
             env.tick();
         }
-        assert_eq!(env.state, EnvelopeState::Idle);
-        assert_eq!(env.level, 0.0);
+        assert_eq!(env.state(), EnvelopeState::Idle);
+        assert_eq!(env.level(), 0.0);
     }
 
     #[test]
@@ -244,14 +256,14 @@ mod tests {
             env.tick();
         }
         env.reset();
-        assert_eq!(env.state, EnvelopeState::Idle);
-        assert_eq!(env.level, 0.0);
+        assert_eq!(env.state(), EnvelopeState::Idle);
+        assert_eq!(env.level(), 0.0);
     }
 
     /// Helper: count samples until envelope leaves a given state.
     fn samples_in_state(env: &mut Envelope, target_state: EnvelopeState, max: usize) -> usize {
         let mut count = 0;
-        while env.state == target_state && count < max {
+        while env.state() == target_state && count < max {
             env.tick();
             count += 1;
         }
@@ -366,7 +378,7 @@ mod tests {
         for _ in 0..1000 {
             env.tick();
         }
-        assert_eq!(env.state, EnvelopeState::Sustain);
+        assert_eq!(env.state(), EnvelopeState::Sustain);
         env.release();
         let samples = samples_in_state(&mut env, EnvelopeState::Release, 100000);
         let ms = samples_to_ms(samples, sr);
@@ -450,7 +462,7 @@ mod tests {
         for _ in 0..500 {
             env.tick();
         }
-        assert_eq!(env.state, EnvelopeState::Sustain);
+        assert_eq!(env.state(), EnvelopeState::Sustain);
         assert_eq!(
             env.stage_pos, 0,
             "stage_pos should be 0 after Decay->Sustain transition"
@@ -476,7 +488,7 @@ mod tests {
         for _ in 0..500 {
             env.tick();
         }
-        assert_eq!(env.state, EnvelopeState::Idle);
+        assert_eq!(env.state(), EnvelopeState::Idle);
         assert_eq!(
             env.stage_pos, 0,
             "stage_pos should be 0 after Release->Idle transition"
@@ -503,7 +515,7 @@ mod tests {
         for _ in 0..100 {
             env.tick();
         }
-        assert_eq!(env.state, EnvelopeState::Idle);
+        assert_eq!(env.state(), EnvelopeState::Idle);
 
         // Retrigger
         env.trigger();

@@ -224,6 +224,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                             from_index: track_idx,
                         });
                     }
+                    if header_drag_resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                    }
 
                     // Timeline lane for this track
                     let lane_width = ui.available_width();
@@ -391,12 +394,16 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                                     });
                                 }
 
-                                // Show resize cursor when hovering edges
+                                // Show cursor hints on hover
                                 if let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos())
                                     && region_rect.contains(pos)
-                                    && (left_handle.contains(pos) || right_handle.contains(pos))
                                 {
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                                    if left_handle.contains(pos) || right_handle.contains(pos) {
+                                        ui.ctx()
+                                            .set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                                    } else {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                    }
                                 }
                             }
                         }
@@ -740,23 +747,38 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
         }
     }
 
-    // Draw ghost overlay for dragged region
+    // Draw ghost overlays and set cursors for active drag operations
     if let Some(ArrangementDrag::MoveRegion {
         region_id,
         track_index,
+        start_frame,
         ..
     }) = &state.drag
         && *track_index < state.session.tracks.len()
         && let Some(region) = state.session.tracks[*track_index].region(*region_id)
     {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         let lane_left = available.left() + TRACK_HEADER_WIDTH;
+
+        // Draw dashed outline at the original position
+        let orig_x = lane_left + (start_frame.as_f64() * pixels_per_frame - scroll_x) as f32;
+        let orig_w = (region.duration.as_f64() * pixels_per_frame) as f32;
+        let orig_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
+        let orig_rect = Rect::from_min_size(pos2(orig_x, orig_y), vec2(orig_w, TRACK_HEIGHT - 4.0));
+        let painter = ui.painter();
+        painter.rect_stroke(
+            orig_rect,
+            egui::CornerRadius::same(3),
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(150, 180, 220, 60)),
+            egui::StrokeKind::Outside,
+        );
+
+        // Draw ghost overlay at the current (dragged) position
         let ghost_x =
             lane_left + (region.timeline_pos.as_f64() * pixels_per_frame - scroll_x) as f32;
-        let ghost_w = (region.duration.as_f64() * pixels_per_frame) as f32;
-        let ghost_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
+        let ghost_y = orig_y;
         let ghost_rect =
-            Rect::from_min_size(pos2(ghost_x, ghost_y), vec2(ghost_w, TRACK_HEIGHT - 4.0));
-        let painter = ui.painter();
+            Rect::from_min_size(pos2(ghost_x, ghost_y), vec2(orig_w, TRACK_HEIGHT - 4.0));
         painter.rect_filled(
             ghost_rect,
             egui::CornerRadius::same(3),
@@ -766,6 +788,37 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
             ghost_rect,
             egui::CornerRadius::same(3),
             Stroke::new(1.0, Color32::from_rgba_premultiplied(100, 160, 255, 120)),
+            egui::StrokeKind::Outside,
+        );
+    }
+
+    // Draw trim ghost overlay during TrimStart/TrimEnd
+    if let Some(
+        ArrangementDrag::TrimStart {
+            region_id,
+            track_index,
+            ..
+        }
+        | ArrangementDrag::TrimEnd {
+            region_id,
+            track_index,
+            ..
+        },
+    ) = &state.drag
+        && *track_index < state.session.tracks.len()
+        && let Some(region) = state.session.tracks[*track_index].region(*region_id)
+    {
+        let lane_left = available.left() + TRACK_HEADER_WIDTH;
+        let trim_x =
+            lane_left + (region.timeline_pos.as_f64() * pixels_per_frame - scroll_x) as f32;
+        let trim_w = (region.duration.as_f64() * pixels_per_frame) as f32;
+        let trim_y = content_rect.top() + (*track_index as f32 * TRACK_HEIGHT) + 2.0;
+        let trim_rect = Rect::from_min_size(pos2(trim_x, trim_y), vec2(trim_w, TRACK_HEIGHT - 4.0));
+        let painter = ui.painter();
+        painter.rect_stroke(
+            trim_rect,
+            egui::CornerRadius::same(3),
+            Stroke::new(1.5, Color32::from_rgba_premultiplied(255, 200, 80, 140)),
             egui::StrokeKind::Outside,
         );
     }
@@ -790,6 +843,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
     }
 
     // Draw reorder indicator line when dragging a track header
+    if let Some(ArrangementDrag::ReorderTrack { .. }) = &state.drag {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
     if let Some(ArrangementDrag::ReorderTrack {
         current_index,
         from_index,

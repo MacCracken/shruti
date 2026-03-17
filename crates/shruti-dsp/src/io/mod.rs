@@ -7,7 +7,9 @@ pub mod mix;
 pub mod resample;
 
 pub use reader::{SUPPORTED_EXTENSIONS, read_audio_file};
-pub use writer::{BitDepth, ExportConfig, ExportFormat, is_native_export, write_audio_file, write_wav_file};
+pub use writer::{
+    BitDepth, ExportConfig, ExportFormat, is_native_export, write_audio_file, write_wav_file,
+};
 
 #[cfg(feature = "tarang")]
 pub use mix::{ChannelLayout, mix_channels};

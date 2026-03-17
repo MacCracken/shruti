@@ -1,4 +1,5 @@
 use crate::buffer::AudioBuffer;
+use crate::constants::{DEFAULT_LIMITER_CEILING, DEFAULT_LIMITER_RELEASE};
 
 /// Brickwall limiter — prevents signal from exceeding the ceiling.
 ///
@@ -16,8 +17,8 @@ pub struct Limiter {
 impl Limiter {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            ceiling_db: -0.3,
-            release: 0.1,
+            ceiling_db: DEFAULT_LIMITER_CEILING,
+            release: DEFAULT_LIMITER_RELEASE,
             sample_rate,
             envelope: 1.0,
         }

@@ -407,10 +407,9 @@ impl SubtractiveSynth {
         }
 
         // Pre-compute per-frame LFO values into stack-allocated buffer.
-        const MAX_LFO_FRAMES: usize = 8192;
-        let clamped_frames = frames.min(MAX_LFO_FRAMES);
-        let mut lfo1_values = [0.0f32; MAX_LFO_FRAMES];
-        let mut lfo2_values = [0.0f32; MAX_LFO_FRAMES];
+        let clamped_frames = frames.min(crate::constants::MAX_LFO_FRAMES);
+        let mut lfo1_values = [0.0f32; crate::constants::MAX_LFO_FRAMES];
+        let mut lfo2_values = [0.0f32; crate::constants::MAX_LFO_FRAMES];
         for i in 0..clamped_frames {
             lfo1_values[i] = self.lfo1.tick();
             lfo2_values[i] = self.lfo2.tick();
@@ -549,7 +548,7 @@ impl SubtractiveSynth {
             self.voice_manager.voices[i].phase = phase1;
             self.voice_manager.voices[i].phase2 = phase2;
             self.voice_manager.voices[i].phase3 = phase3;
-            self.voice_manager.voices[i].envelope_level = self.envelopes[i].level;
+            self.voice_manager.voices[i].envelope_level = self.envelopes[i].level();
         }
 
         self.voice_manager.tick_age();

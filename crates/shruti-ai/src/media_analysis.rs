@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 // Re-export tarang-ai types for convenience
-pub use tarang_ai::{ContentType, MediaAnalysis, TranscriptionResult, TranscriptionSegment};
 pub use tarang_ai::{AudioFingerprint, FingerprintConfig};
+pub use tarang_ai::{ContentType, MediaAnalysis, TranscriptionResult, TranscriptionSegment};
 pub use tarang_ai::{HooshClient, HooshConfig, WhisperModel};
 
 /// Audio content analysis for a decoded file.

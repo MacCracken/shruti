@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{MAX_CUTOFF_HZ, MIN_CUTOFF_HZ, NYQUIST_RATIO};
+
 /// Filter mode for the state-variable filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilterMode {
@@ -53,7 +55,7 @@ pub struct Filter {
 
 impl Filter {
     pub fn new(mode: FilterMode, cutoff: f32, resonance: f32, sample_rate: f32) -> Self {
-        let cutoff = cutoff.clamp(20.0, 20000.0);
+        let cutoff = cutoff.clamp(MIN_CUTOFF_HZ, MAX_CUTOFF_HZ);
         let resonance = resonance.clamp(0.0, 1.0);
         let g = (std::f32::consts::PI * cutoff / sample_rate).tan();
         let k = 2.0 - 2.0 * resonance;
@@ -86,7 +88,10 @@ impl Filter {
     #[inline]
     fn update_coefficients(&mut self) {
         let clamped_res = self.resonance.clamp(0.0, 1.0);
-        self.cached_g = (std::f32::consts::PI * self.cutoff.clamp(20.0, self.sample_rate * 0.49)
+        self.cached_g = (std::f32::consts::PI
+            * self
+                .cutoff
+                .clamp(MIN_CUTOFF_HZ, self.sample_rate * NYQUIST_RATIO)
             / self.sample_rate)
             .tan();
         self.cached_k = 2.0 - 2.0 * clamped_res;

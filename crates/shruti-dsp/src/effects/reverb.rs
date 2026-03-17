@@ -1,4 +1,8 @@
 use crate::buffer::AudioBuffer;
+use crate::constants::{
+    ALLPASS_FEEDBACK, DEFAULT_REVERB_DAMPING, DEFAULT_REVERB_MIX, DEFAULT_REVERB_ROOM_SIZE,
+    FREEVERB_REFERENCE_RATE, REVERB_DAMPING_SCALE, REVERB_FEEDBACK_BASE, REVERB_FEEDBACK_SCALE,
+};
 
 /// Schroeder-style reverb with comb and allpass filters.
 #[derive(Debug, Clone)]
@@ -69,7 +73,7 @@ impl AllpassFilter {
     fn process(&mut self, input: f32) -> f32 {
         let buffered = self.buffer[self.index];
         let output = -input + buffered;
-        self.buffer[self.index] = input + buffered * 0.5;
+        self.buffer[self.index] = input + buffered * ALLPASS_FEEDBACK;
         self.index = (self.index + 1) % self.buffer.len();
         output
     }
@@ -85,7 +89,7 @@ const ALLPASS_LENGTHS: [usize; 4] = [556, 441, 341, 225];
 
 impl Reverb {
     pub fn new(sample_rate: f32) -> Self {
-        let scale = sample_rate / 44100.0;
+        let scale = sample_rate / FREEVERB_REFERENCE_RATE;
 
         let comb_filters = COMB_LENGTHS
             .iter()
@@ -98,9 +102,9 @@ impl Reverb {
             .collect();
 
         let mut reverb = Self {
-            mix: 0.3,
-            room_size: 0.7,
-            damping: 0.5,
+            mix: DEFAULT_REVERB_MIX,
+            room_size: DEFAULT_REVERB_ROOM_SIZE,
+            damping: DEFAULT_REVERB_DAMPING,
             comb_filters,
             allpass_filters,
             sample_rate,
@@ -111,8 +115,8 @@ impl Reverb {
 
     /// Recompute internal parameters from public settings.
     pub fn update_parameters(&mut self) {
-        let feedback = self.room_size * 0.28 + 0.7;
-        let damp1 = self.damping * 0.4;
+        let feedback = self.room_size * REVERB_FEEDBACK_SCALE + REVERB_FEEDBACK_BASE;
+        let damp1 = self.damping * REVERB_DAMPING_SCALE;
         let damp2 = 1.0 - damp1;
 
         for comb in &mut self.comb_filters {
@@ -124,7 +128,7 @@ impl Reverb {
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
-        let scale = sample_rate / 44100.0;
+        let scale = sample_rate / FREEVERB_REFERENCE_RATE;
 
         self.comb_filters = COMB_LENGTHS
             .iter()

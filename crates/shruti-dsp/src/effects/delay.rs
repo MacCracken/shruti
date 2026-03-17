@@ -1,4 +1,7 @@
 use crate::buffer::AudioBuffer;
+use crate::constants::{
+    DEFAULT_DELAY_FEEDBACK, DEFAULT_DELAY_MIX, DEFAULT_DELAY_TIME, MAX_DELAY_SECONDS,
+};
 use crate::format::Sample;
 
 /// Stereo delay effect with feedback and dry/wet mix.
@@ -18,11 +21,11 @@ pub struct Delay {
 
 impl Delay {
     pub fn new(sample_rate: f32) -> Self {
-        let max_delay_samples = (sample_rate * 5.0) as usize; // Up to 5 seconds
+        let max_delay_samples = (sample_rate * MAX_DELAY_SECONDS) as usize;
         Self {
-            time: 0.25,
-            feedback: 0.4,
-            mix: 0.3,
+            time: DEFAULT_DELAY_TIME,
+            feedback: DEFAULT_DELAY_FEEDBACK,
+            mix: DEFAULT_DELAY_MIX,
             sample_rate,
             buffers: vec![vec![0.0; max_delay_samples]; 2],
             write_pos: 0,
@@ -31,7 +34,7 @@ impl Delay {
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
-        let max_delay_samples = (sample_rate * 5.0) as usize;
+        let max_delay_samples = (sample_rate * MAX_DELAY_SECONDS) as usize;
         self.buffers = vec![vec![0.0; max_delay_samples]; 2];
         self.write_pos = 0;
     }
