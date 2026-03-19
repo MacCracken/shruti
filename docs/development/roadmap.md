@@ -1,7 +1,7 @@
 # Shruti Roadmap — Path to MVP v1
 
 > **Version**: 2026.3.18 | **Last Updated**: 2026-03-18
-> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog (high + medium priority resolved) + code audit R8 + test infrastructure — MVP v1 + instruments + full AGNOS integration + audit fixes + constants refactor + setter patterns + undo COW + drag UX + 4-point PolyBLEP + shared test utils + integration test expansion
+> **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments, tarang-demux)
 > **Tests**: 1316 passing (190 dsp, 113 engine, 433 instruments, 257 session, 94 plugin, 189 ai, 12 test-utils + 28 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
@@ -28,110 +28,26 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 7D — AGNOS Distribution | OS integration | Takumi + marketplace recipes, sandbox profile, argonaut service (opt-in), aethersafha Wayland embedding, 5 MCP tools, 5 agnoshi intents |
 | — Editing & Routing | Interactive arrangement | Track reorder (drag), region move/trim (drag), bus send routing (3-pass render), submixes |
 | — Live Recording | Audio capture | Input stream wiring, start/stop recording, buffer→pool→region pipeline, configurable RecordingConfig (44.1–192 kHz, 1–8 ch) |
-| 8A — Instrument Engine | Built-in instruments | `shruti-instruments` crate, InstrumentNode trait, VoiceManager, Oscillator (PolyBLEP), ADSR Envelope, SubtractiveSynth |
-| — Code Audit (R1-6) | Security, perf, memory, correctness, concurrency | Pre-allocated audio buffers, filter coeff caching, FFT validation, path traversal guard, export overflow guard, record buffer cap, transport loop fix, Acquire/Release atomics, atomic session update |
+| — Code Audit (R1-8) | Security, perf, memory, correctness, concurrency | Pre-allocated audio buffers, filter coeff caching, FFT validation, path traversal guard, export overflow guard, record buffer cap, transport loop fix, Acquire/Release atomics, atomic session update |
 | — Engineering (Med) | Constants, setters, undo COW, drag UX, PolyBLEP | Named constants in dsp+instruments, consistent setter patterns, Box-based undo history, drag ghost/cursor feedback, 4-point PolyBLEP oscillator |
 | — Test Infrastructure | Shared utils, integration tests, coverage | `shruti-test-utils` crate (8 helpers), 5 cross-crate pipeline tests, 30 AI serve.rs tests, StereoPanner reuse |
-
----
-
-## Phase 8: Built-in Instruments
-
-**Goal:** Native virtual instruments — synths, drum machines, samplers — so Shruti is a complete production environment without requiring third-party plugins.
-
-### 8A — Instrument Engine (Complete)
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | `InstrumentNode` trait | Done | Audio graph node: receives MIDI, produces audio; shared interface for all instruments (built-in + AI) |
-| 2 | Instrument ↔ MIDI routing | Done | `MidiRoute` with channel filter, note range, velocity curves (Linear/Soft/Hard/Fixed) |
-| 3 | Polyphony manager | Done | Voice allocation (mono/poly/legato), voice stealing (oldest/quietest/lowest), configurable max voices |
-| 4 | Instrument preset system | Done | `InstrumentPreset` JSON format with save/load, from_instrument/apply_to |
-| 5 | Per-instrument undo | Done | `EditCommand::SetInstrumentParam` with full undo/redo |
-
-### 8B — Synthesizers (Complete)
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Subtractive synth | Done | PolyBLEP oscillator, dual ADSR (amp + filter), SVF filter (LP/HP/BP/Notch), dual LFO (6 shapes × 4 targets), 23 params, 16-voice polyphony |
-| 2 | Modulation matrix | Done | 8 sources (LFO1/2, AmpEnv, FilterEnv, Velocity, Aftertouch, ModWheel, PitchBend) → 8 destinations, 16 routings, bipolar amounts |
-| 3 | Effects per instrument | Done | EffectChain with 5 types (Chorus, Delay, Reverb, Distortion, FilterDrive), integrated into SubtractiveSynth, DrumMachine, Sampler |
-| 4 | Oscillator anti-aliasing | Done | PolyBLEP for alias-free saw/square at all frequencies |
-| 5 | Multi-oscillator expansion | Done | 3 oscillators per voice with independent waveform/detune/level, hard sync, ring modulation, oscillator FM (osc1→osc2 cross-mod), 16 tests |
-
-### 8C — Drum Machine (Complete)
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Drum pad engine | Done | 16-pad sample player, one-shot/looped, pitch/gain/pan/decay, GM drum map (note 36+), velocity sensitivity |
-| 2 | Step sequencer | Done | 16/32/64-step grid per pad, swing, per-step probability, accent, BPM-synced |
-| 3 | Pattern system | Done | Pattern banks (A/B/C/D × 16 = 64 patterns), pattern chaining with song mode, copy/select/chain API |
-| 4 | Kit management | Done | DrumKit preset: 16-pad config snapshot with save/load JSON, sample_path references, from_drum_machine/apply_to |
-| 5 | Sample layering | Done | Velocity layers per pad (up to 8), round-robin/random selection, fallback to main samples |
-| 6 | Per-pad effects | Done | PadEffects with one-pole LPF, tanh drive, reverb/delay send levels per pad |
-
-### 8D — Sampler (Complete)
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Multi-sample engine | Done | Key zones + velocity zones, root key, pitch ratio, 16-voice polyphony, linear interpolation |
-| 2 | Sample editing | Done | In-place trim, loop points (forward/ping-pong/one-shot), fade in/out, normalize, reverse, peak/RMS analysis |
-| 3 | Slice mode | Done | Energy-based onset detection, auto-slice by transients, `slice_to_zones()` maps slices to MIDI keys (REX-style) |
-| 4 | Sample format support | Done | WAV, FLAC, AIFF, OGG/Vorbis via symphonia; SUPPORTED_EXTENSIONS, is_supported_extension() |
-| 5 | SFZ/SF2 import | Done | SFZ text parser (global/group/region, opcode inheritance, note names) + SF2 binary RIFF parser (preset→instrument→sample zones, PCM extraction), 28 tests |
-
-### 8E — Instrument UI
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Instrument rack panel | Done | Dockable egui panel: instrument selector, parameter knobs grid, preset placeholder, all 4 instrument track kinds |
-| 2 | Synth editor | Done | Visual osc (3-osc with enable/detune/level), filter (mode/cutoff/res), ADSR envelopes, dual LFO, FM/sync/ring mod controls |
-| 3 | Drum machine grid | Done | 4×4 pad grid with GM drum names, per-pad knobs (pitch/gain/pan/decay), 16-step sequencer, pattern bank selector |
-| 4 | Sampler editor | Done | Zone map (128-key keyboard visualization), zone controls (key/vel range, loop mode), waveform placeholder |
-| 5 | Piano roll integration | Done | 128-note grid with piano keys, instrument-aware labels (GM drums for DrumMachine), velocity opacity, key range highlighting |
-| 6 | Parameter automation | Done | InstrumentParam target variant, label(), instrument_targets() helper |
-
-### 8F — Track Type Organization
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | `TrackKind::Instrument` | Done | New track kind with instrument_type field, `Session::add_instrument_track()`, instrument_params per track |
-| 2 | `TrackKind::DrumMachine` | Done | Kit name, pad count (default 16), drum icon, orange color, `add_drum_machine_track()`, 9 tests |
-| 3 | `TrackKind::Sampler` | Done | Preset name, zone count, disc icon, teal color, `add_sampler_track()`, 9 tests |
-| 4 | `TrackKind::AiPlayer` | Done | Model name, style, creativity (0–1), robot icon, deep purple color, `add_ai_player_track()`, 9 tests |
-| 5 | Track kind icons & colors | Done | Unicode icons, RGB default colors, labels per TrackKind; Track::color override with display_color() |
-| 6 | Track templates | Done | TrackTemplate: save/load track config (kind, gain, pan, channels, instrument params, color) as JSON |
-| 7 | Track groups / folders | Done | Collapsible track groups with undo/redo, arrangement + mixer UI integration |
-| 8 | Output routing matrix | Done | Any track → any bus/master; sidechain routing for compressor keying; loop detection via chain walking |
-
-### 8G — Instrument Testing (Complete)
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | Oscillator accuracy tests | Done | Frequency accuracy (±1Hz), aliasing measurements, DC offset checks, amplitude consistency across waveforms |
-| 2 | Filter response tests | Done | Cutoff accuracy, resonance boost, slope verification, mode switching (LP/HP/BP/Notch) |
-| 3 | Envelope timing tests | Done | Attack/decay/release ±1ms at 44100/48000/96000 Hz, sample rate change consistency |
-| 4 | Polyphony stress tests | Done | Max voices, voice stealing correctness (oldest/quietest/lowest), allocation under load |
-| 5 | Preset roundtrip tests | Done | Synth (with audio verify), DrumMachine, Sampler preset roundtrips + cross-instrument JSON |
-| 6 | Sample playback tests | Done | Pitch mapping, loop points (forward/ping-pong), velocity layer selection, one-shot vs gated, drum machine playback |
-| 7 | Step sequencer tests | Done | Timing accuracy, swing calculation, probability distribution, pattern chaining, BPM sync |
-| 8 | Instrument ↔ MIDI integration | Done | End-to-end: MIDI clip → instrument → audio output for synth, drum machine, sampler |
-
-### 16A — Shruti HTTP Server (Complete)
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | `shruti serve --port 8050` | Done | axum HTTP server wrapping AgentApi (8 endpoints + health), CORS, `Serve` CLI subcommand, 16 async tests |
+| 8A — Instrument Engine | InstrumentNode + MIDI routing | InstrumentNode trait, MidiRoute, VoiceManager (poly/mono/legato, voice stealing), InstrumentPreset JSON, per-instrument undo |
+| 8B — Synthesizers | Subtractive + modulation | 3-osc PolyBLEP, dual ADSR, SVF filter, dual LFO, mod matrix (8×8), per-instrument effects (5 types), hard sync, ring mod, FM |
+| 8C — Drum Machine | Sample-based drums | 16-pad engine, step sequencer (16/32/64), pattern banks (A/B/C/D × 16), kit management, velocity layers, per-pad effects |
+| 8D — Sampler | Multi-sample instrument | Key/velocity zones, sample editing (trim/fade/normalize/reverse), slice mode (onset detection), SFZ/SF2 import |
+| 8E — Instrument UI | Editors + piano roll | Instrument rack panel, synth/drum/sampler editors, piano roll (128-note, instrument-aware), parameter automation |
+| 8F — Track Types | Organization + routing | 5 track kinds (Instrument/DrumMachine/Sampler/AiPlayer + existing), icons/colors, templates, groups/folders, output routing matrix |
+| 8G — Instrument Testing | Comprehensive validation | Oscillator/filter/envelope accuracy, polyphony stress, preset roundtrip, sample playback, sequencer timing, MIDI integration |
+| 16A — HTTP Server | AGNOS integration | `shruti serve --port 8050`, axum (8 endpoints + health), CORS, 16 async tests |
+| — Tarang Integration | Media backend | tarang-audio decoding (MP3/AAC/ALAC/Opus), FLAC export, channel mixing, resampling (linear + sinc), tarang-ai media analysis |
+| — CI/CD & Packaging | Build + distribution | GitHub Actions (CI + release), AGNOS Dockerfile, marketplace recipe, tarang stubs for CI, GPL-3.0 license |
 
 ---
 
 ## Post-MVP
 
-### Tarang Media Backend Integration
-- ~~`tarang-audio` for format decoding~~ — **Done** (2026-03-16): shruti-dsp reads via `FileDecoder`, symphonia removed as direct dep
-- `tarang-audio` for encoding — replaces hound WAV writer once tarang M5 (Audio Encoding) lands
+### Tarang Media Backend (Remaining)
 - `tarang-demux` for container-aware import (MP4 audio tracks, MKV, WebM)
-- `tarang-ai` for audio analysis (content classification, transcription for vocal alignment)
 - **Benefit**: Shared decode/encode codebase with Tazama and AGNOS media player, wider format support, no ffmpeg dep
 
 ### Synthesizers
