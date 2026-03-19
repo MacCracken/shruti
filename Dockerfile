@@ -12,13 +12,14 @@
 # TLS:    docker run -p 443:443 -e TLS_ENABLED=true -e TLS_DOMAIN=shruti.example.com shruti-server
 
 # ── Stage 1: Builder ────────────────────────────────────────────────
-FROM rust:1.88-bookworm AS builder
+FROM ghcr.io/maccracken/agnosticos:latest AS builder
 
-# System packages needed at build time:
-#   - ALSA (cpal audio backend)
-#   - X11/Wayland/GPU libs (eframe/wgpu — linked but unused in serve mode)
-#   - pkg-config for native dependency discovery
-RUN apt-get update && apt-get install -y --no-install-recommends \
+USER root
+
+# Build dependencies: Rust toolchain, tarang, audio/GUI dev libraries
+RUN ark update && ark install \
+    rust \
+    tarang \
     pkg-config \
     libasound2-dev \
     libx11-dev \
@@ -28,8 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon-dev \
     libwayland-dev \
     libgtk-3-dev \
-    libvulkan-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libvulkan-dev
 
 WORKDIR /build
 
@@ -51,7 +51,7 @@ RUN for d in crates/*/; do mkdir -p "$d/src" && echo "" > "$d/src/lib.rs"; done 
     && mkdir -p src/bin && echo "fn main() {}" > src/bin/play.rs
 
 # Pre-fetch and compile dependencies (cached unless Cargo.toml/lock changes)
-RUN cargo build --release --no-default-features --bin shruti 2>&1 || true
+RUN cargo build --release --features tarang --bin shruti 2>&1 || true
 
 # Copy actual source code
 COPY crates/ crates/
@@ -59,29 +59,22 @@ COPY src/ src/
 
 # Touch source files to invalidate the stub build
 RUN find crates/ src/ -name "*.rs" -exec touch {} + \
-    && cargo build --release --no-default-features --bin shruti
+    && cargo build --release --features tarang --bin shruti
 
 # ── Stage 2: Runtime ───────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM ghcr.io/maccracken/agnosticos:latest
 
-# Runtime deps: ALSA, Caddy (TLS termination), supervisord (process management)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+USER root
+
+# Runtime deps: tarang, ALSA, Caddy (TLS termination), supervisord
+RUN ark update && ark install \
+    tarang \
     libasound2 \
     ca-certificates \
     tini \
     curl \
     supervisor \
-    debian-keyring \
-    debian-archive-keyring \
-    apt-transport-https \
-    gnupg \
-    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list \
-    && apt-get update && apt-get install -y --no-install-recommends caddy \
-    && apt-get install -y --no-install-recommends gettext-base \
-    && apt-get purge -y gnupg debian-keyring apt-transport-https \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    caddy
 
 # Non-root user
 RUN groupadd -r shruti && useradd -r -g shruti -s /sbin/nologin -m shruti

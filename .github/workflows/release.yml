@@ -16,6 +16,8 @@ jobs:
   linux:
     name: Build Linux (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     strategy:
       fail-fast: false
       matrix:
@@ -28,14 +30,13 @@ jobs:
             target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
+          rustup target add ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --no-default-features
+        run: cargo build --release --features tarang --target ${{ matrix.target }}
       - name: Package
         run: |
           mkdir -p dist
@@ -62,7 +63,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --no-default-features
+        run: cargo build --release --target ${{ matrix.target }}
       - name: Package
         run: |
           mkdir -p dist
@@ -83,7 +84,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release --target x86_64-pc-windows-msvc --no-default-features
+        run: cargo build --release --target x86_64-pc-windows-msvc
       - name: Package
         shell: bash
         run: |

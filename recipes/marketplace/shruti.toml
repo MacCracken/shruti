@@ -1,0 +1,58 @@
+[package]
+name = "shruti"
+version = "2026.3.18"
+description = "Rust-native Digital Audio Workstation"
+groups = ["creative", "audio"]
+license = "GPL-3.0"
+repository = "https://github.com/anomalyco/shruti"
+
+[depends]
+runtime = [
+    "alsa-lib",
+    "pipewire",
+    "tarang",
+    "vulkan-icd-loader",
+    "sqlite",
+]
+build = [
+    "rust",
+    "pkg-config",
+    "tarang",
+]
+
+[marketplace]
+category = "creative/audio"
+runtime = "native-binary"
+
+[marketplace.sandbox]
+seccomp_mode = "desktop"
+
+[[marketplace.sandbox.landlock]]
+path = "~/.local/share/shruti/"
+access = "rw"
+
+[[marketplace.sandbox.landlock]]
+path = "/run/user/*/pipewire-0"
+access = "rw"
+
+[[marketplace.sandbox.landlock]]
+path = "/tmp/.X11-unix/"
+access = "ro"
+
+[[marketplace.sandbox.landlock]]
+path = "/dev/snd/"
+access = "rw"
+
+[build]
+commands = [
+    "cargo build --release --features tarang",
+]
+
+[install]
+binaries = [
+    { src = "target/release/shruti", dst = "bin/shruti" },
+    { src = "target/release/shruti-play", dst = "bin/shruti-play" },
+]
+assets = [
+    { src = ".agnos-agent/", dst = "share/shruti/.agnos-agent/" },
+]

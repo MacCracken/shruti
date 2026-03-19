@@ -14,25 +14,30 @@ jobs:
   check:
     name: Check & Lint
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
       - name: Check formatting
         run: cargo fmt -- --check
       - name: Clippy
-        run: cargo clippy --workspace --tests -- -W clippy::all -D warnings
+        run: cargo clippy --workspace --tests --features tarang -- -W clippy::all -D warnings
 
   security:
     name: Security Audit
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Run security audit
@@ -41,6 +46,8 @@ jobs:
   test:
     name: Test (${{ matrix.package }})
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     strategy:
       fail-fast: false
       matrix:
@@ -56,16 +63,18 @@ jobs:
           - shruti
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
       - name: Run unit tests for ${{ matrix.package }}
-        run: cargo test -p ${{ matrix.package }} --lib --bins --benches --examples
+        run: cargo test -p ${{ matrix.package }} --features tarang --lib --bins --benches --examples
 
   integration:
     name: Integration Tests (${{ matrix.package }})
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     strategy:
       fail-fast: false
       matrix:
@@ -73,52 +82,58 @@ jobs:
           - shruti-instruments
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
       - name: Run integration tests for ${{ matrix.package }}
-        run: cargo test -p ${{ matrix.package }} --test '*'
+        run: cargo test -p ${{ matrix.package }} --features tarang --test '*'
 
   e2e:
     name: E2E Tests
     needs: [test, integration]
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
       - name: Run end-to-end tests
-        run: cargo test -p shruti --test integration
+        run: cargo test -p shruti --features tarang --test integration
 
   coverage:
     name: Coverage (50% threshold)
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Run coverage
-        run: cargo tarpaulin --workspace --fail-under 50 --exclude-files "vendor/*" "src/main.rs" "src/bin/*" --ignore-tests --no-default-features
+        run: cargo tarpaulin --workspace --features tarang --fail-under 50 --exclude-files "vendor/*" "src/main.rs" "src/bin/*" --ignore-tests
 
   build:
     name: Build Release
     needs: [check, test, integration, e2e, security, coverage]
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install audio dev libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install dependencies
+        run: |
+          ark update
+          ark install rust tarang libasound2-dev pkg-config
       - name: Build release binary
-        run: cargo build --release --no-default-features
+        run: cargo build --release --features tarang
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
