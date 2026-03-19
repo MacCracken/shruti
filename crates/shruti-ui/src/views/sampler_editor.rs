@@ -633,6 +633,7 @@ mod tests {
     // ---- SELECTED_ZONE_PARAM and PARAMS_PER_ZONE constants ----
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn constants_are_sensible() {
         assert_eq!(SELECTED_ZONE_PARAM, 192);
         assert_eq!(PARAMS_PER_ZONE, 6);

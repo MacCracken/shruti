@@ -10,8 +10,8 @@ default = []
 tarang = ["dep:tarang-audio", "dep:tarang-core", "dep:bytes"]
 
 [dependencies]
-tarang-audio = { workspace = true, optional = true }
-tarang-core = { workspace = true, optional = true }
+tarang-audio = { path = "../../../tarang/crates/tarang-audio", optional = true }
+tarang-core = { path = "../../../tarang/crates/tarang-core", optional = true }
 bytes = { workspace = true, optional = true }
 hound = { workspace = true }
 serde = { workspace = true }

@@ -75,6 +75,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn constants_are_sane() {
         assert!(DB_FLOOR < -100.0);
         assert!(LINEAR_FLOOR > 0.0);
@@ -90,6 +91,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn reverb_defaults_in_range() {
         assert!((0.0..=1.0).contains(&DEFAULT_REVERB_MIX));
         assert!((0.0..=1.0).contains(&DEFAULT_REVERB_ROOM_SIZE));
@@ -98,6 +100,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn delay_defaults_in_range() {
         assert!(DEFAULT_DELAY_TIME > 0.0 && DEFAULT_DELAY_TIME <= MAX_DELAY_SECONDS);
         assert!((0.0..1.0).contains(&DEFAULT_DELAY_FEEDBACK));
@@ -105,6 +108,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn compressor_defaults_reasonable() {
         assert!(DEFAULT_COMPRESSOR_THRESHOLD < 0.0);
         assert!(DEFAULT_COMPRESSOR_ATTACK > 0.0);

@@ -160,8 +160,7 @@ mod tests {
 
     #[test]
     fn from_boxed_io_error() {
-        let io_err: Box<dyn std::error::Error> =
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, "io boxed"));
+        let io_err: Box<dyn std::error::Error> = Box::new(std::io::Error::other("io boxed"));
         let err: EngineError = io_err.into();
         assert!(matches!(err, EngineError::Backend(_)));
         assert!(err.to_string().contains("io boxed"));
@@ -175,7 +174,7 @@ mod tests {
 
     #[test]
     fn source_io_chain() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "inner cause");
+        let io_err = std::io::Error::other("inner cause");
         let err = EngineError::Io(io_err);
         let source = std::error::Error::source(&err).unwrap();
         assert!(source.to_string().contains("inner cause"));

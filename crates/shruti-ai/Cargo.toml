@@ -14,8 +14,8 @@ shruti-session = { path = "../shruti-session" }
 shruti-engine = { path = "../shruti-engine" }
 shruti-dsp = { path = "../shruti-dsp" }
 shruti-plugin = { path = "../shruti-plugin" }
-tarang-ai = { workspace = true, optional = true }
-tarang-core = { workspace = true, optional = true }
+tarang-ai = { path = "../../../tarang/crates/tarang-ai", optional = true }
+tarang-core = { path = "../../../tarang/crates/tarang-core", optional = true }
 bytes = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 serde = { workspace = true }

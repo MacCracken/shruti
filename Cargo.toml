@@ -14,9 +14,6 @@ members = [
 [workspace.dependencies]
 cpal = "0.15"
 rtrb = "0.3"
-tarang-audio = { path = "../tarang/crates/tarang-audio" }
-tarang-core = { path = "../tarang/crates/tarang-core" }
-tarang-ai = { path = "../tarang/crates/tarang-ai" }
 bytes = "1"
 hound = "3.5"
 clap = { version = "4", features = ["derive"] }

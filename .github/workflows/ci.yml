@@ -15,7 +15,7 @@ jobs:
     name: Check & Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -25,13 +25,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
       - name: Clippy
-        run: cargo clippy --workspace -- -W clippy::all -D warnings
+        run: cargo clippy --workspace --tests -- -W clippy::all -D warnings
 
   security:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
         run: cargo install cargo-audit
@@ -52,9 +52,10 @@ jobs:
           - shruti-session
           - shruti-ai
           - shruti-instruments
+          - shruti-test-utils
           - shruti
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install audio dev libraries
@@ -71,7 +72,7 @@ jobs:
         package:
           - shruti-instruments
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install audio dev libraries
@@ -84,7 +85,7 @@ jobs:
     needs: [test, integration]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install audio dev libraries
@@ -96,7 +97,7 @@ jobs:
     name: Coverage (50% threshold)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install audio dev libraries
@@ -104,22 +105,22 @@ jobs:
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Run coverage
-        run: cargo tarpaulin --workspace --fail-under 50 --exclude-files "vendor/*" "src/main.rs" "src/bin/*"
+        run: cargo tarpaulin --workspace --fail-under 50 --exclude-files "vendor/*" "src/main.rs" "src/bin/*" --ignore-tests --no-default-features
 
   build:
     name: Build Release
     needs: [check, test, integration, e2e, security, coverage]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install audio dev libraries
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --no-default-features
       - name: Upload binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: shruti-linux-amd64
           path: target/release/shruti

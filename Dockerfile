@@ -43,6 +43,7 @@ COPY crates/shruti-ui/Cargo.toml crates/shruti-ui/Cargo.toml
 COPY crates/shruti-session/Cargo.toml crates/shruti-session/Cargo.toml
 COPY crates/shruti-ai/Cargo.toml crates/shruti-ai/Cargo.toml
 COPY crates/shruti-instruments/Cargo.toml crates/shruti-instruments/Cargo.toml
+COPY crates/shruti-test-utils/Cargo.toml crates/shruti-test-utils/Cargo.toml
 
 # Create stub lib.rs files so cargo can resolve the workspace
 RUN for d in crates/*/; do mkdir -p "$d/src" && echo "" > "$d/src/lib.rs"; done \
@@ -50,7 +51,7 @@ RUN for d in crates/*/; do mkdir -p "$d/src" && echo "" > "$d/src/lib.rs"; done 
     && mkdir -p src/bin && echo "fn main() {}" > src/bin/play.rs
 
 # Pre-fetch and compile dependencies (cached unless Cargo.toml/lock changes)
-RUN cargo build --release --bin shruti 2>&1 || true
+RUN cargo build --release --no-default-features --bin shruti 2>&1 || true
 
 # Copy actual source code
 COPY crates/ crates/
@@ -58,7 +59,7 @@ COPY src/ src/
 
 # Touch source files to invalidate the stub build
 RUN find crates/ src/ -name "*.rs" -exec touch {} + \
-    && cargo build --release --bin shruti
+    && cargo build --release --no-default-features --bin shruti
 
 # ── Stage 2: Runtime ───────────────────────────────────────────────
 FROM debian:bookworm-slim

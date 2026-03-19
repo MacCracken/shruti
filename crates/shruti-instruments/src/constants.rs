@@ -47,6 +47,7 @@ pub const MAX_LFO_FRAMES: usize = 8192;
 pub const ONSET_HOP_SIZE: usize = 512;
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
 
