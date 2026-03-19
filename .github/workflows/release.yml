@@ -23,51 +23,39 @@ jobs:
     strategy:
       matrix:
         include:
-          - platform: linux-amd64
+          - platform: linux
             runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - platform: linux-arm64
-            runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
           - platform: macos-arm64
             runner: macos-latest
-            target: aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust (Linux)
-        if: startsWith(matrix.platform, 'linux')
+      - name: Setup Rust
         uses: ./.github/actions/setup-rust-env
         with:
           cache-prefix: release-${{ matrix.platform }}
-
-      - name: Setup Rust (macOS)
-        if: startsWith(matrix.platform, 'macos')
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        if: startsWith(matrix.platform, 'macos')
+          install-system-deps: ${{ matrix.platform == 'linux' }}
 
       - name: Read version
         id: version
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --workspace
 
       - name: Package release
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          ARCHIVE="shruti-${VERSION}-${{ matrix.platform }}.tar.gz"
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/shruti dist/
-          cp LICENSE README.md dist/
-          tar czf "$ARCHIVE" -C dist .
-          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256" 2>/dev/null || \
-            shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+          RELEASE_DIR="shruti-${VERSION}-${{ matrix.platform }}"
+          mkdir -p "${RELEASE_DIR}"
+
+          cp target/release/shruti "${RELEASE_DIR}/" 2>/dev/null || true
+          cp LICENSE README.md "${RELEASE_DIR}/"
+
+          tar czf "${RELEASE_DIR}.tar.gz" "${RELEASE_DIR}"
+          sha256sum "${RELEASE_DIR}.tar.gz" > "${RELEASE_DIR}.tar.gz.sha256" 2>/dev/null || \
+            shasum -a 256 "${RELEASE_DIR}.tar.gz" > "${RELEASE_DIR}.tar.gz.sha256"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -123,14 +111,12 @@ jobs:
             ### Downloads
             | Platform | Archive |
             |----------|---------|
-            | Linux x86_64 | `shruti-${{ steps.version.outputs.version }}-linux-amd64.tar.gz` |
-            | Linux arm64 | `shruti-${{ steps.version.outputs.version }}-linux-arm64.tar.gz` |
+            | Linux x86_64 | `shruti-${{ steps.version.outputs.version }}-linux.tar.gz` |
             | macOS arm64 | `shruti-${{ steps.version.outputs.version }}-macos-arm64.tar.gz` |
 
             ### Verification
             Each archive includes a `.sha256` checksum file.
           files: |
-            release-artifacts/release-linux-amd64/*
-            release-artifacts/release-linux-arm64/*
+            release-artifacts/release-linux/*
             release-artifacts/release-macos-arm64/*
           prerelease: true
