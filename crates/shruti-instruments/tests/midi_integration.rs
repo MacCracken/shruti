@@ -10,46 +10,10 @@ use shruti_instruments::instrument::InstrumentNode;
 use shruti_instruments::sampler::{SampleZone, Sampler};
 use shruti_instruments::synth::SubtractiveSynth;
 use shruti_session::midi::{ControlChange, MidiClip, NoteEvent};
+use shruti_test_utils::{collect_note_ons, generate_sine, has_audio, is_silent};
 
 const SAMPLE_RATE: f32 = 44100.0;
 const BLOCK_SIZE: u32 = 512;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Generate a sine-wave sample buffer of the given length.
-fn make_sine(len: usize, freq: f32, sr: f32) -> Vec<f32> {
-    (0..len)
-        .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin())
-        .collect()
-}
-
-/// Check whether a buffer contains any sample with absolute value above `threshold`.
-fn has_nonzero(buf: &AudioBuffer, threshold: f32) -> bool {
-    for frame in 0..buf.frames() {
-        for ch in 0..buf.channels() {
-            if buf.get(frame, ch).abs() > threshold {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Check whether a buffer is entirely silent (all samples below `threshold`).
-fn is_silent(buf: &AudioBuffer, threshold: f32) -> bool {
-    !has_nonzero(buf, threshold)
-}
-
-/// Build NoteEvents from a MidiClip using its note_ons_at helper.
-/// Collects note-on events that start at `frame` (absolute position).
-fn collect_note_ons(clip: &MidiClip, frame: u64) -> Vec<NoteEvent> {
-    clip.note_ons_at(shruti_session::FramePos(frame))
-        .into_iter()
-        .cloned()
-        .collect()
-}
 
 // ---------------------------------------------------------------------------
 // 1. Synth plays MIDI clip
@@ -71,7 +35,7 @@ fn synth_plays_midi_clip() {
     synth.process(&note_events, &[], &mut buf);
 
     assert!(
-        has_nonzero(&buf, 0.001),
+        has_audio(&buf, 0.001),
         "SubtractiveSynth should produce non-silent output when fed NoteEvents from a MidiClip"
     );
 }
@@ -92,7 +56,7 @@ fn drum_machine_plays_midi_clip() {
 
     let mut dm = DrumMachine::new(SAMPLE_RATE);
     // Load sine samples onto the target pads.
-    let sample = make_sine(4410, 200.0, SAMPLE_RATE);
+    let sample = generate_sine(200.0, SAMPLE_RATE, 4410, 1.0);
     dm.pads[0].load_sample(sample.clone(), SAMPLE_RATE as u32); // note 36
     dm.pads[2].load_sample(sample.clone(), SAMPLE_RATE as u32); // note 38
     dm.pads[6].load_sample(sample, SAMPLE_RATE as u32); // note 42
@@ -101,7 +65,7 @@ fn drum_machine_plays_midi_clip() {
     dm.process(&note_events, &[], &mut buf);
 
     assert!(
-        has_nonzero(&buf, 0.001),
+        has_audio(&buf, 0.001),
         "DrumMachine should produce audio when playing drum note events from a MidiClip"
     );
 }
@@ -121,7 +85,7 @@ fn sampler_plays_midi_clip() {
     let zone = SampleZone::new(
         "Piano",
         60,
-        make_sine(44100, 440.0, SAMPLE_RATE),
+        generate_sine(440.0, SAMPLE_RATE, 44100, 1.0),
         SAMPLE_RATE as u32,
     );
     sampler.add_zone(zone);
@@ -130,7 +94,7 @@ fn sampler_plays_midi_clip() {
     sampler.process(&note_events, &[], &mut buf);
 
     assert!(
-        has_nonzero(&buf, 0.001),
+        has_audio(&buf, 0.001),
         "Sampler should produce audio when processing NoteEvents from a MidiClip"
     );
 }
@@ -166,7 +130,7 @@ fn cc_events_do_not_crash_and_params_affect_output() {
     synth.process(&[], &[], &mut buf_after);
 
     assert!(
-        has_nonzero(&buf_before, 0.001),
+        has_audio(&buf_before, 0.001),
         "Synth at default volume should produce sound"
     );
     assert!(
@@ -223,7 +187,7 @@ fn note_off_stops_sound() {
     synth.note_on(60, 127, 0);
     let mut buf = AudioBuffer::new(2, BLOCK_SIZE);
     synth.process(&[], &[], &mut buf);
-    assert!(has_nonzero(&buf, 0.001), "Note should produce sound");
+    assert!(has_audio(&buf, 0.001), "Note should produce sound");
 
     // Send note-off.
     synth.note_off(60, 0);
@@ -271,7 +235,7 @@ fn multiple_simultaneous_notes() {
         4,
         "Should have 4 active voices for a 4-note chord"
     );
-    assert!(has_nonzero(&buf, 0.001), "Chord should produce audio");
+    assert!(has_audio(&buf, 0.001), "Chord should produce audio");
 
     // The combined output should be louder than a single note (roughly).
     let mut rms_chord = 0.0_f64;
@@ -327,7 +291,10 @@ fn empty_clip_produces_silence() {
 
     // DrumMachine
     let mut dm = DrumMachine::new(SAMPLE_RATE);
-    dm.pads[0].load_sample(make_sine(4410, 200.0, SAMPLE_RATE), SAMPLE_RATE as u32);
+    dm.pads[0].load_sample(
+        generate_sine(200.0, SAMPLE_RATE, 4410, 1.0),
+        SAMPLE_RATE as u32,
+    );
     let mut buf_dm = AudioBuffer::new(2, BLOCK_SIZE);
     dm.process(&note_events, &[], &mut buf_dm);
     assert!(
@@ -340,7 +307,7 @@ fn empty_clip_produces_silence() {
     sampler.add_zone(SampleZone::new(
         "Test",
         60,
-        make_sine(4410, 440.0, SAMPLE_RATE),
+        generate_sine(440.0, SAMPLE_RATE, 4410, 1.0),
         SAMPLE_RATE as u32,
     ));
     let mut buf_sampler = AudioBuffer::new(2, BLOCK_SIZE);

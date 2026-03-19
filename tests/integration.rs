@@ -27,30 +27,7 @@ use shruti_session::store::SessionStore;
 use shruti_session::track::SendPosition;
 use shruti_session::types::FramePos;
 use shruti_session::undo::UndoManager;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Generate a mono sine wave at the given frequency.
-fn generate_sine(freq: f32, sample_rate: f32, frames: usize, amplitude: f32) -> Vec<f32> {
-    (0..frames)
-        .map(|i| (2.0 * PI * freq * i as f32 / sample_rate).sin() * amplitude)
-        .collect()
-}
-
-/// Compute RMS of a single channel in a buffer.
-fn rms(buf: &AudioBuffer, channel: u16, frames: usize) -> f32 {
-    let sum: f32 = (0..frames)
-        .map(|i| buf.get(i as u32, channel).powi(2))
-        .sum();
-    (sum / frames as f32).sqrt()
-}
-
-/// Check that a buffer has non-silent content (any sample above threshold).
-fn has_audio(buf: &AudioBuffer, threshold: f32) -> bool {
-    buf.as_interleaved().iter().any(|&s| s.abs() > threshold)
-}
+use shruti_test_utils::{generate_sine, has_audio, rms_of_buffer as rms};
 
 // ===========================================================================
 // 1. Full audio pipeline
@@ -1407,4 +1384,230 @@ fn automation_affects_timeline_render() {
         (ratio - 0.25).abs() < 0.05,
         "Automation should set gain to ~0.25: ratio={ratio}"
     );
+}
+
+// ===========================================================================
+// Cross-crate integration: synth → effects chain → output
+// ===========================================================================
+
+#[test]
+fn synth_through_effects_chain() {
+    use shruti_test_utils::{is_silent, peak_amplitude, rms_of_buffer};
+
+    let sample_rate = 44100.0;
+    let block_size = 512u32;
+
+    // Set up a subtractive synth
+    let mut synth = SubtractiveSynth::new(sample_rate);
+
+    // Trigger a note and process
+    synth.note_on(60, 100, 0);
+    let mut buf = AudioBuffer::new(2, block_size);
+    synth.process(&[], &[], &mut buf);
+    assert!(!is_silent(&buf, 0.001), "Synth should produce audio");
+
+    // Run through EQ (in-place)
+    let mut eq = ParametricEq::new(sample_rate);
+    eq.add_band(EqBand::new(FilterType::Peak, 440.0, 6.0, 1.0));
+    eq.process(&mut buf);
+    assert!(!is_silent(&buf, 0.001), "EQ should not silence audio");
+
+    // Run through compressor (in-place)
+    let mut comp = Compressor::new(sample_rate);
+    comp.threshold_db = -20.0;
+    comp.ratio = 4.0;
+    comp.process(&mut buf);
+    assert!(!is_silent(&buf, 0.001), "Compressor should pass audio");
+
+    // Run through delay (in-place)
+    let mut delay = Delay::new(sample_rate);
+    delay.time = 0.1;
+    delay.mix = 0.3;
+    delay.process(&mut buf);
+    assert!(!is_silent(&buf, 0.001), "Delay should pass audio");
+
+    // Verify signal is still meaningful
+    let final_rms = rms_of_buffer(&buf, 0, block_size as usize);
+    assert!(final_rms > 0.001, "Final output should have measurable RMS");
+    assert!(peak_amplitude(&buf) <= 1.5, "Peak should be reasonable");
+}
+
+// ===========================================================================
+// Cross-crate integration: drum machine → mix → export roundtrip
+// ===========================================================================
+
+#[test]
+fn drum_machine_mix_export_roundtrip() {
+    use shruti_test_utils::peak_amplitude;
+
+    let sample_rate = 44100.0;
+    let block_size = 512u32;
+
+    // Set up drum machine with a kick sample
+    let mut dm = DrumMachine::new(sample_rate);
+    let kick_sample = generate_sine(80.0, sample_rate, 4410, 0.8);
+    dm.pads[0].load_sample(kick_sample, sample_rate as u32);
+
+    // Trigger pad 0 (note 36)
+    dm.note_on(36, 127, 0);
+    let mut buf = AudioBuffer::new(2, block_size);
+    dm.process(&[], &[], &mut buf);
+    assert!(has_audio(&buf, 0.01), "Drum machine should produce audio");
+
+    // Export to WAV and re-import
+    let dir = std::env::temp_dir();
+    let path = dir.join("shruti_integ_drum_roundtrip.wav");
+    let format = AudioFormat {
+        sample_rate: sample_rate as u32,
+        channels: 2,
+        buffer_size: block_size,
+    };
+    write_wav_file(&path, &buf, &format).unwrap();
+
+    let (reimported, _) = read_audio_file(&path).unwrap();
+    assert!(
+        has_audio(&reimported, 0.01),
+        "Re-imported audio should be non-silent"
+    );
+
+    // Peaks should be similar (within quantization tolerance)
+    let orig_peak = peak_amplitude(&buf);
+    let reimported_peak = peak_amplitude(&reimported);
+    assert!(
+        (orig_peak - reimported_peak).abs() < 0.01,
+        "Peak mismatch: orig={orig_peak}, reimported={reimported_peak}"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// ===========================================================================
+// Cross-crate integration: sampler with zone pitch mapping
+// ===========================================================================
+
+#[test]
+fn sampler_multi_zone_pitch_coverage() {
+    use shruti_test_utils::count_zero_crossings;
+
+    let sample_rate = 44100.0;
+    let block_size = 2048u32;
+
+    let mut sampler = Sampler::new(sample_rate);
+
+    // Load a 440 Hz sine as the sample
+    let sample_data = generate_sine(440.0, sample_rate, 44100, 0.8);
+
+    // Create zone covering full range with root at A4
+    let zone = SampleZone {
+        name: "TestZone".into(),
+        key_low: 0,
+        key_high: 127,
+        velocity_low: 0,
+        velocity_high: 127,
+        root_key: 69, // A4 = 440 Hz
+        samples: sample_data,
+        sample_rate: sample_rate as u32,
+        loop_start: None,
+        loop_end: None,
+        loop_mode: shruti_instruments::sampler::LoopMode::NoLoop,
+        slices: vec![],
+    };
+    sampler.add_zone(zone);
+
+    // Play A4 (note 69) — should match root pitch
+    sampler.note_on(69, 100, 0);
+    let mut buf_a4 = AudioBuffer::new(2, block_size);
+    sampler.process(&[], &[], &mut buf_a4);
+    let crossings_a4 = count_zero_crossings(&buf_a4, 0, block_size);
+
+    // Reset sampler for next note
+    sampler.note_off(69, 0);
+
+    // Play A5 (note 81) — should be ~double frequency
+    sampler.note_on(81, 100, 0);
+    let mut buf_a5 = AudioBuffer::new(2, block_size);
+    sampler.process(&[], &[], &mut buf_a5);
+    let crossings_a5 = count_zero_crossings(&buf_a5, 0, block_size);
+
+    // A5 should have roughly double the zero crossings of A4
+    assert!(
+        crossings_a4 > 10,
+        "A4 should have significant zero crossings: {crossings_a4}"
+    );
+    assert!(
+        crossings_a5 > crossings_a4,
+        "A5 ({crossings_a5}) should have more crossings than A4 ({crossings_a4})"
+    );
+}
+
+// ===========================================================================
+// Cross-crate integration: track template roundtrip
+// ===========================================================================
+
+#[test]
+fn track_template_roundtrip() {
+    use shruti_session::track::TrackTemplate;
+
+    let mut session = Session::new("Template Test", 48000, 256);
+    let track_id = session.add_audio_track("Lead Guitar");
+    {
+        let track = session.track_mut(track_id).unwrap();
+        track.gain = 0.75;
+        track.pan = -0.3;
+    }
+
+    // Create template from track
+    let template = TrackTemplate::from_track(session.track(track_id).unwrap(), "Guitar Template");
+
+    // Serialize and deserialize
+    let json = serde_json::to_string(&template).unwrap();
+    let restored: TrackTemplate = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(restored.name, "Guitar Template");
+    assert!((restored.gain - 0.75).abs() < 1e-6);
+    assert!((restored.pan - (-0.3)).abs() < 1e-6);
+}
+
+// ===========================================================================
+// Cross-crate integration: undo/redo with execute
+// ===========================================================================
+
+#[test]
+fn undo_redo_gain_pan_integration() {
+    let mut session = Session::new("Undo Test", 44100, 256);
+    let mut undo = UndoManager::new(100);
+
+    let track_id = session.add_audio_track("Vocals");
+
+    // Set gain via undo manager
+    let cmd = EditCommand::SetTrackGain {
+        track_id,
+        old_gain: session.track(track_id).unwrap().gain,
+        new_gain: 0.5,
+    };
+    undo.execute(cmd, &mut session);
+    assert!((session.track(track_id).unwrap().gain - 0.5).abs() < 1e-6);
+
+    // Set pan
+    let cmd = EditCommand::SetTrackPan {
+        track_id,
+        old_pan: session.track(track_id).unwrap().pan,
+        new_pan: -0.7,
+    };
+    undo.execute(cmd, &mut session);
+    assert!((session.track(track_id).unwrap().pan - (-0.7)).abs() < 1e-6);
+
+    // Undo pan
+    assert!(undo.undo(&mut session));
+    assert!((session.track(track_id).unwrap().pan - 0.0).abs() < 1e-6);
+
+    // Undo gain
+    assert!(undo.undo(&mut session));
+    assert!((session.track(track_id).unwrap().gain - 1.0).abs() < 1e-6);
+
+    // Redo both
+    assert!(undo.redo(&mut session));
+    assert!((session.track(track_id).unwrap().gain - 0.5).abs() < 1e-6);
+    assert!(undo.redo(&mut session));
+    assert!((session.track(track_id).unwrap().pan - (-0.7)).abs() < 1e-6);
 }

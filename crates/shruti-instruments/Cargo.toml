@@ -1,6 +1,6 @@
 [package]
 name = "shruti-instruments"
-version = "2026.3.14-1"
+version = "2026.3.18"
 edition = "2024"
 description = "Built-in virtual instruments for Shruti"
 license = "GPL-3.0"
@@ -11,3 +11,6 @@ shruti-session = { path = "../shruti-session" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+shruti-test-utils = { path = "../shruti-test-utils" }

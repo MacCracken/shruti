@@ -3,6 +3,23 @@
 All notable changes to Shruti are documented here.
 Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 
+## 2026.3.18 — Test Infrastructure & Backlog Cleanup
+
+### Shared Test Utilities Crate
+- New `shruti-test-utils` crate with shared helpers: `generate_sine()`, `rms_of_buffer()`, `has_audio()`, `is_silent()`, `count_zero_crossings()`, `fill_sine()`, `peak_amplitude()`, `collect_note_ons()`
+- Deduplicated identical helpers across `tests/integration.rs`, `crates/shruti-instruments/tests/midi_integration.rs`, and `crates/shruti-dsp/src/effects/eq.rs`
+- 12 self-tests validating helper correctness
+
+### Integration Test Expansion
+- 5 new cross-crate integration tests: synth→EQ→compressor→delay pipeline, drum machine→WAV export roundtrip, sampler multi-zone pitch mapping, track template roundtrip, undo/redo gain/pan via UndoManager
+- Total integration tests: 28 root-level + 7 instrument-level
+
+### Coverage Boost (shruti-ai)
+- 30 new tests in `serve.rs`: rate limiter edge cases (boundary, window reset, single-RPS), default value functions, serde default integration, CORS 127.0.0.1 origin, add_region/spectrum/dynamics/auto_mix/save/open/redo endpoints, MCP tracks/transport dispatch, constant validation
+
+### StereoPanner Reuse
+- `Timeline` now holds a single `StereoPanner` instance, reused across all tracks per render call instead of allocating a new one per-track per-buffer
+
 ## 2026.3.17 — Engineering Backlog (Medium Priority)
 
 ### Centralized Constants

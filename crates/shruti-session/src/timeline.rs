@@ -24,6 +24,8 @@ pub struct Timeline {
     source_buffers: Vec<AudioBuffer>,
     /// Number of active source buffers in the current render pass.
     source_count: usize,
+    /// Reusable panner instance (avoids per-track per-buffer allocation).
+    panner: StereoPanner,
 }
 
 impl Timeline {
@@ -38,6 +40,7 @@ impl Timeline {
                 .map(|_| AudioBuffer::new(channels, buffer_size))
                 .collect(),
             source_count: 0,
+            panner: StereoPanner::default(),
         }
     }
 
@@ -134,8 +137,8 @@ impl Timeline {
 
             // Apply panning (stereo only)
             if self.track_buffer.channels() >= 2 {
-                let mut panner = StereoPanner::new(pan);
-                panner.process(&mut self.track_buffer);
+                self.panner.pan = pan;
+                self.panner.process(&mut self.track_buffer);
             }
 
             // Process post-fader sends after applying gain/pan
@@ -185,8 +188,8 @@ impl Timeline {
 
                 // Apply bus panning
                 if self.bus_buffers[bus_idx].channels() >= 2 {
-                    let mut panner = StereoPanner::new(track.pan);
-                    panner.process(&mut self.bus_buffers[bus_idx]);
+                    self.panner.pan = track.pan;
+                    self.panner.process(&mut self.bus_buffers[bus_idx]);
                 }
 
                 output.mix_from(&self.bus_buffers[bus_idx]);

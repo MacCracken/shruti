@@ -1012,4 +1012,315 @@ mod tests {
         assert_eq!(s, StatusCode::BAD_REQUEST);
         assert_eq!(j["success"], false);
     }
+
+    // --- Rate limiter edge cases ---
+
+    #[test]
+    fn test_rate_limiter_exactly_at_limit() {
+        let mut rl = RateLimiter::new(3);
+        assert!(rl.check()); // 1
+        assert!(rl.check()); // 2
+        assert!(rl.check()); // 3
+        assert!(!rl.check()); // blocked
+        assert!(!rl.check()); // still blocked
+    }
+
+    #[test]
+    fn test_rate_limiter_window_reset() {
+        let mut rl = RateLimiter::new(2);
+        assert!(rl.check());
+        assert!(rl.check());
+        assert!(!rl.check()); // blocked
+
+        // Simulate window reset by backdating the start
+        rl.window_start = Instant::now() - std::time::Duration::from_secs(2);
+        assert!(rl.check()); // should reset and allow
+    }
+
+    #[test]
+    fn test_rate_limiter_single_rps() {
+        let mut rl = RateLimiter::new(1);
+        assert!(rl.check());
+        assert!(!rl.check());
+    }
+
+    // --- Default value functions ---
+
+    #[test]
+    fn test_default_sample_rate() {
+        assert_eq!(default_sample_rate(), 48000);
+    }
+
+    #[test]
+    fn test_default_buffer_size() {
+        assert_eq!(default_buffer_size(), 256);
+    }
+
+    #[test]
+    fn test_default_export_path() {
+        assert_eq!(default_export_path(), "output.wav");
+    }
+
+    #[test]
+    fn test_default_export_format() {
+        assert_eq!(default_export_format(), "wav");
+    }
+
+    #[test]
+    fn test_default_bit_depth() {
+        assert_eq!(default_bit_depth(), "24");
+    }
+
+    // --- Serde default integration ---
+
+    #[test]
+    fn test_session_request_defaults() {
+        let json = serde_json::json!({"action": "create"});
+        let req: SessionRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.action, "create");
+        assert_eq!(req.sample_rate, 48000);
+        assert_eq!(req.buffer_size, 256);
+        assert!(req.name.is_none());
+        assert!(req.path.is_none());
+    }
+
+    #[test]
+    fn test_export_request_defaults() {
+        let json = serde_json::json!({});
+        let req: ExportRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.path, "output.wav");
+        assert_eq!(req.format, "wav");
+        assert_eq!(req.bit_depth, "24");
+    }
+
+    #[test]
+    fn test_tracks_request_defaults() {
+        let json = serde_json::json!({"action": "list"});
+        let req: TracksRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.action, "list");
+        assert!(req.name.is_none());
+        assert!(req.kind.is_none());
+        assert!(req.value.is_none());
+        assert!(req.audio_file.is_none());
+        assert!(req.position.is_none());
+    }
+
+    #[test]
+    fn test_transport_request_defaults() {
+        let json = serde_json::json!({"action": "play"});
+        let req: TransportRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.action, "play");
+        assert!(req.value.is_none());
+    }
+
+    // --- CORS: 127.0.0.1 ---
+
+    #[tokio::test]
+    async fn test_cors_allows_127_0_0_1_origin() {
+        let app = test_app();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/session")
+            .header("content-type", "application/json")
+            .header("origin", "http://127.0.0.1:8080")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({"action": "info"})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let cors_header = response.headers().get("access-control-allow-origin");
+        assert!(cors_header.is_some(), "CORS should allow 127.0.0.1 origin");
+    }
+
+    // --- Endpoint: add_region ---
+
+    #[tokio::test]
+    async fn test_tracks_add_region_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/tracks",
+            serde_json::json!({
+                "action": "add_region",
+                "name": "Track 1",
+                "audio_file": "/fake/audio.wav",
+                "position": 0
+            }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    // --- Analysis: spectrum & dynamics ---
+
+    #[tokio::test]
+    async fn test_analysis_spectrum_no_track() {
+        let state = test_state();
+        let app = app(state);
+        post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Test"}),
+        )
+        .await;
+
+        let (s, j) = post_json(
+            &app,
+            "/api/analysis",
+            serde_json::json!({"action": "spectrum", "track": "nonexistent"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_analysis_dynamics_no_track() {
+        let state = test_state();
+        let app = app(state);
+        post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Test"}),
+        )
+        .await;
+
+        let (s, j) = post_json(
+            &app,
+            "/api/analysis",
+            serde_json::json!({"action": "dynamics", "track": "nonexistent"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_analysis_auto_mix() {
+        let state = test_state();
+        let app = app(state);
+        post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Test"}),
+        )
+        .await;
+
+        // auto_mix on empty session returns an error (no tracks to analyze)
+        let (s, j) = post_json(
+            &app,
+            "/api/analysis",
+            serde_json::json!({"action": "auto_mix"}),
+        )
+        .await;
+        // Just verify it doesn't crash — result depends on session state
+        assert!(s == StatusCode::OK || s == StatusCode::BAD_REQUEST);
+        assert!(j.get("success").is_some() || j.get("message").is_some());
+    }
+
+    // --- Session: open and save ---
+
+    #[tokio::test]
+    async fn test_session_save_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "save", "path": "/tmp/test.shruti"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_session_open_nonexistent() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "open", "path": "/nonexistent/session.shruti"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    // --- Mixer: redo ---
+
+    #[tokio::test]
+    async fn test_mixer_redo_empty() {
+        let state = test_state();
+        let app = app(state);
+        post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Test"}),
+        )
+        .await;
+
+        let (s, j) = post_json(&app, "/api/mixer", serde_json::json!({"action": "redo"})).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    // --- MCP: more tool dispatch ---
+
+    #[tokio::test]
+    async fn test_mcp_tracks_list() {
+        let state = test_state();
+        let app = app(state);
+
+        // Create session and add track via MCP
+        post_json(
+            &app,
+            "/api/mcp",
+            serde_json::json!({"tool": "shruti_session", "args": {"action": "create", "name": "MCP"}}),
+        )
+        .await;
+
+        let (s, j) = post_json(
+            &app,
+            "/api/mcp",
+            serde_json::json!({"tool": "shruti_tracks", "args": {"action": "list"}}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(j["is_error"], false);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_transport() {
+        let state = test_state();
+        let app = app(state);
+
+        post_json(
+            &app,
+            "/api/mcp",
+            serde_json::json!({"tool": "shruti_session", "args": {"action": "create", "name": "MCP"}}),
+        )
+        .await;
+
+        let (s, j) = post_json(
+            &app,
+            "/api/mcp",
+            serde_json::json!({"tool": "shruti_transport", "args": {"action": "play"}}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(j["is_error"], false);
+    }
+
+    // --- Constants ---
+
+    #[test]
+    fn test_max_body_size_constant() {
+        assert_eq!(MAX_BODY_SIZE, 1_048_576); // 1 MB
+    }
+
+    #[test]
+    fn test_rate_limit_rps_constant() {
+        assert_eq!(RATE_LIMIT_RPS, 100);
+    }
 }

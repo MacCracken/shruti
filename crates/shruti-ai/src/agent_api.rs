@@ -1618,6 +1618,108 @@ mod tests {
     }
 
     #[test]
+    fn test_save_and_open_session_roundtrip() {
+        let dir = std::env::temp_dir().join("shruti_test_agent_save");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test_roundtrip.shruti");
+
+        let mut api = AgentApi::new();
+        api.create_session("Roundtrip Test", 44100, 512);
+        api.add_track("Guitar", "audio");
+
+        let r = api.save_session(path.to_str().unwrap());
+        assert!(r.success, "save should succeed: {}", r.message);
+
+        // Open in a fresh api
+        let mut api2 = AgentApi::new();
+        let r = api2.open_session(path.to_str().unwrap());
+        assert!(r.success, "open should succeed: {}", r.message);
+
+        let info = api2.session_info();
+        assert!(info.success);
+        assert_eq!(info.data.unwrap()["name"], "Roundtrip Test");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_add_region_with_pool_audio() {
+        let api = api_with_audio_track();
+        // The api_with_audio_track helper already adds a region — verify via list_tracks
+        let r = api.list_tracks();
+        assert!(r.success);
+        let data = r.data.unwrap();
+        let tracks = data["tracks"].as_array().unwrap();
+        assert!(tracks.iter().any(|t| t["name"] == "Drums"));
+    }
+
+    #[test]
+    fn test_add_region_track_not_found() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        api.add_track("Guitar", "audio");
+        // Insert audio in pool
+        let samples: Vec<f32> = vec![0.1; 1000];
+        let buf = shruti_dsp::AudioBuffer::from_interleaved(samples, 1);
+        let session = api.session.as_mut().unwrap();
+        session.audio_pool.insert("test_audio".to_string(), buf);
+        // Try adding to nonexistent track
+        let r = api.add_region("NonExistent", "test_audio", 0);
+        assert!(!r.success);
+        assert!(r.message.contains("not found"));
+    }
+
+    #[test]
+    fn test_auto_mix_eq_suggestions_coverage() {
+        // Create tracks with different spectral characteristics to hit all EQ branches
+        let mut api = AgentApi::new();
+        api.create_session("EQ Test", 48000, 256);
+
+        // Low-frequency dominant track (low centroid < 300 Hz)
+        api.add_track("Bass", "audio");
+        let samples: Vec<f32> = (0..4096)
+            .map(|i| (2.0 * std::f32::consts::PI * 80.0 * i as f32 / 48000.0).sin() * 0.5)
+            .collect();
+        let buf = shruti_dsp::AudioBuffer::from_interleaved(samples, 1);
+        let session = api.session.as_mut().unwrap();
+        session.audio_pool.insert("bass_audio".to_string(), buf);
+        let region = Region::new("bass_audio".to_string(), 0u64, 0u64, 4096u64);
+        session
+            .tracks
+            .iter_mut()
+            .find(|t| t.name == "Bass")
+            .unwrap()
+            .add_region(region);
+
+        // High-frequency dominant track (high centroid > 4000 Hz)
+        api.add_track("HiHat", "audio");
+        let samples: Vec<f32> = (0..4096)
+            .map(|i| (2.0 * std::f32::consts::PI * 8000.0 * i as f32 / 48000.0).sin() * 0.3)
+            .collect();
+        let buf = shruti_dsp::AudioBuffer::from_interleaved(samples, 1);
+        let session = api.session.as_mut().unwrap();
+        session.audio_pool.insert("hihat_audio".to_string(), buf);
+        let region = Region::new("hihat_audio".to_string(), 0u64, 0u64, 4096u64);
+        session
+            .tracks
+            .iter_mut()
+            .find(|t| t.name == "HiHat")
+            .unwrap()
+            .add_region(region);
+
+        let r = api.auto_mix_suggest();
+        assert!(r.success);
+        let data = r.data.unwrap();
+        let suggestions = data["suggestions"].as_array().unwrap();
+        assert_eq!(suggestions.len(), 2);
+
+        // Check that EQ suggestions are present
+        for s in suggestions {
+            assert!(s["eq_suggestion"].is_string());
+        }
+    }
+
+    #[test]
     fn test_api_result_serialization() {
         let r = ApiResult::ok_with_data("test", serde_json::json!({"key": "val"}));
         let json = serde_json::to_string(&r).unwrap();

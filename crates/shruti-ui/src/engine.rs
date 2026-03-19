@@ -520,4 +520,89 @@ mod tests {
         assert!(!transport.recording.load(Ordering::Relaxed));
         assert!(!transport.loop_enabled.load(Ordering::Relaxed));
     }
+
+    #[test]
+    fn shared_transport_seek_resets_after_consume() {
+        let transport = SharedTransport::new();
+        transport.request_seek(96000);
+        // First consume gets the seek value
+        let seek = transport.seek_request.swap(NO_SEEK, Ordering::AcqRel);
+        assert_eq!(seek, 96000);
+        // Second consume gets NO_SEEK
+        let seek2 = transport.seek_request.swap(NO_SEEK, Ordering::AcqRel);
+        assert_eq!(seek2, NO_SEEK);
+    }
+
+    #[test]
+    fn shared_transport_multiple_seeks_last_wins() {
+        let transport = SharedTransport::new();
+        transport.request_seek(1000);
+        transport.request_seek(2000);
+        transport.request_seek(3000);
+        assert_eq!(transport.seek_request.load(Ordering::Relaxed), 3000);
+    }
+
+    #[test]
+    fn shared_transport_playing_toggle() {
+        let transport = SharedTransport::new();
+        assert!(!transport.playing.load(Ordering::Relaxed));
+        transport.playing.store(true, Ordering::Release);
+        assert!(transport.playing.load(Ordering::Acquire));
+        transport.playing.store(false, Ordering::Release);
+        assert!(!transport.playing.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn shared_transport_loop_sync_update() {
+        let transport = SharedTransport::new();
+        transport.sync_loop(true, 48000, 96000);
+        assert!(transport.loop_enabled.load(Ordering::Relaxed));
+        assert_eq!(transport.loop_start.load(Ordering::Relaxed), 48000);
+        assert_eq!(transport.loop_end.load(Ordering::Relaxed), 96000);
+
+        // Update loop bounds
+        transport.sync_loop(true, 0, 192000);
+        assert_eq!(transport.loop_start.load(Ordering::Relaxed), 0);
+        assert_eq!(transport.loop_end.load(Ordering::Relaxed), 192000);
+
+        // Disable loop
+        transport.sync_loop(false, 0, 0);
+        assert!(!transport.loop_enabled.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn shared_transport_position_update() {
+        let transport = SharedTransport::new();
+        transport.position.store(48000, Ordering::Release);
+        assert_eq!(transport.position.load(Ordering::Acquire), 48000);
+        transport.position.store(0, Ordering::Release);
+        assert_eq!(transport.position.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn shared_transport_cross_thread_atomics() {
+        use std::sync::Arc;
+
+        let transport = Arc::new(SharedTransport::new());
+        let t2 = Arc::clone(&transport);
+
+        let handle = std::thread::spawn(move || {
+            t2.playing.store(true, Ordering::Release);
+            t2.position.store(12345, Ordering::Release);
+            t2.request_seek(99999);
+        });
+
+        handle.join().unwrap();
+
+        assert!(transport.playing.load(Ordering::Acquire));
+        // Position or seek_request should reflect the write
+        let pos = transport.position.load(Ordering::Acquire);
+        let seek = transport.seek_request.load(Ordering::Acquire);
+        assert!(pos == 12345 || seek == 99999);
+    }
+
+    #[test]
+    fn no_seek_sentinel_is_max() {
+        assert_eq!(NO_SEEK, u64::MAX);
+    }
 }

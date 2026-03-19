@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.17 | **Last Updated**: 2026-03-17
-> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog (high + medium priority resolved) + code audit R8 — MVP v1 + instruments + full AGNOS integration + audit fixes + constants refactor + setter patterns + undo COW + drag UX + 4-point PolyBLEP
-> **Tests**: 1395 passing (190 dsp, 89 engine, 426 instruments, 257 session, 47 plugin, 134 ai, 263 ui + 7 shruti + 23 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
+> **Version**: 2026.3.18 | **Last Updated**: 2026-03-18
+> **Status**: Phases 1–7D, 8A–8G complete + engineering backlog (high + medium priority resolved) + code audit R8 + test infrastructure — MVP v1 + instruments + full AGNOS integration + audit fixes + constants refactor + setter patterns + undo COW + drag UX + 4-point PolyBLEP + shared test utils + integration test expansion
+> **Tests**: 1316 passing (190 dsp, 113 engine, 433 instruments, 257 session, 94 plugin, 189 ai, 12 test-utils + 28 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -31,6 +31,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 8A — Instrument Engine | Built-in instruments | `shruti-instruments` crate, InstrumentNode trait, VoiceManager, Oscillator (PolyBLEP), ADSR Envelope, SubtractiveSynth |
 | — Code Audit (R1-6) | Security, perf, memory, correctness, concurrency | Pre-allocated audio buffers, filter coeff caching, FFT validation, path traversal guard, export overflow guard, record buffer cap, transport loop fix, Acquire/Release atomics, atomic session update |
 | — Engineering (Med) | Constants, setters, undo COW, drag UX, PolyBLEP | Named constants in dsp+instruments, consistent setter patterns, Box-based undo history, drag ghost/cursor feedback, 4-point PolyBLEP oscillator |
+| — Test Infrastructure | Shared utils, integration tests, coverage | `shruti-test-utils` crate (8 helpers), 5 cross-crate pipeline tests, 30 AI serve.rs tests, StereoPanner reuse |
 
 ---
 
@@ -251,18 +252,14 @@ All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
 
 | Pri | Item | Notes |
 |-----|------|-------|
+| **H** | **UI logic extraction refactor** | Extract state mutations and computation from egui view callbacks into standalone pure functions; enables unit testing of ~2484 lines currently untestable; target files: app.rs, arrangement.rs, mixer.rs, transport.rs, instrument editors |
 | L | Theme JSON validation | Reject malformed theme files gracefully |
 
 ### Code Quality
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| M | Test coverage to 65%+ | Currently 64% (5409/8450); need ~83 more lines — target plugin (76%), engine (82%), AI (90%) gaps |
-| M | Shared test utilities crate | Deduplicate `generate_sine()`, `rms_of_buffer()` helpers |
-| M | Integration test crate | Cross-crate tests: synth→filter→delay→output pipeline |
-
-| L | Unnecessary `to_vec()` in AI analysis | Pass slice references instead of cloning |
-| L | StereoPanner reuse | Reuse panner instances instead of creating per-track per-buffer |
+| M | Test coverage to 70%+ | At 64.3% (5473/8512); blocked by UI rendering — unblocked by UI logic extraction above |
 
 ---
 
@@ -277,13 +274,14 @@ All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
 | `shruti-ui` | GPU-accelerated DAW UI (egui + eframe) | Active |
 | `shruti-ai` | Agent API + MCP tools for AGNOS | Active |
 | `shruti-instruments` | Built-in instruments: synths, drum machine, sampler, InstrumentNode trait | Active |
+| `shruti-test-utils` | Shared test helpers: sine generation, RMS, silence detection | Active |
 | `shruti-ml` | Music LLM runtime, tokenizer, AI player agents | Planned |
 
 ---
 
 ## Test Coverage
 
-**Current:** 1617 tests, 64% line coverage (5409/8450 lines, excluding vendor and binaries).
+**Current:** 1316 tests, 64.3% line coverage (5473/8512 lines, excluding vendor and binaries).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 50% (fails build if coverage drops below).
 
@@ -294,17 +292,21 @@ All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
 | shruti-dsp | 96.9% | 622/642 | 20 lines — meter LUFS edge cases, limiter |
 | shruti-session | 95.4% | 1088/1140 | 52 lines — store error paths, add_track variants |
 | shruti-instruments | 94.0% | 2014/2142 | 128 lines — drum looped playback, sampler loop modes |
-| shruti-ai | 90.6% | 671/741 | 70 lines — MCP dispatch, serve.rs |
-| shruti-engine | 82.5% | 288/349 | 61 lines — cpal_backend (needs mock), midi_io |
-| shruti-plugin | 76.3% | 235/308 | 73 lines — host.rs plugin loading (needs .so/.clap files) |
-| shruti-ui | 15.7% | 491/3128 | 2637 lines — mostly egui rendering (not unit-testable) |
+| shruti-ai | 94.1% | 703/747 | 44 lines — serve.rs run_server, media_analysis |
+| shruti-engine | 82.5% | 288/349 | 61 lines — cpal_backend (hardware), midi_io |
+| shruti-plugin | 76.3% | 235/308 | 73 lines — LoadedPlugin (needs libloading::Library) |
+| shruti-ui | 15.7% | 491/3128 | 2637 lines — egui rendering (not unit-testable) |
+| shruti-test-utils | 100% | 34/34 | — |
 
-### Path to 80%
+### Coverage Ceiling Analysis
+
+The UI crate contains 2484 lines of egui rendering code that cannot be unit tested. This caps the theoretical maximum overall coverage at ~71%. Reaching 70%+ requires extracting pure logic from egui view functions into testable helpers.
+
+### Path to 70%+
 
 | Phase | Target | Focus | Strategy |
 |-------|--------|-------|----------|
-| Engine mocking | 70% | cpal_backend mock, midi_io mock, engine callback logic | `MockBackend` implementing `AudioHost` |
-| UI data logic | 75% | app.rs action dispatch, state transitions, theme construction | Extract pure functions from egui callbacks |
-| UI widget math | 80% | fader dB math, knob angles, meter decay, grid calculations | Test computation functions, skip painting code |
+| UI data extraction | 68% | Extract state update logic from egui callbacks | Move mixer/arrangement state mutations into pure functions |
+| UI widget extraction | 70% | Extract layout math from widget painting | Separate computation from egui Painter calls |
 
-*Last Updated: 2026-03-17*
+*Last Updated: 2026-03-18*

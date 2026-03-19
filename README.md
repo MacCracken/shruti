@@ -2,7 +2,7 @@
 
 > A Rust-native Digital Audio Workstation
 
-**Version:** 2026.3.14 | **Tests:** 1381 passing | **Clippy:** 0 warnings
+**Version:** 2026.3.18 | **Tests:** 1381 passing | **Clippy:** 0 warnings
 
 **Shruti** is a cross-platform DAW built from the ground up in Rust, designed for performance, reliability, and AI-assisted music production. While OS-independent, Shruti is purpose-built as the primary audio workstation for the [AGNOS](https://github.com/MacCracken/agnosticos) ecosystem.
 
