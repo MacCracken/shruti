@@ -1,0 +1,63 @@
+name: 'Setup Rust Environment'
+description: 'Install Rust toolchain, system dependencies, cache, and prepare build environment'
+
+inputs:
+  toolchain:
+    description: 'Rust toolchain version'
+    required: false
+    default: 'stable'
+  components:
+    description: 'Rust components to install'
+    required: false
+    default: 'rustfmt, clippy'
+  cache-prefix:
+    description: 'Cache key prefix for segmentation'
+    required: false
+    default: 'shruti'
+  install-system-deps:
+    description: 'Install system dependencies (ALSA, PipeWire)'
+    required: false
+    default: 'true'
+
+outputs:
+  project-version:
+    description: 'Project version from VERSION file'
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Read VERSION
+      id: version
+      shell: bash
+      run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+    - name: Install system dependencies
+      if: inputs.install-system-deps == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libasound2-dev \
+          pkg-config
+
+    - name: Create tarang stubs (if tarang repo not available)
+      shell: bash
+      run: bash scripts/create-tarang-stubs.sh
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+
+    - name: Cache cargo registry and build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+        key: ${{ inputs.cache-prefix }}-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ inputs.cache-prefix }}-${{ runner.os }}-cargo-

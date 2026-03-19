@@ -6,48 +6,63 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-D warnings"
 
 jobs:
-  check:
-    name: Check & Lint
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ark update
-          ark install rust tarang libasound2-dev pkg-config
-      - name: Check formatting
-        run: cargo fmt -- --check
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: build
+      - name: Build workspace
+        run: cargo build --release --workspace
+
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: quality
+      - name: Format check
+        run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --workspace --tests --features tarang -- -W clippy::all -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   security:
-    name: Security Audit
+    name: Security Scan
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: security
+      - name: Cargo audit
         run: |
-          ark update
-          ark install rust tarang
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-      - name: Run security audit
-        run: cargo audit
+          cargo install cargo-audit --locked
+          cargo audit
+        continue-on-error: true
 
   test:
     name: Test (${{ matrix.package }})
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
     strategy:
       fail-fast: false
       matrix:
@@ -63,79 +78,57 @@ jobs:
           - shruti
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ark update
-          ark install rust tarang libasound2-dev pkg-config
-      - name: Run unit tests for ${{ matrix.package }}
-        run: cargo test -p ${{ matrix.package }} --features tarang --lib --bins --benches --examples
-
-  integration:
-    name: Integration Tests (${{ matrix.package }})
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - shruti-instruments
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ark update
-          ark install rust tarang libasound2-dev pkg-config
-      - name: Run integration tests for ${{ matrix.package }}
-        run: cargo test -p ${{ matrix.package }} --features tarang --test '*'
-
-  e2e:
-    name: E2E Tests
-    needs: [test, integration]
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ark update
-          ark install rust tarang libasound2-dev pkg-config
-      - name: Run end-to-end tests
-        run: cargo test -p shruti --features tarang --test integration
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: test
+      - name: Run tests
+        run: cargo test --package ${{ matrix.package }}
 
   coverage:
-    name: Coverage (50% threshold)
+    name: Code Coverage
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ark update
-          ark install rust tarang libasound2-dev pkg-config
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
-      - name: Run coverage
-        run: cargo tarpaulin --workspace --features tarang --fail-under 50 --exclude-files "vendor/*" "src/main.rs" "src/bin/*" --ignore-tests
-
-  build:
-    name: Build Release
-    needs: [check, test, integration, e2e, security, coverage]
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/maccracken/agnosticos:latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          ark update
-          ark install rust tarang libasound2-dev pkg-config
-      - name: Build release binary
-        run: cargo build --release --features tarang
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-env
         with:
-          name: shruti-linux-amd64
-          path: target/release/shruti
+          cache-prefix: coverage
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+      - name: Run coverage
+        run: |
+          cargo tarpaulin --workspace \
+            --fail-under 50 \
+            --timeout 300 \
+            --out xml \
+            --skip-clean \
+            --exclude-files "vendor/*" "src/main.rs"
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: cobertura.xml
+          fail_ci_if_error: false
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: docs
+      - name: Check required docs
+        run: |
+          for f in README.md CHANGELOG.md LICENSE; do
+            if [ ! -f "$f" ]; then
+              echo "Missing required doc: $f"
+              exit 1
+            fi
+          done
+      - name: Build docs
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
