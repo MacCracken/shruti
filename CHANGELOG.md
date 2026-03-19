@@ -20,6 +20,23 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 ### StereoPanner Reuse
 - `Timeline` now holds a single `StereoPanner` instance, reused across all tracks per render call instead of allocating a new one per-track per-buffer
 
+### CI/CD Overhaul
+- New `setup-rust-env` composite action: Rust toolchain install, system deps, cargo caching, tarang stub creation, version extraction
+- CI workflow: concurrency groups with cancel-in-progress for branch pushes
+- Dockerfile migrated to AGNOS base image (`ghcr.io/maccracken/agnosticos:latest`) with `ark` package manager
+- Docker build uses `--features tarang` for full codec support
+- `scripts/create-tarang-stubs.sh` — creates minimal stub crates for CI environments without the tarang repo
+
+### AGNOS Marketplace Recipe
+- New `recipes/marketplace/shruti.toml` — AGNOS package definition with runtime/build dependencies, sandbox config (seccomp + Landlock), and marketplace metadata
+
+### License
+- Added GPL-3.0 LICENSE file
+
+### Additional Test Coverage
+- Agent API: save/open session roundtrip, add_region with pool audio, add_region track-not-found error path
+- SharedTransport: seek consume/reset, multiple-seeks-last-wins, playing toggle
+
 ## 2026.3.17 — Engineering Backlog (Medium Priority)
 
 ### Centralized Constants
@@ -62,7 +79,28 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - `SUPPORTED_EXTENSIONS` expanded: `mp3`, `m4a`, `aac`, `alac`, `opus`
 - Empty file handling: gracefully returns zero-frame buffer when tarang reports no audio decoded
 - `catch_unwind` safety wrapper retained for malformed file protection
-- Writer unchanged (hound for WAV export) — will migrate to tarang once M5 (Audio Encoding) lands
+
+### Native FLAC Export via tarang-audio
+- FLAC encoding via `tarang_audio::FlacEncoder` when `tarang` feature is enabled
+- `write_audio_file()` dispatches FLAC to tarang encoder (falls back to WAV without feature)
+- `is_native_export()` helper to check if a format has native support
+
+### Channel Mixing via tarang-audio
+- New `mix` module in `shruti-dsp::io` — stereo/mono conversion and multichannel downmixing
+- Supports stereo→mono, mono→stereo, 5.1→stereo (ITU-R BS.775), generic N-channel fallbacks
+- Available with `tarang` feature flag
+
+### Audio Resampling via tarang-audio
+- New `resample` module in `shruti-dsp::io` — linear interpolation and windowed sinc resampling
+- `resample()` for fast linear interpolation (previews, non-critical paths)
+- `resample_sinc()` for high-quality windowed sinc with configurable window size
+
+### Media Analysis via tarang-ai
+- New `media_analysis` module in `shruti-ai` — content classification, audio fingerprinting, transcription routing
+- `analyze_audio()` — auto-tagging imported samples by content type and quality
+- Re-exports tarang-ai types: `AudioFingerprint`, `ContentType`, `MediaAnalysis`, `TranscriptionResult`
+- Hoosh client and Whisper model integration for fingerprinting and transcription
+- Available with `tarang` feature flag
 
 ## 2026.3.14 — Engineering Backlog (High Priority)
 
