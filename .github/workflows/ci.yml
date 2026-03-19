@@ -13,7 +13,6 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write
 
 env:
   CARGO_TERM_COLOR: always
