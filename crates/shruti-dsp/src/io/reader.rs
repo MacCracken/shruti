@@ -6,12 +6,14 @@ use crate::format::AudioFormat;
 /// Supported audio file extensions for reading.
 ///
 /// With the `tarang` feature enabled, supports: WAV, FLAC, AIFF, OGG/Vorbis,
-/// MP3, AAC/M4A, ALAC, and Opus (powered by tarang-audio / symphonia backend).
+/// MP3, AAC/M4A, ALAC, Opus, and container formats with audio tracks
+/// (MP4, MOV, MKV, WebM) — powered by tarang-audio / symphonia backend.
 ///
 /// Without `tarang`, only WAV is supported (via hound).
 #[cfg(feature = "tarang")]
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "wav", "flac", "aiff", "aif", "ogg", "mp3", "m4a", "aac", "alac", "opus",
+    "wav", "flac", "aiff", "aif", "ogg", "mp3", "m4a", "aac", "alac", "opus", "mp4", "mov", "mkv",
+    "webm",
 ];
 
 #[cfg(not(feature = "tarang"))]
@@ -143,6 +145,110 @@ fn read_audio_file_hound(
     Ok((buffer, audio_format))
 }
 
+// ── container probing (tarang-demux) ──────────────────────────────────────
+
+/// Information about a container file's audio content.
+///
+/// Useful for inspecting MP4/MKV/WebM files before importing to determine
+/// codec, duration, channels, and sample rate without decoding.
+#[cfg(feature = "tarang")]
+#[derive(Debug, Clone)]
+pub struct ContainerInfo {
+    /// Detected container format (e.g., Mp4, Mkv, Ogg, Wav).
+    pub format: String,
+    /// Audio codec found in the container (e.g., "AAC", "Opus", "FLAC").
+    pub audio_codec: Option<String>,
+    /// Sample rate of the first audio stream.
+    pub sample_rate: Option<u32>,
+    /// Number of audio channels.
+    pub channels: Option<u16>,
+    /// Duration of the audio content.
+    pub duration: Option<std::time::Duration>,
+    /// Whether the container also contains video streams.
+    pub has_video: bool,
+    /// Title metadata if available.
+    pub title: Option<String>,
+    /// Artist metadata if available.
+    pub artist: Option<String>,
+}
+
+/// Probe a container file for audio stream metadata without decoding.
+///
+/// Supports MP4, MKV/WebM, OGG, and WAV containers. Returns information
+/// about the first audio stream found, including codec, sample rate, channels,
+/// and duration.
+#[cfg(feature = "tarang")]
+pub fn probe_container(path: &Path) -> Result<ContainerInfo, Box<dyn std::error::Error>> {
+    use tarang::demux::Demuxer;
+
+    let mut header = [0u8; 12];
+    {
+        use std::io::Read;
+        let mut f = std::fs::File::open(path)?;
+        f.read_exact(&mut header)?;
+    }
+
+    let format = tarang::demux::detect_format(&header)?;
+
+    let file = std::fs::File::open(path)?;
+    let info = match format {
+        tarang::core::ContainerFormat::Mp4 => {
+            let mut demuxer = tarang::demux::Mp4Demuxer::new(file);
+            demuxer.probe()?
+        }
+        tarang::core::ContainerFormat::Mkv => {
+            let mut demuxer = tarang::demux::MkvDemuxer::new(file);
+            demuxer.probe()?
+        }
+        tarang::core::ContainerFormat::Ogg => {
+            let mut demuxer = tarang::demux::OggDemuxer::new(file);
+            demuxer.probe()?
+        }
+        tarang::core::ContainerFormat::Wav => {
+            let mut demuxer = tarang::demux::WavDemuxer::new(file);
+            demuxer.probe()?
+        }
+        other => {
+            return Err(format!("unsupported container format: {other:?}").into());
+        }
+    };
+
+    // Find the first audio stream
+    let mut audio_codec = None;
+    let mut sample_rate = None;
+    let mut channels = None;
+    let mut audio_duration = None;
+    let mut has_video = false;
+
+    for stream in &info.streams {
+        match stream {
+            tarang::core::StreamInfo::Audio(a) => {
+                if audio_codec.is_none() {
+                    audio_codec = Some(format!("{:?}", a.codec));
+                    sample_rate = Some(a.sample_rate);
+                    channels = Some(a.channels);
+                    audio_duration = a.duration;
+                }
+            }
+            tarang::core::StreamInfo::Video(_) => {
+                has_video = true;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ContainerInfo {
+        format: format!("{format:?}"),
+        audio_codec,
+        sample_rate,
+        channels,
+        duration: audio_duration.or(info.duration),
+        has_video,
+        title: info.title,
+        artist: info.artist,
+    })
+}
+
 // ── streaming reader (tarang, pull-based) ─────────────────────────────────
 
 /// Status returned when the streaming reader has no more data.
@@ -266,6 +372,38 @@ mod tests {
         assert!(is_supported_extension("alac"));
         assert!(is_supported_extension("opus"));
         assert!(is_supported_extension("MP3"));
+    }
+
+    #[cfg(feature = "tarang")]
+    #[test]
+    fn supported_extensions_includes_containers() {
+        assert!(is_supported_extension("mp4"));
+        assert!(is_supported_extension("mov"));
+        assert!(is_supported_extension("mkv"));
+        assert!(is_supported_extension("webm"));
+        assert!(is_supported_extension("MP4"));
+    }
+
+    #[cfg(feature = "tarang")]
+    #[test]
+    fn probe_wav_container() {
+        let dir = std::env::temp_dir().join("shruti_probe_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("probe.wav");
+
+        let buf = AudioBuffer::from_interleaved(vec![0.5, -0.5, 0.3, -0.3], 2);
+        let fmt = AudioFormat::new(44100, 2, 0);
+        write_wav_file(&path, &buf, &fmt).unwrap();
+
+        let info = probe_container(&path).unwrap();
+        assert_eq!(info.format, "Wav");
+        assert!(info.audio_codec.is_some());
+        assert_eq!(info.sample_rate, Some(44100));
+        assert_eq!(info.channels, Some(2));
+        assert!(!info.has_video);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[cfg(not(feature = "tarang"))]

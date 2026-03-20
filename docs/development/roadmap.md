@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.20 | **Last Updated**: 2026-03-19
-> **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments, tarang-demux)
-> **Tests**: 1847 passing, 89.65% coverage (excl. egui rendering), 0 clippy warnings, 0 audit vulnerabilities
+> **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
+> **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
+> **Tests**: 1873 passing, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -39,16 +39,17 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 8F — Track Types | Organization + routing | 5 track kinds (Instrument/DrumMachine/Sampler/AiPlayer + existing), icons/colors, templates, groups/folders, output routing matrix |
 | 8G — Instrument Testing | Comprehensive validation | Oscillator/filter/envelope accuracy, polyphony stress, preset roundtrip, sample playback, sequencer timing, MIDI integration |
 | 16A — HTTP Server | AGNOS integration | `shruti serve --port 8050`, axum (8 endpoints + health), CORS, 16 async tests |
-| — Tarang Integration | Media backend | tarang-audio decoding (MP3/AAC/ALAC/Opus), FLAC export, channel mixing, resampling (linear + sinc), tarang-ai media analysis |
+| — Tarang Integration | Media backend | tarang-audio decoding (MP3/AAC/ALAC/Opus + MP4/MKV/WebM containers), FLAC/Opus/AAC export, channel mixing, resampling (linear + sinc), loudness normalization, streaming decode, tarang-ai media analysis (fingerprint, AcoustID, diarization), container probing |
 | — CI/CD & Packaging | Build + distribution | GitHub Actions (CI + release), AGNOS Dockerfile, marketplace recipe, GPL-3.0 license |
 | — Crates.io Migration | Tarang + ai-hwaccel | Switched tarang from path deps (3 sub-crates) to unified `tarang 0.19.3` from crates.io; added `ai-hwaccel 0.19.3` with hardware detection module + MCP tool; removed CI stub script |
+| — Tarang 0.20.3 Upgrade | Dependency upgrade + 8 features | Upgraded tarang + ai-hwaccel to 0.20.3; container-aware import (MP4/MKV/WebM); cached+selective+async hardware detection; live GPU metrics; AcoustID fingerprinting; speaker diarization; streaming decode; loudness normalization; Opus/AAC export support |
 
 ---
 
 ## Post-MVP
 
-### Tarang Media Backend (Remaining)
-- `tarang-demux` for container-aware import (MP4 audio tracks, MKV, WebM)
+### ~~Tarang Media Backend (Remaining)~~ (Complete)
+- ~~`tarang-demux` for container-aware import (MP4 audio tracks, MKV, WebM)~~ — Done in 2026.3.20
 - **Benefit**: Shared decode/encode codebase with Tazama and AGNOS media player, wider format support, no ffmpeg dep
 
 ### Synthesizers
@@ -165,10 +166,10 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Test Coverage
 
-**Current:** 1847 tests, 89.65% line coverage (5389/6011 lines, excluding vendor, binaries, and egui rendering).
+**Current:** 1873 tests (excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 70% (fails build if coverage drops below).
 
 Pure egui rendering files (~2500 lines across 16 view/widget files) are excluded from coverage measurement — they contain only `fn(&mut Ui)` callbacks with no extractable logic. All testable computation has been extracted into `logic.rs`, widget test modules, or standalone pure functions.
 
-*Last Updated: 2026-03-19*
+*Last Updated: 2026-03-20*

@@ -3,6 +3,52 @@
 All notable changes to Shruti are documented here.
 Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 
+## 2026.3.20 — Tarang 0.20.3 Upgrade & New Features
+
+### Dependency Upgrades
+- Upgraded `tarang` from 0.19.3 to 0.20.3
+- Upgraded `ai-hwaccel` from 0.19.3 to 0.20.3
+- Added `async-detect` feature to `ai-hwaccel` for non-blocking hardware probing
+- Added `MediaInfo.metadata` field for tarang 0.20.3 compatibility
+- Fixed `AudioBuffer::num_samples` → `num_frames` rename across all tarang integration code (mix, resample, writer, media_analysis)
+
+### Container-Aware Import (tarang-demux)
+- Added MP4, MOV, MKV, WebM to `SUPPORTED_EXTENSIONS` — audio tracks from video containers can now be imported directly
+- New `probe_container()` function: inspects container metadata (codec, sample rate, channels, duration, video presence) without decoding
+- New `ContainerInfo` struct for container probe results
+
+### Hardware Detection Improvements
+- **Cached detection**: Results cached for 5 minutes via `LazyLock`-based cache with TTL, avoiding repeated subprocess spawns
+- **Selective backends**: Only probes CUDA and ROCm (desktop GPU focus) via `DetectBuilder`
+- **Async detection**: New `detect_async()` function for non-blocking hardware probing in async contexts (axum server)
+- **Live GPU metrics**: `DeviceInfo` now includes `memory_free_bytes`, `memory_used_bytes`, `gpu_utilization_percent`, `temperature_c`, `power_watts`
+- **Cache control**: New `invalidate_cache()` function for manual cache reset
+
+### Audio Analysis Expansion
+- **AcoustID fingerprinting**: New `compute_acoustid()` — base64-encoded fingerprints compatible with AcoustID music identification database
+- **Speaker diarization**: New `diarize_audio()` — energy-based VAD + spectral clustering for who-spoke-when segmentation
+- Extracted shared `to_tarang_buffer()` and `parse_codec()` helpers, reducing duplication
+
+### Streaming Audio Decode
+- New `StreamingReader` with `open()`, `next_buffer()`, `read_all()` — pull-based streaming decode via `FileDecoder::next_buffer()` for memory-efficient playback of long files
+- New `StreamingError` enum (`EndOfStream`, `Decode`)
+
+### Loudness Normalization
+- New `loudness` module in `shruti-dsp` (feature-gated: `tarang`):
+  - `measure_loudness()` — ITU-R BS.1770 simplified LUFS measurement
+  - `apply_gain()` — dB gain with clamping
+  - `normalize_loudness()` — two-pass normalize to target LUFS (e.g., -14 for Spotify/YouTube)
+
+### Opus & AAC Export
+- Added `Opus` and `Aac` variants to `ExportFormat`
+- New feature flags: `opus-enc` (libopus) and `aac-enc` (fdk-aac) forwarded through workspace
+- `write_opus_tarang()` — Opus encoding via OGG muxer
+- `write_aac_tarang()` — raw AAC encoding via fdk-aac
+
+### Tests
+- 1873 tests passing (up from 1847), 0 clippy warnings
+- New tests: AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1), fingerprint fix (1)
+
 ## 2026.3.19 — Crates.io Migration & Hardware Detection
 
 ### Tarang Crates.io Migration

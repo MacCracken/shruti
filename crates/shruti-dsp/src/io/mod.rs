@@ -18,6 +18,6 @@ pub use loudness::{LoudnessMetrics, apply_gain, measure_loudness, normalize_loud
 #[cfg(feature = "tarang")]
 pub use mix::{ChannelLayout, mix_channels};
 #[cfg(feature = "tarang")]
-pub use reader::{StreamingError, StreamingReader};
+pub use reader::{ContainerInfo, StreamingError, StreamingReader, probe_container};
 #[cfg(feature = "tarang")]
 pub use resample::{resample, resample_sinc};
