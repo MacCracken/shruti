@@ -31,6 +31,7 @@ pub struct SubtractiveSynth {
     oscillators: Vec<Oscillator>,
     oscillators2: Vec<Oscillator>,
     oscillators3: Vec<Oscillator>,
+    sub_oscillators: Vec<Oscillator>,
     envelopes: Vec<Envelope>,
     filter_envelopes: Vec<Envelope>,
     filters: Vec<Filter>,
@@ -81,6 +82,13 @@ pub enum SynthParam {
     HardSync = 31,
     RingMod = 32,
     FmAmount = 33,
+    UnisonVoices = 34,
+    UnisonDetune = 35,
+    UnisonSpread = 36,
+    SubOscEnable = 37,
+    SubOscOctave = 38,
+    SubOscWaveform = 39,
+    SubOscLevel = 40,
 }
 
 impl ParamIndex for SynthParam {
@@ -88,7 +96,7 @@ impl ParamIndex for SynthParam {
         self as usize
     }
     fn count() -> usize {
-        SynthParam::FmAmount as usize + 1
+        SynthParam::SubOscLevel as usize + 1
     }
 }
 
@@ -136,6 +144,13 @@ impl TryFrom<usize> for SynthParam {
             31 => Ok(Self::HardSync),
             32 => Ok(Self::RingMod),
             33 => Ok(Self::FmAmount),
+            34 => Ok(Self::UnisonVoices),
+            35 => Ok(Self::UnisonDetune),
+            36 => Ok(Self::UnisonSpread),
+            37 => Ok(Self::SubOscEnable),
+            38 => Ok(Self::SubOscOctave),
+            39 => Ok(Self::SubOscWaveform),
+            40 => Ok(Self::SubOscLevel),
             _ => Err(()),
         }
     }
@@ -197,6 +212,15 @@ impl SubtractiveSynth {
             InstrumentParam::new("HardSync", 0.0, 1.0, 0.0, ""), // 0=off, 1=on (osc1 resets osc2 phase)
             InstrumentParam::new("RingMod", 0.0, 1.0, 0.0, ""),  // 0.0..1.0 blend (osc1 * osc2)
             InstrumentParam::new("FmAmount", 0.0, 1.0, 0.0, ""), // 0.0..1.0 (osc1 -> osc2 frequency mod)
+            // Unison
+            InstrumentParam::new("UnisonVoices", 1.0, 8.0, 1.0, ""), // 1 = no unison
+            InstrumentParam::new("UnisonDetune", 0.0, 100.0, 0.0, "cents"),
+            InstrumentParam::new("UnisonSpread", 0.0, 1.0, 0.5, ""),
+            // Sub-oscillator
+            InstrumentParam::new("SubOscEnable", 0.0, 1.0, 0.0, ""), // 0=off, 1=on
+            InstrumentParam::new("SubOscOctave", 0.0, 1.0, 0.0, ""), // 0=-1oct, 1=-2oct
+            InstrumentParam::new("SubOscWaveform", 0.0, 4.0, 0.0, ""), // 0=Sine default for sub
+            InstrumentParam::new("SubOscLevel", 0.0, 1.0, 0.5, ""),
         ];
 
         let oscillators = (0..MAX_VOICES)

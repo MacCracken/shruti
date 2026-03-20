@@ -39,6 +39,10 @@ pub struct Voice {
     pub phase2: f64,
     /// Phase accumulator for oscillator 3.
     pub phase3: f64,
+    /// Phase accumulators for up to 8 unison copies.
+    pub unison_phases: [f64; 8],
+    /// Phase accumulator for sub-oscillator.
+    pub sub_phase: f64,
     /// Per-voice amplitude envelope level.
     pub envelope_level: f32,
     /// Age counter — increments each process block while active.
@@ -55,6 +59,8 @@ impl Voice {
             phase: 0.0,
             phase2: 0.0,
             phase3: 0.0,
+            unison_phases: [0.0; 8],
+            sub_phase: 0.0,
             envelope_level: 0.0,
             age: 0,
         }
@@ -187,6 +193,8 @@ impl VoiceManager {
         voice.phase = 0.0;
         voice.phase2 = 0.0;
         voice.phase3 = 0.0;
+        voice.unison_phases = [0.0; 8];
+        voice.sub_phase = 0.0;
         voice.envelope_level = 1.0;
         voice.age = 0;
     }
