@@ -25,8 +25,16 @@ jobs:
         include:
           - platform: linux
             runner: ubuntu-latest
+            binary: shruti
+            archive: tar.gz
           - platform: macos-arm64
             runner: macos-latest
+            binary: shruti
+            archive: tar.gz
+          - platform: windows
+            runner: windows-latest
+            binary: shruti.exe
+            archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -39,31 +47,49 @@ jobs:
 
       - name: Read version
         id: version
+        shell: bash
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Build release
         run: cargo build --release --workspace
 
-      - name: Package release
+      - name: Package release (unix)
+        if: matrix.archive == 'tar.gz'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           RELEASE_DIR="shruti-${VERSION}-${{ matrix.platform }}"
           mkdir -p "${RELEASE_DIR}"
 
-          cp target/release/shruti "${RELEASE_DIR}/" 2>/dev/null || true
+          cp target/release/${{ matrix.binary }} "${RELEASE_DIR}/"
           cp LICENSE README.md "${RELEASE_DIR}/"
 
           tar czf "${RELEASE_DIR}.tar.gz" "${RELEASE_DIR}"
           sha256sum "${RELEASE_DIR}.tar.gz" > "${RELEASE_DIR}.tar.gz.sha256" 2>/dev/null || \
             shasum -a 256 "${RELEASE_DIR}.tar.gz" > "${RELEASE_DIR}.tar.gz.sha256"
 
+      - name: Package release (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $VERSION = "${{ steps.version.outputs.version }}"
+          $RELEASE_DIR = "shruti-${VERSION}-${{ matrix.platform }}"
+          New-Item -ItemType Directory -Force -Path $RELEASE_DIR
+
+          Copy-Item "target/release/${{ matrix.binary }}" "$RELEASE_DIR/"
+          Copy-Item "LICENSE" "$RELEASE_DIR/"
+          Copy-Item "README.md" "$RELEASE_DIR/"
+
+          Compress-Archive -Path $RELEASE_DIR -DestinationPath "${RELEASE_DIR}.zip"
+          $hash = (Get-FileHash "${RELEASE_DIR}.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${RELEASE_DIR}.zip" | Out-File -Encoding ascii "${RELEASE_DIR}.zip.sha256"
+
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
           path: |
-            shruti-*.tar.gz
-            shruti-*.tar.gz.sha256
+            shruti-*.${{ matrix.archive }}
+            shruti-*.${{ matrix.archive }}.sha256
           retention-days: 7
 
   create-release:
@@ -103,20 +129,45 @@ jobs:
         with:
           name: Shruti ${{ steps.version.outputs.version }}
           body: |
-            ## Shruti ${{ steps.version.outputs.version }}
+            # Shruti ${{ steps.version.outputs.version }}
 
-            ### Changes
+            A Rust-native Digital Audio Workstation — sample-accurate, real-time, cross-platform.
+
+            ---
+
+            ### What's Changed
+
             ${{ steps.changelog.outputs.changelog }}
 
-            ### Downloads
-            | Platform | Archive |
-            |----------|---------|
-            | Linux x86_64 | `shruti-${{ steps.version.outputs.version }}-linux.tar.gz` |
-            | macOS arm64 | `shruti-${{ steps.version.outputs.version }}-macos-arm64.tar.gz` |
+            ---
 
-            ### Verification
-            Each archive includes a `.sha256` checksum file.
+            ### Downloads
+
+            | Platform | Architecture | Archive | Checksum |
+            |----------|-------------|---------|----------|
+            | Linux | x86_64 | `shruti-${{ steps.version.outputs.version }}-linux.tar.gz` | `.sha256` |
+            | macOS | arm64 (Apple Silicon) | `shruti-${{ steps.version.outputs.version }}-macos-arm64.tar.gz` | `.sha256` |
+            | Windows | x86_64 | `shruti-${{ steps.version.outputs.version }}-windows.zip` | `.sha256` |
+
+            ### Install
+
+            **Linux / macOS**
+            ```sh
+            tar xzf shruti-${{ steps.version.outputs.version }}-<platform>.tar.gz
+            ./shruti-${{ steps.version.outputs.version }}-<platform>/shruti
+            ```
+
+            **Windows**
+            Extract the `.zip` and run `shruti.exe`.
+
+            ### Verify
+
+            Each download has a matching `.sha256` checksum file. Verify with:
+            ```sh
+            sha256sum -c shruti-${{ steps.version.outputs.version }}-<platform>.tar.gz.sha256
+            ```
           files: |
             release-artifacts/release-linux/*
             release-artifacts/release-macos-arm64/*
+            release-artifacts/release-windows/*
           prerelease: true
