@@ -119,6 +119,7 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
   - Channels validation (.max(1)) in loudness/mix/resample tarang buffer construction
 - **34 Medium/Low issues** triaged to engineering backlog (M1–M20, L1–L14)
 - **Second audit pass**: fixed stereo spread energy conservation (constant-power panning law, L²+R²=1), context trim data loss (keep 75% instead of 50%, use `>=` boundary)
+- **Full codebase sweep** (131 files, 55K LOC): fixed `accumulator_handle.take().unwrap()` → `ok_or_else` in RecordManager/LoopRecordManager (prevents panic on double-finalize), `AudioFormat::buffer_duration_secs` division by zero guard (sample_rate=0), `AudioBuffer::from_interleaved` channels=0 guard. Confirmed `chunks_exact` is safe (returns partial, no panic). Added 3 items to backlog (M21, L15-L16). **37 total backlog items** (M1-M21, L1-L16)
 
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings

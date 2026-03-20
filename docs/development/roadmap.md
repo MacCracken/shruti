@@ -220,6 +220,12 @@ Issues identified in code audit, triaged as Medium/Low. Critical/High issues wer
 | L13 | shruti-ml | Hoosh timeout hardcoded to 10s | Make configurable via GenerationConfig |
 | L14 | shruti-instruments | Unison phase tracking choice (voice[0]) undocumented | Document why first voice is primary |
 
+*Full codebase sweep (2026.3.20):*
+
+| M21 | shruti-dsp | AudioBuffer::get/set unchecked index in hot paths | Use debug_assert! for bounds in debug builds |
+| L15 | shruti-session | FramePos Add/Sub can overflow u64 silently | Document u64 limit (~19hr at 48kHz) or use checked arithmetic |
+| L16 | shruti-session | AudioPool filename defaults to "unknown" on None | Return error instead of silent default |
+
 ---
 
 ## Crate Architecture

@@ -43,7 +43,10 @@ impl RecordManager {
         // Drop the producer to signal the consumer thread to finish
         drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
 
-        let handle = self.accumulator_handle.take().unwrap();
+        let handle = self
+            .accumulator_handle
+            .take()
+            .ok_or_else(|| EngineError::Recording("recorder already finalized".into()))?;
         let samples = handle
             .join()
             .map_err(|_| EngineError::Recording("recording thread panicked".into()))?;
@@ -144,7 +147,10 @@ impl LoopRecordManager {
         // Drop the producer to signal the consumer thread to finish
         drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
 
-        let handle = self.accumulator_handle.take().unwrap();
+        let handle = self
+            .accumulator_handle
+            .take()
+            .ok_or_else(|| EngineError::Recording("loop recorder already finalized".into()))?;
         let takes = handle
             .join()
             .map_err(|_| EngineError::Recording("loop recording thread panicked".into()))?;

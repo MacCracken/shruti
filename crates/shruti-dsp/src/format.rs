@@ -20,6 +20,9 @@ impl AudioFormat {
 
     /// Duration of one buffer in seconds.
     pub fn buffer_duration_secs(&self) -> f64 {
+        if self.sample_rate == 0 {
+            return 0.0;
+        }
         self.buffer_size as f64 / self.sample_rate as f64
     }
 

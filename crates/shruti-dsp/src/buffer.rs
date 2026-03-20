@@ -23,6 +23,7 @@ impl AudioBuffer {
 
     /// Create a buffer from existing interleaved sample data.
     pub fn from_interleaved(data: Vec<Sample>, channels: u16) -> Self {
+        let channels = channels.max(1);
         let frames = data.len() as u32 / channels as u32;
         Self {
             data,
