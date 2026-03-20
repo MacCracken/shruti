@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 // Re-export tarang-ai types for convenience
 pub use tarang::ai::{AcoustIdFingerprint, DiarizeConfig, SpeakerSegment};
 pub use tarang::ai::{AudioFingerprint, FingerprintConfig};
-pub use tarang::ai::{ContentType, MediaAnalysis, TranscriptionResult, TranscriptionSegment};
+pub use tarang::ai::{ContentType, MediaAnalysis};
 pub use tarang::ai::{HooshClient, HooshConfig, WhisperModel};
 
 /// Convert interleaved f32 samples into a tarang `AudioBuffer`.
@@ -133,44 +133,6 @@ pub fn diarize_audio(
     let buf = to_tarang_buffer(samples, sample_rate, channels);
     let segments = tarang::ai::diarize(&buf, config)?;
     Ok(segments)
-}
-
-/// Prepare a transcription request for an audio track.
-///
-/// Returns a `TranscriptionRequest` that can be sent to the hoosh service
-/// for Whisper-based transcription (useful for vocal alignment).
-pub fn prepare_transcription(
-    sample_rate: u32,
-    channels: u16,
-    duration_secs: f64,
-    codec_name: &str,
-    language_hint: Option<String>,
-) -> Option<tarang::ai::TranscriptionRequest> {
-    use std::time::Duration;
-    use tarang::core::*;
-
-    let codec = parse_codec(codec_name);
-
-    let info = MediaInfo {
-        id: uuid::Uuid::new_v4(),
-        format: ContainerFormat::Wav,
-        streams: vec![StreamInfo::Audio(AudioStreamInfo {
-            codec,
-            sample_rate,
-            channels,
-            sample_format: SampleFormat::F32,
-            bitrate: None,
-            duration: Some(Duration::from_secs_f64(duration_secs)),
-        })],
-        duration: Some(Duration::from_secs_f64(duration_secs)),
-        file_size: None,
-        title: None,
-        artist: None,
-        album: None,
-        metadata: std::collections::HashMap::new(),
-    };
-
-    tarang::ai::prepare_transcription(&info, language_hint)
 }
 
 /// Parse a codec name string into a tarang `AudioCodec`.
@@ -350,20 +312,4 @@ mod tests {
         assert!(ids.iter().all(|&id| id == ids[0]));
     }
 
-    #[test]
-    fn prepare_transcription_returns_request() {
-        let req = prepare_transcription(44100, 2, 120.0, "wav", Some("en".to_string()));
-        assert!(req.is_some());
-        let req = req.unwrap();
-        assert_eq!(req.sample_rate, 44100);
-        assert_eq!(req.channels, 2);
-        assert_eq!(req.language_hint, Some("en".to_string()));
-    }
-
-    #[cfg(feature = "hoosh")]
-    #[test]
-    fn hoosh_transcription_module_exists() {
-        // Just verify the types compile — actual server tests need integration env
-        let _ = hoosh::HooshClient::new("http://localhost:9999");
-    }
 }

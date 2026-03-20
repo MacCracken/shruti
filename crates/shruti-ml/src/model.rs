@@ -5,8 +5,6 @@
 //! replace with ONNX Runtime or candle for real model inference.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
 
 use crate::tokenizer::MidiToken;
@@ -230,60 +228,6 @@ impl InferenceScheduler {
     /// Get the model info.
     pub fn model_info(&self) -> &ModelInfo {
         self.runtime.info()
-    }
-}
-
-/// Manages model discovery, caching, and loading.
-#[derive(Debug)]
-pub struct ModelManager {
-    /// Directory where models are stored.
-    model_dir: PathBuf,
-    /// Cached list of available models.
-    available: Vec<ModelInfo>,
-}
-
-impl ModelManager {
-    /// Create a new model manager scanning the given directory.
-    pub fn new(model_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            model_dir: model_dir.into(),
-            available: Vec::new(),
-        }
-    }
-
-    /// Scan the model directory for available models.
-    ///
-    /// Looks for `.shruti-model` files (JSON metadata + weights).
-    pub fn scan(&mut self) {
-        self.available.clear();
-
-        if let Ok(entries) = std::fs::read_dir(&self.model_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "shruti-model")
-                    && let Ok(info) = Self::read_model_info(&path)
-                {
-                    self.available.push(info);
-                }
-            }
-        }
-    }
-
-    /// Get the list of available models.
-    pub fn available_models(&self) -> &[ModelInfo] {
-        &self.available
-    }
-
-    /// Get the model directory path.
-    pub fn model_dir(&self) -> &Path {
-        &self.model_dir
-    }
-
-    /// Read model info from a `.shruti-model` file.
-    fn read_model_info(path: &Path) -> Result<ModelInfo, Box<dyn std::error::Error>> {
-        let content = std::fs::read_to_string(path)?;
-        let info: ModelInfo = serde_json::from_str(&content)?;
-        Ok(info)
     }
 }
 
@@ -555,38 +499,4 @@ mod tests {
         assert_eq!(config.top_k, 40);
     }
 
-    #[test]
-    fn model_manager_empty_dir() {
-        let dir = std::env::temp_dir().join("shruti_ml_test_empty");
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut mgr = ModelManager::new(&dir);
-        mgr.scan();
-        assert!(mgr.available_models().is_empty());
-        let _ = std::fs::remove_dir(&dir);
-    }
-
-    #[test]
-    fn model_manager_finds_model() {
-        let dir = std::env::temp_dir().join("shruti_ml_test_models");
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let info = ModelInfo {
-            name: "test".into(),
-            version: "0.1".into(),
-            parameters: 1000,
-            vocab_size: 584,
-            max_seq_len: 512,
-            styles: vec![],
-        };
-        let path = dir.join("test.shruti-model");
-        std::fs::write(&path, serde_json::to_string(&info).unwrap()).unwrap();
-
-        let mut mgr = ModelManager::new(&dir);
-        mgr.scan();
-        assert_eq!(mgr.available_models().len(), 1);
-        assert_eq!(mgr.available_models()[0].name, "test");
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
-    }
 }

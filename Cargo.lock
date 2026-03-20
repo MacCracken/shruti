@@ -1917,6 +1917,8 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "hoosh"
 version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d5a907afdb8d8460230fdb16b0fd152b306e48b117648532677d30a663dca80"
 dependencies = [
  "ai-hwaccel",
  "anyhow",
