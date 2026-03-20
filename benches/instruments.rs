@@ -1,8 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use shruti_dsp::AudioBuffer;
-use shruti_instruments::{
-    DrumMachine, InstrumentNode, Sampler, SampleZone, SubtractiveSynth,
-};
+use shruti_instruments::{DrumMachine, InstrumentNode, SampleZone, Sampler, SubtractiveSynth};
 use shruti_session::midi::NoteEvent;
 use shruti_session::types::FramePos;
 
@@ -107,20 +105,10 @@ fn sampler_render_256(c: &mut Criterion) {
 
 // ── Groups ──────────────────────────────────────────────────────────
 
-criterion_group!(
-    synth_benches,
-    synth_render_256,
-    synth_render_1024,
-);
+criterion_group!(synth_benches, synth_render_256, synth_render_1024,);
 
-criterion_group!(
-    drum_benches,
-    drum_machine_render_256,
-);
+criterion_group!(drum_benches, drum_machine_render_256,);
 
-criterion_group!(
-    sampler_benches,
-    sampler_render_256,
-);
+criterion_group!(sampler_benches, sampler_render_256,);
 
 criterion_main!(synth_benches, drum_benches, sampler_benches);

@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use shruti_dsp::AudioBuffer;
-use shruti_dsp::effects::{Compressor, Delay, Limiter, ParametricEq, Reverb};
 use shruti_dsp::effects::eq::{EqBand, FilterType};
+use shruti_dsp::effects::{Compressor, Delay, Limiter, ParametricEq, Reverb};
 
 const SAMPLE_RATE: f32 = 48000.0;
 const CHANNELS: u16 = 2;
@@ -127,9 +127,7 @@ fn limiter_process(c: &mut Criterion) {
 
 fn buffer_from_interleaved(c: &mut Criterion) {
     let total = CHANNELS as usize * FRAMES_1S as usize;
-    let data: Vec<f32> = (0..total)
-        .map(|i| (i as f32 * 0.001).sin())
-        .collect();
+    let data: Vec<f32> = (0..total).map(|i| (i as f32 * 0.001).sin()).collect();
 
     c.bench_function("buffer_from_interleaved", |b| {
         b.iter_batched(
