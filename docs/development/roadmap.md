@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
-> **Tests**: 1873 passing, 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1899 passing, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -43,6 +43,8 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — CI/CD & Packaging | Build + distribution | GitHub Actions (CI + release), AGNOS Dockerfile, marketplace recipe, GPL-3.0 license |
 | — Crates.io Migration | Tarang + ai-hwaccel | Switched tarang from path deps (3 sub-crates) to unified `tarang 0.19.3` from crates.io; added `ai-hwaccel 0.19.3` with hardware detection module + MCP tool; removed CI stub script |
 | — Tarang 0.20.3 Upgrade | Dependency upgrade + 8 features | Upgraded tarang + ai-hwaccel to 0.20.3; container-aware import (MP4/MKV/WebM); cached+selective+async hardware detection; live GPU metrics; AcoustID fingerprinting; speaker diarization; streaming decode; loudness normalization; Opus/AAC export support |
+| — Unison & Voice Stacking | Supersaw + sub-osc | Per-osc unison (1-8 voices), detune spread, stereo width, sub-oscillator (-1/-2 oct), 7 new SynthParam variants |
+| — Loop Recording & Takes | Overdub + take management | LoopRecordManager with NAN-sentinel splitting, RecordingMode enum, TakeStack/Take structs with mute/solo/delete, transport loop_iteration tracking, AdvanceResult, 3 undo/redo edit commands |
 
 ---
 
@@ -61,7 +63,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 3 | Wavetable synth | Large | Wavetable loading (.wav frames, single-cycle), wavetable morphing (smooth interpolation between frames), position modulation via LFO/envelope, built-in factory tables (analog, digital, vocal, organic) |
 | 4 | Physical modeling synth | Large | Karplus-Strong string model, waveguide resonators (plucked/bowed/struck), exciter types (noise burst, impulse, bow), body resonance modeling, material parameters (brightness, decay, stiffness) |
 | 5 | Granular synth | Large | Grain cloud engine (position, density, size, pitch, spread), real-time granulation of loaded samples, freeze/scatter/spray modes, per-grain envelope (Gaussian/trapezoid), stereo grain panning |
-| 6 | Unison & voice stacking | Medium | Per-oscillator unison voices (up to 8), spread (detune + stereo width), sub-oscillator (-1/-2 octave), supersaw-style detuned stacks |
+| ~~6~~ | ~~Unison & voice stacking~~ | ~~Medium~~ | ~~Per-oscillator unison voices (up to 8), spread (detune + stereo width), sub-oscillator (-1/-2 octave), supersaw-style detuned stacks~~ — Done in 2026.3.20 |
 | 7 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
 
 ### Sampler
@@ -74,8 +76,8 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Loop-aware overdub recording | Medium | When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks |
-| 2 | Take/layer management | Medium | Stack, mute, solo, delete individual takes per track per loop pass |
+| ~~1~~ | ~~Loop-aware overdub recording~~ | ~~Medium~~ | ~~When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks~~ — Done in 2026.3.20 |
+| ~~2~~ | ~~Take/layer management~~ | ~~Medium~~ | ~~Stack, mute, solo, delete individual takes per track per loop pass~~ — Done in 2026.3.20 |
 | 3 | Comp editing | Large | Select best sections across takes to build a composite region |
 
 ### MIDI 2.0
@@ -166,7 +168,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Test Coverage
 
-**Current:** 1873 tests (excluding vendor, binaries, and egui rendering).
+**Current:** 1899 tests (excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 70% (fails build if coverage drops below).
 

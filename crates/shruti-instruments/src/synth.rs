@@ -232,6 +232,9 @@ impl SubtractiveSynth {
         let oscillators3 = (0..MAX_VOICES)
             .map(|_| Oscillator::new(Waveform::Saw, sample_rate as f64))
             .collect();
+        let sub_oscillators = (0..MAX_VOICES)
+            .map(|_| Oscillator::new(Waveform::Sine, sample_rate as f64))
+            .collect();
         let envelopes = (0..MAX_VOICES)
             .map(|_| Envelope::new(AdsrParams::default(), sample_rate))
             .collect();
@@ -261,6 +264,7 @@ impl SubtractiveSynth {
             oscillators,
             oscillators2,
             oscillators3,
+            sub_oscillators,
             envelopes,
             filter_envelopes,
             filters,
@@ -391,6 +395,22 @@ impl SubtractiveSynth {
         let ring_mod = self.params[SynthParam::RingMod.index()].value;
         let fm_amount = self.params[SynthParam::FmAmount.index()].value;
 
+        // Unison parameters
+        let unison_voices = self.params[SynthParam::UnisonVoices.index()].value.round() as usize;
+        let unison_detune_cents = self.params[SynthParam::UnisonDetune.index()].value as f64;
+        let unison_spread = self.params[SynthParam::UnisonSpread.index()].value;
+
+        // Sub-oscillator parameters
+        let sub_enabled = self.params[SynthParam::SubOscEnable.index()].value >= 0.5;
+        let sub_octave: f64 = if self.params[SynthParam::SubOscOctave.index()].value >= 0.5 {
+            4.0
+        } else {
+            2.0
+        }; // divisor
+        let sub_waveform =
+            Self::waveform_from_param(self.params[SynthParam::SubOscWaveform.index()].value);
+        let sub_level = self.params[SynthParam::SubOscLevel.index()].value;
+
         // Update oscillator 1 settings
         for osc in &mut self.oscillators {
             osc.waveform = waveform;
@@ -407,6 +427,11 @@ impl SubtractiveSynth {
         for osc in &mut self.oscillators3 {
             osc.waveform = osc3_waveform;
             osc.detune = osc3_detune;
+        }
+
+        // Update sub-oscillator settings
+        for osc in &mut self.sub_oscillators {
+            osc.waveform = sub_waveform;
         }
 
         // Update filter settings
@@ -444,8 +469,10 @@ impl SubtractiveSynth {
         let osc3_detune_ratio = Oscillator::fast_exp2_f64(osc3_detune / 1200.0);
 
         // Compute osc level normalization: divide by number of active oscillators
-        let active_osc_count =
-            1.0f32 + if osc2_enabled { 1.0 } else { 0.0 } + if osc3_enabled { 1.0 } else { 0.0 };
+        let active_osc_count = 1.0f32
+            + if osc2_enabled { 1.0 } else { 0.0 }
+            + if osc3_enabled { 1.0 } else { 0.0 }
+            + if sub_enabled { 1.0 } else { 0.0 };
         let osc_norm = 1.0 / active_osc_count;
 
         // Render each active voice
@@ -465,6 +492,8 @@ impl SubtractiveSynth {
             let mut phase1 = voice.phase;
             let mut phase2 = voice.phase2;
             let mut phase3 = voice.phase3;
+            let mut unison_phases = voice.unison_phases;
+            let mut sub_phase = voice.sub_phase;
 
             for frame in 0..clamped_frames {
                 let env_level = self.envelopes[i].tick();
@@ -490,12 +519,36 @@ impl SubtractiveSynth {
                     freq
                 };
 
-                // --- Oscillator 1 ---
-                let osc1_sample = self.oscillators[i].sample(phase1, effective_freq);
-                let prev_phase1 = phase1;
-                phase1 = Oscillator::advance_phase(phase1, effective_freq, sample_rate);
+                // --- Oscillator 1 (with unison) ---
+                let unison_count = unison_voices.clamp(1, 8);
+                let mut osc1_sample = 0.0f32;
+                let prev_phase1;
 
-                // Detect osc1 zero crossing (phase wrapped around) for hard sync
+                if unison_count <= 1 {
+                    // No unison — original single-oscillator path
+                    osc1_sample = self.oscillators[i].sample(phase1, effective_freq);
+                    prev_phase1 = phase1;
+                    phase1 = Oscillator::advance_phase(phase1, effective_freq, sample_rate);
+                } else {
+                    // Unison: generate N detuned copies, average them
+                    for (u, u_phase) in unison_phases.iter_mut().enumerate().take(unison_count) {
+                        let detune_offset = if unison_count > 1 {
+                            let t = u as f64 / (unison_count - 1) as f64;
+                            (t - 0.5) * 2.0 * unison_detune_cents
+                        } else {
+                            0.0
+                        };
+                        let u_freq =
+                            effective_freq * Oscillator::fast_exp2_f64(detune_offset / 1200.0);
+                        let s = self.oscillators[i].sample(*u_phase, u_freq);
+                        osc1_sample += s;
+                        *u_phase = Oscillator::advance_phase(*u_phase, u_freq, sample_rate);
+                    }
+                    osc1_sample /= unison_count as f32;
+                    // Use first unison voice phase as primary for sync/wrap detection
+                    prev_phase1 = phase1;
+                    phase1 = unison_phases[0];
+                }
                 let osc1_wrapped = phase1 < prev_phase1;
 
                 // --- Oscillator mix ---
@@ -542,6 +595,14 @@ impl SubtractiveSynth {
                     mix += osc3_sample * osc3_level * osc_norm;
                 }
 
+                // --- Sub-oscillator ---
+                if sub_enabled {
+                    let sub_freq = effective_freq / sub_octave;
+                    let sub_sample = self.sub_oscillators[i].sample(sub_phase, sub_freq);
+                    sub_phase = Oscillator::advance_phase(sub_phase, sub_freq, sample_rate);
+                    mix += sub_sample * sub_level * osc_norm;
+                }
+
                 // Apply amp envelope
                 let after_env = mix * env_level;
 
@@ -563,15 +624,36 @@ impl SubtractiveSynth {
                 let vol_mod = (1.0 + volume_lfo_mod).clamp(0.0, 2.0) * 0.5;
                 let out = filtered * vel_gain * volume * vol_mod;
 
-                for ch in 0..channels {
-                    let current = output.get(frame as u32, ch);
-                    output.set(frame as u32, ch, current + out);
+                if unison_count > 1 && channels >= 2 && unison_spread > 0.001 {
+                    // Approximate stereo spread: detune creates phase differences
+                    // that naturally produce width. Amplify L/R difference slightly.
+                    let width = unison_spread * 0.3;
+                    output.set(
+                        frame as u32,
+                        0,
+                        output.get(frame as u32, 0) + out * (1.0 + width),
+                    );
+                    output.set(
+                        frame as u32,
+                        1,
+                        output.get(frame as u32, 1) + out * (1.0 - width),
+                    );
+                    for ch in 2..channels {
+                        output.set(frame as u32, ch, output.get(frame as u32, ch) + out);
+                    }
+                } else {
+                    for ch in 0..channels {
+                        let current = output.get(frame as u32, ch);
+                        output.set(frame as u32, ch, current + out);
+                    }
                 }
             }
 
             self.voice_manager.voices[i].phase = phase1;
             self.voice_manager.voices[i].phase2 = phase2;
             self.voice_manager.voices[i].phase3 = phase3;
+            self.voice_manager.voices[i].unison_phases = unison_phases;
+            self.voice_manager.voices[i].sub_phase = sub_phase;
             self.voice_manager.voices[i].envelope_level = self.envelopes[i].level();
         }
 
@@ -593,6 +675,9 @@ impl InstrumentNode for SubtractiveSynth {
             osc.set_sample_rate(sample_rate as f64);
         }
         for osc in &mut self.oscillators3 {
+            osc.set_sample_rate(sample_rate as f64);
+        }
+        for osc in &mut self.sub_oscillators {
             osc.set_sample_rate(sample_rate as f64);
         }
         for env in &mut self.envelopes {
@@ -749,7 +834,7 @@ mod tests {
     fn synth_creates_with_defaults() {
         let synth = SubtractiveSynth::new(48000.0);
         assert_eq!(synth.info().name, "Subtractive Synth");
-        assert_eq!(synth.params().len(), 34); // 23 original + 11 multi-osc params
+        assert_eq!(synth.params().len(), 41); // 23 original + 11 multi-osc + 7 unison/sub params
         assert_eq!(synth.active_voices(), 0);
     }
 
@@ -1603,5 +1688,63 @@ mod tests {
         let mut synth = SubtractiveSynth::new(44100.0);
         synth.set_param(SynthParam::Volume, 0.42);
         assert!((synth.get_param(SynthParam::Volume) - 0.42).abs() < 1e-6);
+    }
+
+    // =========================================================================
+    // Unison & sub-oscillator tests
+    // =========================================================================
+
+    #[test]
+    fn unison_voices_produce_output() {
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.set_param(SynthParam::UnisonVoices, 4.0);
+        synth.set_param(SynthParam::UnisonDetune, 20.0);
+        synth.set_param(SynthParam::UnisonSpread, 0.5);
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.note_on(60, 100, 0);
+        synth.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn sub_oscillator_produces_output() {
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.set_param(SynthParam::SubOscEnable, 1.0);
+        synth.set_param(SynthParam::SubOscLevel, 0.8);
+        synth.set_param(SynthParam::SubOscWaveform, 0.0); // sine
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.note_on(60, 100, 0);
+        synth.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn sub_osc_octave_down() {
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.set_param(SynthParam::SubOscEnable, 1.0);
+        synth.set_param(SynthParam::SubOscOctave, 1.0); // -2 octaves
+        synth.set_param(SynthParam::SubOscLevel, 1.0);
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.note_on(69, 100, 0); // A4
+        synth.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn unison_with_sub_osc_combined() {
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.set_param(SynthParam::UnisonVoices, 8.0);
+        synth.set_param(SynthParam::UnisonDetune, 50.0);
+        synth.set_param(SynthParam::SubOscEnable, 1.0);
+        synth.set_param(SynthParam::SubOscLevel, 0.5);
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.note_on(60, 100, 0);
+        synth.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn param_count_includes_new_params() {
+        assert_eq!(SynthParam::count(), 41);
     }
 }

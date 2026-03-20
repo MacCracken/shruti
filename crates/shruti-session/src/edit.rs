@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::region::{Region, RegionId};
+use crate::take::{Take, TakeId};
 use crate::track::{TrackGroup, TrackGroupId, TrackId};
 use crate::types::{FramePos, TrackSlot};
 
@@ -158,6 +159,27 @@ pub enum EditCommand {
         track_id: TrackId,
         old_source: Option<TrackId>,
         new_source: Option<TrackId>,
+    },
+    /// Set the active take in a take stack.
+    SetActiveTake {
+        track_id: TrackId,
+        stack_index: usize,
+        old_active: usize,
+        new_active: usize,
+    },
+    /// Mute or unmute a take in a take stack.
+    MuteTake {
+        track_id: TrackId,
+        stack_index: usize,
+        take_id: TakeId,
+        was_muted: bool,
+    },
+    /// Delete a take from a take stack.
+    DeleteTake {
+        track_id: TrackId,
+        stack_index: usize,
+        take: Box<Take>,
+        was_at_index: usize,
     },
     /// Compound command (multiple edits as one undoable action).
     Compound { commands: Vec<EditCommand> },

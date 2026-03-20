@@ -305,6 +305,47 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
                 track.routing.sidechain_input = *new_source;
             }
         }
+        EditCommand::SetActiveTake {
+            track_id,
+            stack_index,
+            new_active,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(stack) = track.take_stacks.get_mut(*stack_index)
+            {
+                stack.set_active(*new_active);
+            }
+        }
+        EditCommand::MuteTake {
+            track_id,
+            stack_index,
+            take_id,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(stack) = track.take_stacks.get_mut(*stack_index)
+                && let Some(take) = stack.takes.iter_mut().find(|t| t.id == *take_id)
+            {
+                take.muted = !take.muted;
+            }
+        }
+        EditCommand::DeleteTake {
+            track_id,
+            stack_index,
+            take,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(stack) = track.take_stacks.get_mut(*stack_index)
+                && let Some(pos) = stack.takes.iter().position(|t| t.id == take.id)
+            {
+                stack.takes.remove(pos);
+                if stack.active_index >= stack.takes.len() && !stack.takes.is_empty() {
+                    stack.active_index = stack.takes.len() - 1;
+                }
+            }
+        }
         EditCommand::Compound { commands } => {
             for sub in commands.iter_mut() {
                 apply_command(sub, session);
@@ -533,6 +574,46 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
         } => {
             if let Some(track) = session.track_mut(*track_id) {
                 track.routing.sidechain_input = *old_source;
+            }
+        }
+        EditCommand::SetActiveTake {
+            track_id,
+            stack_index,
+            old_active,
+            ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(stack) = track.take_stacks.get_mut(*stack_index)
+            {
+                stack.set_active(*old_active);
+            }
+        }
+        EditCommand::MuteTake {
+            track_id,
+            stack_index,
+            take_id,
+            ..
+        } => {
+            // Toggle back — same operation as apply (mute is a toggle)
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(stack) = track.take_stacks.get_mut(*stack_index)
+                && let Some(take) = stack.takes.iter_mut().find(|t| t.id == *take_id)
+            {
+                take.muted = !take.muted;
+            }
+        }
+        EditCommand::DeleteTake {
+            track_id,
+            stack_index,
+            take,
+            was_at_index,
+        } => {
+            // Undo delete = re-insert the take at its original position
+            if let Some(track) = session.track_mut(*track_id)
+                && let Some(stack) = track.take_stacks.get_mut(*stack_index)
+            {
+                let idx = (*was_at_index).min(stack.takes.len());
+                stack.takes.insert(idx, (**take).clone());
             }
         }
         EditCommand::Compound { commands } => {

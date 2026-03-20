@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::automation::AutomationLane;
 use crate::midi::MidiClip;
 use crate::region::{Region, RegionId};
+use crate::take::TakeStack;
 use crate::types::FramePos;
 
 /// Unique identifier for a track.
@@ -310,6 +311,9 @@ pub struct Track {
     /// Output routing configuration.
     #[serde(default)]
     pub routing: OutputRouting,
+    /// Take stacks for loop recording layers.
+    #[serde(default)]
+    pub take_stacks: Vec<TakeStack>,
 }
 
 impl Track {
@@ -331,6 +335,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -352,6 +357,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -373,6 +379,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -394,6 +401,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -418,6 +426,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -442,6 +451,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -471,6 +481,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -492,6 +503,7 @@ impl Track {
             instrument_params: Vec::new(),
             color: None,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 
@@ -544,6 +556,20 @@ impl Track {
             .iter()
             .filter(|r| !r.muted && r.end_pos() > start)
             .collect()
+    }
+
+    /// Add a take stack to this track.
+    pub fn add_take_stack(&mut self, stack: TakeStack) {
+        self.take_stacks.push(stack);
+    }
+
+    /// Find the take stack that covers the given timeline position.
+    pub fn take_stack_at(&self, pos: FramePos) -> Option<&TakeStack> {
+        self.take_stacks.iter().find(|s| {
+            let start = s.timeline_pos.0;
+            let end = start + s.duration.0;
+            pos.0 >= start && pos.0 < end
+        })
     }
 }
 
@@ -601,6 +627,7 @@ impl TrackTemplate {
             instrument_params: self.instrument_params.clone(),
             color: self.color,
             routing: OutputRouting::default(),
+            take_stacks: Vec::new(),
         }
     }
 

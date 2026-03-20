@@ -11,6 +11,19 @@ pub enum TransportState {
     Recording,
 }
 
+/// Result of advancing the transport, with loop boundary information.
+#[derive(Debug, Clone, Copy)]
+pub struct AdvanceResult {
+    /// Position before the advance.
+    pub start: FramePos,
+    /// Position after the advance.
+    pub end: FramePos,
+    /// Whether the transport wrapped past the loop boundary.
+    pub loop_wrapped: bool,
+    /// Current loop iteration (0-indexed, increments on each wrap).
+    pub loop_iteration: u32,
+}
+
 /// Transport controls: playback position, tempo, time signature, loop region.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transport {
@@ -31,6 +44,9 @@ pub struct Transport {
     pub loop_start: FramePos,
     /// Loop end position in frames.
     pub loop_end: FramePos,
+    /// Current loop iteration (0-indexed, increments on each wrap).
+    #[serde(default)]
+    pub loop_iteration: u32,
 }
 
 impl Transport {
@@ -45,6 +61,7 @@ impl Transport {
             loop_enabled: false,
             loop_start: FramePos::ZERO,
             loop_end: FramePos::ZERO,
+            loop_iteration: 0,
         }
     }
 
@@ -55,6 +72,7 @@ impl Transport {
     pub fn stop(&mut self) {
         self.state = TransportState::Stopped;
         self.position = FramePos::ZERO;
+        self.loop_iteration = 0;
     }
 
     pub fn pause(&mut self) {
@@ -67,8 +85,9 @@ impl Transport {
 
     /// Advance the transport by `frames` and return the actual range processed,
     /// handling loop boundaries.
-    pub fn advance(&mut self, frames: u32) -> (FramePos, FramePos) {
+    pub fn advance(&mut self, frames: u32) -> AdvanceResult {
         let start = self.position;
+        let mut loop_wrapped = false;
 
         if self.loop_enabled && self.loop_end > self.loop_start {
             let end = start + FramePos::from(frames);
@@ -76,6 +95,8 @@ impl Transport {
                 let loop_length = self.loop_end - self.loop_start;
                 let overshoot = end - self.loop_end;
                 self.position = self.loop_start + (overshoot % loop_length);
+                self.loop_iteration += 1;
+                loop_wrapped = true;
             } else {
                 self.position = end;
             }
@@ -83,7 +104,12 @@ impl Transport {
             self.position += FramePos::from(frames);
         }
 
-        (start, self.position)
+        AdvanceResult {
+            start,
+            end: self.position,
+            loop_wrapped,
+            loop_iteration: self.loop_iteration,
+        }
     }
 
     /// Convert a frame position to seconds.
@@ -117,10 +143,11 @@ mod tests {
     fn test_transport_advance() {
         let mut t = Transport::new(48000);
         t.play();
-        let (start, end) = t.advance(256);
-        assert_eq!(start, FramePos::ZERO);
-        assert_eq!(end, FramePos(256));
+        let result = t.advance(256);
+        assert_eq!(result.start, FramePos::ZERO);
+        assert_eq!(result.end, FramePos(256));
         assert_eq!(t.position, FramePos(256));
+        assert!(!result.loop_wrapped);
     }
 
     #[test]
@@ -132,10 +159,12 @@ mod tests {
         t.position = FramePos(900);
         t.play();
 
-        let (start, _end) = t.advance(256);
-        assert_eq!(start, FramePos(900));
+        let result = t.advance(256);
+        assert_eq!(result.start, FramePos(900));
         // 900 + 256 = 1156, wraps to 1156 - 1000 = 156
         assert_eq!(t.position, FramePos(156));
+        assert!(result.loop_wrapped);
+        assert_eq!(result.loop_iteration, 1);
     }
 
     #[test]
@@ -161,8 +190,9 @@ mod tests {
 
         // 190 + 256 = 446, overshoot = 446 - 200 = 246, 246 % 100 = 46
         // position = 100 + 46 = 146
-        t.advance(256);
+        let result = t.advance(256);
         assert_eq!(t.position, FramePos(146));
+        assert!(result.loop_wrapped);
     }
 
     #[test]
@@ -175,7 +205,49 @@ mod tests {
         t.play();
 
         // Advance exactly to loop_end
-        t.advance(256);
+        let result = t.advance(256);
         assert_eq!(t.position, FramePos::ZERO);
+        assert!(result.loop_wrapped);
+    }
+
+    #[test]
+    fn test_loop_iteration_increments() {
+        let mut t = Transport::new(48000);
+        t.loop_enabled = true;
+        t.loop_start = FramePos::ZERO;
+        t.loop_end = FramePos(100);
+        t.play();
+
+        assert_eq!(t.loop_iteration, 0);
+
+        // First loop wrap
+        let r1 = t.advance(100);
+        assert!(r1.loop_wrapped);
+        assert_eq!(r1.loop_iteration, 1);
+        assert_eq!(t.loop_iteration, 1);
+
+        // Advance within loop (no wrap)
+        let r2 = t.advance(50);
+        assert!(!r2.loop_wrapped);
+        assert_eq!(r2.loop_iteration, 1);
+
+        // Second loop wrap
+        let r3 = t.advance(60); // 50+60=110, wraps
+        assert!(r3.loop_wrapped);
+        assert_eq!(r3.loop_iteration, 2);
+    }
+
+    #[test]
+    fn test_stop_resets_loop_iteration() {
+        let mut t = Transport::new(48000);
+        t.loop_enabled = true;
+        t.loop_start = FramePos::ZERO;
+        t.loop_end = FramePos(100);
+        t.play();
+        t.advance(100); // wrap once
+        assert_eq!(t.loop_iteration, 1);
+
+        t.stop();
+        assert_eq!(t.loop_iteration, 0);
     }
 }

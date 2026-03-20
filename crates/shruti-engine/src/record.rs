@@ -78,6 +78,127 @@ fn accumulate_samples(mut consumer: Consumer<f32>) -> Vec<f32> {
     samples
 }
 
+/// Recording mode for loop-aware recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingMode {
+    /// Normal linear recording.
+    Normal,
+    /// Overdub: layer new audio on top of existing takes.
+    Overdub,
+    /// Replace: overwrite the existing audio for each loop iteration.
+    Replace,
+}
+
+/// Manages loop-aware recording where each loop iteration produces a separate take.
+///
+/// Uses a lock-free ring buffer with NAN sentinels to mark loop boundaries.
+/// The accumulator thread splits the stream at these sentinels to produce
+/// one `Vec<f32>` per take.
+pub struct LoopRecordManager {
+    producer: Producer<f32>,
+    accumulator_handle: Option<thread::JoinHandle<Vec<Vec<f32>>>>,
+    mode: RecordingMode,
+}
+
+impl LoopRecordManager {
+    /// Create a new loop-aware record manager.
+    pub fn new(capacity: usize, mode: RecordingMode) -> Self {
+        let (producer, consumer) = RingBuffer::new(capacity);
+        let handle = thread::spawn(move || accumulate_loop_samples(consumer));
+
+        Self {
+            producer,
+            accumulator_handle: Some(handle),
+            mode,
+        }
+    }
+
+    /// The recording mode.
+    pub fn mode(&self) -> RecordingMode {
+        self.mode
+    }
+
+    /// Push interleaved samples from the RT callback. Non-blocking.
+    pub fn push_samples(&mut self, data: &[f32]) {
+        for &sample in data {
+            let _ = self.producer.push(sample);
+        }
+    }
+
+    /// Push a loop boundary marker. Call this when the transport wraps past loop_end.
+    ///
+    /// The accumulator thread uses NAN as a sentinel to split takes.
+    pub fn push_loop_marker(&mut self) {
+        let _ = self.producer.push(f32::NAN);
+    }
+
+    /// Stop recording and write each take as a separate WAV file.
+    ///
+    /// Returns the paths of the written files, one per take.
+    pub fn finish_all(
+        mut self,
+        dir: &Path,
+        base_name: &str,
+        format: &AudioFormat,
+    ) -> Result<Vec<std::path::PathBuf>, EngineError> {
+        // Drop the producer to signal the consumer thread to finish
+        drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
+
+        let handle = self.accumulator_handle.take().unwrap();
+        let takes = handle
+            .join()
+            .map_err(|_| EngineError::Recording("loop recording thread panicked".into()))?;
+
+        let mut paths = Vec::new();
+        for (i, samples) in takes.into_iter().enumerate() {
+            if samples.is_empty() {
+                continue;
+            }
+            let filename = format!("{}_{:03}.wav", base_name, i + 1);
+            let path = dir.join(filename);
+            let buffer = AudioBuffer::from_interleaved(samples, format.channels);
+            write_wav_file(&path, &buffer, format)
+                .map_err(|e| EngineError::Recording(e.to_string()))?;
+            paths.push(path);
+        }
+
+        Ok(paths)
+    }
+}
+
+/// Accumulate samples, splitting on NAN sentinels into separate takes.
+fn accumulate_loop_samples(mut consumer: Consumer<f32>) -> Vec<Vec<f32>> {
+    let mut takes: Vec<Vec<f32>> = vec![Vec::new()];
+
+    loop {
+        match consumer.pop() {
+            Ok(sample) => {
+                if sample.is_nan() {
+                    // NAN sentinel: start a new take
+                    takes.push(Vec::new());
+                } else if let Some(current) = takes.last_mut() {
+                    current.push(sample);
+                }
+            }
+            Err(_) => {
+                if consumer.is_abandoned() {
+                    while let Ok(sample) = consumer.pop() {
+                        if sample.is_nan() {
+                            takes.push(Vec::new());
+                        } else if let Some(current) = takes.last_mut() {
+                            current.push(sample);
+                        }
+                    }
+                    break;
+                }
+                thread::yield_now();
+            }
+        }
+    }
+
+    takes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +363,143 @@ mod tests {
         rm.finish(&path, &format).unwrap();
         assert!(path.exists());
         let _ = std::fs::remove_file(&path);
+    }
+
+    // --- Loop recording tests ---
+
+    #[test]
+    fn test_loop_record_manager_creation() {
+        let _lrm = LoopRecordManager::new(1024, RecordingMode::Overdub);
+    }
+
+    #[test]
+    fn test_loop_record_single_take() {
+        let mut lrm = LoopRecordManager::new(1024, RecordingMode::Overdub);
+        lrm.push_samples(&[0.1, 0.2, 0.3, 0.4]);
+
+        let dir = std::env::temp_dir().join("shruti_loop_test_single");
+        std::fs::create_dir_all(&dir).unwrap();
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 1,
+            buffer_size: 256,
+        };
+
+        let paths = lrm.finish_all(&dir, "take", &format).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].exists());
+
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_loop_record_multiple_takes() {
+        let mut lrm = LoopRecordManager::new(1024, RecordingMode::Overdub);
+        lrm.push_samples(&[0.1, 0.2]);
+        lrm.push_loop_marker(); // take boundary
+        lrm.push_samples(&[0.3, 0.4]);
+        lrm.push_loop_marker(); // take boundary
+        lrm.push_samples(&[0.5, 0.6]);
+
+        let dir = std::env::temp_dir().join("shruti_loop_test_multi");
+        std::fs::create_dir_all(&dir).unwrap();
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 1,
+            buffer_size: 256,
+        };
+
+        let paths = lrm.finish_all(&dir, "take", &format).unwrap();
+        assert_eq!(paths.len(), 3);
+        for p in &paths {
+            assert!(p.exists());
+        }
+        // Verify filenames
+        assert!(
+            paths[0]
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("take_001")
+        );
+        assert!(
+            paths[1]
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("take_002")
+        );
+        assert!(
+            paths[2]
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("take_003")
+        );
+
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_loop_record_empty_take_skipped() {
+        let mut lrm = LoopRecordManager::new(1024, RecordingMode::Overdub);
+        lrm.push_samples(&[0.1, 0.2]);
+        lrm.push_loop_marker();
+        // Empty take (just a marker, no samples)
+        lrm.push_loop_marker();
+        lrm.push_samples(&[0.3, 0.4]);
+
+        let dir = std::env::temp_dir().join("shruti_loop_test_empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        let format = AudioFormat {
+            sample_rate: 44100,
+            channels: 1,
+            buffer_size: 256,
+        };
+
+        let paths = lrm.finish_all(&dir, "take", &format).unwrap();
+        // Empty take should be skipped
+        assert_eq!(paths.len(), 2);
+
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_accumulate_loop_samples_splits() {
+        let (mut producer, consumer) = rtrb::RingBuffer::new(64);
+        let handle = thread::spawn(move || accumulate_loop_samples(consumer));
+
+        for &s in &[1.0f32, 2.0] {
+            let _ = producer.push(s);
+        }
+        let _ = producer.push(f32::NAN); // boundary
+        for &s in &[3.0f32, 4.0, 5.0] {
+            let _ = producer.push(s);
+        }
+        drop(producer);
+
+        let result = handle.join().unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], vec![1.0, 2.0]);
+        assert_eq!(result[1], vec![3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_recording_mode_variants() {
+        assert_eq!(RecordingMode::Normal, RecordingMode::Normal);
+        assert_ne!(RecordingMode::Normal, RecordingMode::Overdub);
+        assert_ne!(RecordingMode::Overdub, RecordingMode::Replace);
     }
 }

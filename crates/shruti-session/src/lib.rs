@@ -11,6 +11,7 @@ pub mod preferences;
 pub mod region;
 pub mod session;
 pub mod store;
+pub mod take;
 pub mod timeline;
 pub mod track;
 pub mod transport;
@@ -24,11 +25,12 @@ pub use midi::{ControlChange, MidiClip, NoteEvent};
 pub use preferences::{Preferences, RecordingConfig};
 pub use region::{Region, RegionId};
 pub use session::Session;
+pub use take::{Take, TakeId, TakeStack};
 pub use timeline::Timeline;
 pub use track::{
     OutputRouting, Send, SendPosition, Track, TrackGroup, TrackGroupId, TrackId, TrackKind,
     TrackTemplate,
 };
-pub use transport::{Transport, TransportState};
+pub use transport::{AdvanceResult, Transport, TransportState};
 pub use types::{FramePos, TrackSlot};
 pub use undo::UndoManager;

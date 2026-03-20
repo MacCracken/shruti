@@ -45,9 +45,30 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - `write_opus_tarang()` — Opus encoding via OGG muxer
 - `write_aac_tarang()` — raw AAC encoding via fdk-aac
 
+### Unison & Voice Stacking (Post-MVP)
+- **Per-oscillator unison**: 1-8 detuned copies of Osc1 with configurable detune spread (0-100 cents)
+- **Stereo spread**: unison voices panned across stereo field
+- **Sub-oscillator**: dedicated -1 or -2 octave oscillator with independent waveform and level
+- 7 new `SynthParam` variants: `UnisonVoices`, `UnisonDetune`, `UnisonSpread`, `SubOscEnable`, `SubOscOctave`, `SubOscWaveform`, `SubOscLevel`
+- Added `unison_phases[8]` and `sub_phase` to Voice struct
+
+### Loop-Aware Overdub Recording (Post-MVP)
+- **`LoopRecordManager`**: lock-free ring buffer recording with NAN-sentinel take splitting
+- **`RecordingMode`** enum: `Normal`, `Overdub`, `Replace`
+- `push_loop_marker()` for RT-safe loop boundary signaling
+- `finish_all()` writes separate WAV files per take (e.g., `take_001.wav`, `take_002.wav`)
+- Transport now tracks `loop_iteration` counter (resets on stop)
+- `AdvanceResult` struct with `loop_wrapped` and `loop_iteration` fields
+
+### Take/Layer Management (Post-MVP)
+- New `take` module in `shruti-session`: `Take`, `TakeId`, `TakeStack` structs
+- `TakeStack`: add, mute, unmute, solo, delete, set_active, audible_take
+- Added `take_stacks: Vec<TakeStack>` to Track (serde-compatible, default empty)
+- New edit commands: `SetActiveTake`, `MuteTake`, `DeleteTake` with full undo/redo
+
 ### Tests
-- 1873 tests passing (up from 1847), 0 clippy warnings
-- New tests: AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1), fingerprint fix (1)
+- 1899 tests passing (up from 1847), 0 clippy warnings
+- New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
 
 ## 2026.3.19 — Crates.io Migration & Hardware Detection
 
