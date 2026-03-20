@@ -1,8 +1,8 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.18 | **Last Updated**: 2026-03-18
+> **Version**: 2026.3.19 | **Last Updated**: 2026-03-19
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments, tarang-demux)
-> **Tests**: 1316 passing (190 dsp, 113 engine, 433 instruments, 257 session, 94 plugin, 189 ai, 12 test-utils + 28 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1673 passing (190 dsp, 113 engine, 433 instruments, 257 session, 94 plugin, 196 ai, 350 ui, 12 test-utils + 28 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -40,7 +40,8 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 8G — Instrument Testing | Comprehensive validation | Oscillator/filter/envelope accuracy, polyphony stress, preset roundtrip, sample playback, sequencer timing, MIDI integration |
 | 16A — HTTP Server | AGNOS integration | `shruti serve --port 8050`, axum (8 endpoints + health), CORS, 16 async tests |
 | — Tarang Integration | Media backend | tarang-audio decoding (MP3/AAC/ALAC/Opus), FLAC export, channel mixing, resampling (linear + sinc), tarang-ai media analysis |
-| — CI/CD & Packaging | Build + distribution | GitHub Actions (CI + release), AGNOS Dockerfile, marketplace recipe, tarang stubs for CI, GPL-3.0 license |
+| — CI/CD & Packaging | Build + distribution | GitHub Actions (CI + release), AGNOS Dockerfile, marketplace recipe, GPL-3.0 license |
+| — Crates.io Migration | Tarang + ai-hwaccel | Switched tarang from path deps (3 sub-crates) to unified `tarang 0.19.3` from crates.io; added `ai-hwaccel 0.19.3` with hardware detection module + MCP tool; removed CI stub script |
 
 ---
 
@@ -146,23 +147,23 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
 
-### DSP
+### ~~DSP~~
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| L | Zero-copy `as_interleaved()` | Ensure no unnecessary copy in hot audio path |
+| ~~L~~ | ~~Zero-copy `as_interleaved()`~~ | ~~Already zero-copy — returns `&[Sample]` directly from internal `Vec`; verified by pointer-identity test~~ |
 
-### Instruments
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| L | InstrumentPreset clone overhead | Use `Cow` or `Arc` for shared preset data |
-
-### Session
+### ~~Instruments~~
 
 | Pri | Item | Notes |
 |-----|------|-------|
-| L | SmallString for Track names | Interning or SmallString for hot-path string fields |
+| ~~L~~ | ~~InstrumentPreset clone overhead~~ | ~~No production clones; `apply_to` borrows immutably (allocation-free); docs recommend `Arc` at call site if shared~~ |
+
+### ~~Session~~
+
+| Pri | Item | Notes |
+|-----|------|-------|
+| ~~L~~ | ~~SmallString for Track names~~ | ~~Not in hot path — lookups by `TrackId` not name; single-digit track counts; clone cost negligible~~ |
 
 ### UI / UX
 
@@ -225,4 +226,4 @@ The UI crate contains 2484 lines of egui rendering code that cannot be unit test
 | UI data extraction | 68% | Extract state update logic from egui callbacks | Move mixer/arrangement state mutations into pure functions |
 | UI widget extraction | 70% | Extract layout math from widget painting | Separate computation from egui Painter calls |
 
-*Last Updated: 2026-03-18*
+*Last Updated: 2026-03-19*

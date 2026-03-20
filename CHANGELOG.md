@@ -3,6 +3,27 @@
 All notable changes to Shruti are documented here.
 Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 
+## 2026.3.19 — Crates.io Migration & Hardware Detection
+
+### Tarang Crates.io Migration
+- Replaced 3 path-based tarang sub-crate dependencies (`tarang-core`, `tarang-audio`, `tarang-ai` at `../../../tarang/crates/`) with single unified `tarang = "0.19.3"` from crates.io
+- Updated all imports: `tarang_core::` → `tarang::core::`, `tarang_audio::` → `tarang::audio::`, `tarang_ai::` → `tarang::ai::`
+- Removed `scripts/create-tarang-stubs.sh` (no longer needed — tarang resolves from crates.io)
+- Removed CI stub creation step from `.github/actions/setup-rust-env/action.yml`
+
+### AI Hardware Acceleration
+- Added `ai-hwaccel = "0.19.3"` dependency to `shruti-ai`
+- New `hardware` module in `shruti-ai`: wraps `ai-hwaccel` for GPU/NPU/TPU detection
+- `HardwareInfo` struct: summarizes detected accelerators, memory, suggested quantization (targeting 7B-param music LLM for Phase 9)
+- `detect()` function: queries all available backends via `AcceleratorRegistry`
+- New MCP tool `shruti_hardware` with `detect` action — exposes hardware capabilities to AGNOS agents
+
+### Engineering Backlog Cleanup
+- Closed 3 LOW-priority items as resolved/non-issues:
+  - `as_interleaved()` — already zero-copy (returns `&[Sample]` directly, verified by pointer-identity test)
+  - `InstrumentPreset` clone overhead — no production clones; `apply_to` borrows immutably
+  - `SmallString` for track names — not in hot path; lookups by `TrackId`, single-digit track counts
+
 ## 2026.3.18 — Test Infrastructure & Backlog Cleanup
 
 ### Shared Test Utilities Crate

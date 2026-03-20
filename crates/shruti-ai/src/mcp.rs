@@ -191,6 +191,22 @@ impl McpTools {
                     "required": ["action"]
                 }),
             },
+            McpToolDescription {
+                name: "shruti_hardware".into(),
+                description:
+                    "Query AI hardware accelerator capabilities (GPUs, NPUs, TPUs)".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["detect"],
+                            "description": "Hardware action"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
         ]
     }
 
@@ -207,6 +223,7 @@ impl McpTools {
             "shruti_export" => Self::handle_export(api, args),
             "shruti_analysis" => Self::handle_analysis(api, args),
             "shruti_mixer" => Self::handle_mixer(api, args),
+            "shruti_hardware" => Self::handle_hardware(args),
             _ => McpToolResult {
                 content: vec![McpContentBlock {
                     content_type: "text".into(),
@@ -338,6 +355,19 @@ impl McpTools {
         };
         McpToolResult::from_api(result)
     }
+
+    fn handle_hardware(args: &serde_json::Value) -> McpToolResult {
+        let action = args["action"].as_str().unwrap_or("");
+        let result = match action {
+            "detect" => {
+                let info = crate::hardware::detect();
+                let data = serde_json::to_value(&info).unwrap_or_default();
+                ApiResult::ok_with_data("hardware detected", data)
+            }
+            _ => ApiResult::err(format!("unknown hardware action: {action}")),
+        };
+        McpToolResult::from_api(result)
+    }
 }
 
 #[cfg(test)]
@@ -347,7 +377,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_manifest() {
         let tools = McpTools::tool_manifest();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"shruti_session"));
@@ -356,6 +386,7 @@ mod tests {
         assert!(names.contains(&"shruti_export"));
         assert!(names.contains(&"shruti_analysis"));
         assert!(names.contains(&"shruti_mixer"));
+        assert!(names.contains(&"shruti_hardware"));
     }
 
     #[test]
@@ -817,6 +848,17 @@ mod tests {
             McpTools::dispatch(&mut api, "shruti_transport", &json!({ "action": "rewind" }));
         assert!(result.is_error);
         assert!(result.content[0].text.contains("unknown transport action"));
+    }
+
+    // --- shruti_hardware dispatch ---
+
+    #[test]
+    fn test_mcp_dispatch_hardware_detect() {
+        let mut api = AgentApi::new();
+        let result =
+            McpTools::dispatch(&mut api, "shruti_hardware", &json!({ "action": "detect" }));
+        assert!(!result.is_error);
+        assert!(result.content[0].text.contains("hardware detected"));
     }
 
     // --- McpToolResult serialization ---

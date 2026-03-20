@@ -9,6 +9,7 @@
 #![deny(unsafe_code)]
 
 pub mod agent_api;
+pub mod hardware;
 pub mod mcp;
 pub mod serve;
 pub mod voice;
@@ -17,6 +18,7 @@ pub mod voice;
 pub mod media_analysis;
 
 pub use agent_api::AgentApi;
+pub use hardware::HardwareInfo;
 pub use mcp::McpTools;
 pub use serve::{MAX_BODY_SIZE, RATE_LIMIT_RPS, RateLimiter};
 pub use voice::{VoiceAction, VoiceIntent, parse_voice_input};
