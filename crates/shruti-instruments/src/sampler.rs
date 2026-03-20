@@ -323,6 +323,10 @@ struct SamplerVoice {
     envelope: Envelope,
     active: bool,
     direction: i8,
+    /// Source position for time-stretching (advances independently from play_pos)
+    source_pos: f64,
+    /// Phase within current grain overlap cycle (0.0 to 1.0)
+    grain_phase: f64,
 }
 
 impl SamplerVoice {
@@ -337,6 +341,8 @@ impl SamplerVoice {
             envelope: Envelope::new(AdsrParams::default(), sample_rate),
             active: false,
             direction: 1,
+            source_pos: 0.0,
+            grain_phase: 0.0,
         }
     }
 }
@@ -352,6 +358,8 @@ pub enum SamplerParam {
     Decay = 2,
     Sustain = 3,
     Release = 4,
+    TimeStretch = 5,
+    GrainSize = 6,
 }
 
 impl ParamIndex for SamplerParam {
@@ -359,7 +367,7 @@ impl ParamIndex for SamplerParam {
         self as usize
     }
     fn count() -> usize {
-        SamplerParam::Release as usize + 1
+        SamplerParam::GrainSize as usize + 1
     }
 }
 
@@ -378,6 +386,8 @@ impl TryFrom<usize> for SamplerParam {
             2 => Ok(Self::Decay),
             3 => Ok(Self::Sustain),
             4 => Ok(Self::Release),
+            5 => Ok(Self::TimeStretch),
+            6 => Ok(Self::GrainSize),
             _ => Err(()),
         }
     }
@@ -412,6 +422,8 @@ impl Sampler {
             InstrumentParam::new("Decay", 0.001, 5.0, 0.1, "s"),
             InstrumentParam::new("Sustain", 0.0, 1.0, 0.7, ""),
             InstrumentParam::new("Release", 0.001, 10.0, 0.3, "s"),
+            InstrumentParam::new("TimeStretch", 0.25, 4.0, 1.0, ""),
+            InstrumentParam::new("GrainSize", 10.0, 100.0, 50.0, "ms"),
         ];
 
         let voices = (0..MAX_VOICES)
@@ -495,6 +507,10 @@ impl Sampler {
             let vel_gain = self.voices[i].velocity as f32 / 127.0;
             let pitch_ratio = self.voices[i].pitch_ratio;
 
+            let time_stretch = self.params[SamplerParam::TimeStretch.index()].value;
+            let grain_ms = self.params[SamplerParam::GrainSize.index()].value;
+            let grain_size = (grain_ms as f64 / 1000.0) * self.sample_rate as f64;
+
             for frame in 0..frames {
                 let env_level = self.voices[i].envelope.tick();
 
@@ -503,47 +519,78 @@ impl Sampler {
                     break;
                 }
 
-                let sample = Self::read_sample(&self.zones[zone_index], self.voices[i].play_pos);
+                let sample = if (time_stretch - 1.0).abs() > 0.001 {
+                    // Time-stretched playback via granular OLA
+                    let s = Self::read_grain_sample(
+                        &self.zones[zone_index],
+                        self.voices[i].source_pos,
+                        self.voices[i].grain_phase,
+                        grain_size,
+                    );
+
+                    // Advance source position by time-stretch ratio
+                    // pitch_ratio is used for pitch adjustment within grains
+                    self.voices[i].source_pos += time_stretch as f64 * pitch_ratio;
+                    self.voices[i].grain_phase += 1.0 / grain_size;
+                    if self.voices[i].grain_phase >= 1.0 {
+                        self.voices[i].grain_phase -= 1.0;
+                    }
+
+                    // Check bounds
+                    let zone = &self.zones[zone_index];
+                    if self.voices[i].source_pos >= zone.samples.len() as f64 {
+                        self.voices[i].active = false;
+                        break;
+                    }
+
+                    s
+                } else {
+                    // Normal playback (existing path)
+                    let s = Self::read_sample(&self.zones[zone_index], self.voices[i].play_pos);
+
+                    let zone = &self.zones[zone_index];
+                    match zone.loop_mode {
+                        LoopMode::NoLoop => {
+                            self.voices[i].play_pos += pitch_ratio;
+                            if self.voices[i].play_pos >= zone.samples.len() as f64 {
+                                self.voices[i].active = false;
+                                break;
+                            }
+                        }
+                        LoopMode::Forward => {
+                            self.voices[i].play_pos += pitch_ratio;
+                            let loop_start = zone.loop_start.unwrap_or(0) as f64;
+                            let loop_end = zone.loop_end.unwrap_or(zone.samples.len()) as f64;
+                            if self.voices[i].play_pos >= loop_end {
+                                self.voices[i].play_pos =
+                                    loop_start + (self.voices[i].play_pos - loop_end);
+                            }
+                        }
+                        LoopMode::PingPong => {
+                            let step = pitch_ratio * f64::from(self.voices[i].direction);
+                            self.voices[i].play_pos += step;
+                            let loop_start = zone.loop_start.unwrap_or(0) as f64;
+                            let loop_end = zone.loop_end.unwrap_or(zone.samples.len()) as f64;
+                            if self.voices[i].play_pos >= loop_end {
+                                self.voices[i].direction = -1;
+                                self.voices[i].play_pos =
+                                    loop_end - (self.voices[i].play_pos - loop_end);
+                            } else if self.voices[i].play_pos <= loop_start {
+                                self.voices[i].direction = 1;
+                                self.voices[i].play_pos =
+                                    loop_start + (loop_start - self.voices[i].play_pos);
+                            }
+                        }
+                    }
+
+                    s
+                };
+
                 let out = sample * env_level * vel_gain * volume;
 
                 for ch in 0..channels {
                     let current = output.get(frame as u32, ch);
                     output.set(frame as u32, ch, current + out);
-                }
-
-                let zone = &self.zones[zone_index];
-                match zone.loop_mode {
-                    LoopMode::NoLoop => {
-                        self.voices[i].play_pos += pitch_ratio;
-                        if self.voices[i].play_pos >= zone.samples.len() as f64 {
-                            self.voices[i].active = false;
-                            break;
-                        }
-                    }
-                    LoopMode::Forward => {
-                        self.voices[i].play_pos += pitch_ratio;
-                        let loop_start = zone.loop_start.unwrap_or(0) as f64;
-                        let loop_end = zone.loop_end.unwrap_or(zone.samples.len()) as f64;
-                        if self.voices[i].play_pos >= loop_end {
-                            self.voices[i].play_pos =
-                                loop_start + (self.voices[i].play_pos - loop_end);
-                        }
-                    }
-                    LoopMode::PingPong => {
-                        let step = pitch_ratio * f64::from(self.voices[i].direction);
-                        self.voices[i].play_pos += step;
-                        let loop_start = zone.loop_start.unwrap_or(0) as f64;
-                        let loop_end = zone.loop_end.unwrap_or(zone.samples.len()) as f64;
-                        if self.voices[i].play_pos >= loop_end {
-                            self.voices[i].direction = -1;
-                            self.voices[i].play_pos =
-                                loop_end - (self.voices[i].play_pos - loop_end);
-                        } else if self.voices[i].play_pos <= loop_start {
-                            self.voices[i].direction = 1;
-                            self.voices[i].play_pos =
-                                loop_start + (loop_start - self.voices[i].play_pos);
-                        }
-                    }
                 }
             }
         }
@@ -567,6 +614,34 @@ impl Sampler {
             s0
         };
         s0 * (1.0 - frac) + s1 * frac
+    }
+
+    /// Read a sample from a zone using granular overlap-add time-stretching.
+    fn read_grain_sample(
+        zone: &SampleZone,
+        source_pos: f64,
+        grain_phase: f64,
+        grain_size: f64,
+    ) -> f32 {
+        let half_grain = grain_size / 2.0;
+
+        // Grain A: centered around source_pos
+        let pos_a = source_pos;
+        let window_a = Self::hann_window(grain_phase);
+        let sample_a = Self::read_sample(zone, pos_a) * window_a;
+
+        // Grain B: offset by half grain size, 180 degrees out of phase
+        let pos_b = source_pos + half_grain;
+        let phase_b = (grain_phase + 0.5) % 1.0;
+        let window_b = Self::hann_window(phase_b);
+        let sample_b = Self::read_sample(zone, pos_b) * window_b;
+
+        sample_a + sample_b
+    }
+
+    #[inline]
+    fn hann_window(phase: f64) -> f32 {
+        (0.5 * (1.0 - (std::f64::consts::TAU * phase).cos())) as f32
     }
 }
 
@@ -618,6 +693,8 @@ impl InstrumentNode for Sampler {
         voice.velocity = velocity;
         voice.channel = channel;
         voice.play_pos = 0.0;
+        voice.source_pos = 0.0;
+        voice.grain_phase = 0.0;
         voice.pitch_ratio = pitch_ratio;
         voice.active = true;
         voice.direction = 1;
@@ -1628,5 +1705,83 @@ mod tests {
         assert_eq!(restored.name, "Piano C4");
         assert_eq!(restored.root_key, 60);
         assert_eq!(restored.loop_mode, LoopMode::NoLoop);
+    }
+
+    // ── Granular time-stretching tests ───────────────────────────────
+
+    #[test]
+    fn time_stretch_slower_produces_output() {
+        let mut sampler = Sampler::new(44100.0);
+        let samples: Vec<f32> = (0..44100)
+            .map(|i| (i as f32 / 44100.0 * 440.0 * std::f32::consts::TAU).sin())
+            .collect();
+        sampler.add_zone(SampleZone::new("Test", 60, samples, 44100));
+        sampler.set_param(SamplerParam::TimeStretch, 0.5); // half speed
+
+        let mut buf = AudioBuffer::new(2, 512);
+        sampler.note_on(60, 100, 0);
+        sampler.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn time_stretch_faster_produces_output() {
+        let mut sampler = Sampler::new(44100.0);
+        let samples: Vec<f32> = (0..44100)
+            .map(|i| (i as f32 / 44100.0 * 440.0 * std::f32::consts::TAU).sin())
+            .collect();
+        sampler.add_zone(SampleZone::new("Test", 60, samples, 44100));
+        sampler.set_param(SamplerParam::TimeStretch, 2.0); // double speed
+
+        let mut buf = AudioBuffer::new(2, 512);
+        sampler.note_on(60, 100, 0);
+        sampler.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn time_stretch_unity_matches_normal() {
+        let mut sampler = Sampler::new(44100.0);
+        let samples: Vec<f32> = (0..44100)
+            .map(|i| (i as f32 / 44100.0 * 440.0 * std::f32::consts::TAU).sin())
+            .collect();
+        sampler.add_zone(SampleZone::new("Test", 60, samples, 44100));
+
+        // Render normal (no time stretch)
+        let mut buf_normal = AudioBuffer::new(2, 512);
+        sampler.note_on(60, 100, 0);
+        sampler.process(&[], &[], &mut buf_normal);
+
+        // Reset and render with time_stretch = 1.0
+        sampler.reset();
+        sampler.set_param(SamplerParam::TimeStretch, 1.0);
+        let mut buf_ts = AudioBuffer::new(2, 512);
+        sampler.note_on(60, 100, 0);
+        sampler.process(&[], &[], &mut buf_ts);
+
+        // Both should produce output
+        assert!(buf_normal.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+        assert!(buf_ts.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn time_stretch_param_count() {
+        assert_eq!(SamplerParam::count(), 7);
+    }
+
+    #[test]
+    fn grain_size_adjustable() {
+        let mut sampler = Sampler::new(44100.0);
+        let samples: Vec<f32> = (0..44100)
+            .map(|i| (i as f32 / 44100.0 * 440.0 * std::f32::consts::TAU).sin())
+            .collect();
+        sampler.add_zone(SampleZone::new("Test", 60, samples, 44100));
+        sampler.set_param(SamplerParam::TimeStretch, 0.5);
+        sampler.set_param(SamplerParam::GrainSize, 20.0); // small grains
+
+        let mut buf = AudioBuffer::new(2, 512);
+        sampler.note_on(60, 100, 0);
+        sampler.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
     }
 }

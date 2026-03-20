@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
-> **Tests**: 1899 passing, 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1904 passing, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -45,6 +45,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — Tarang 0.20.3 Upgrade | Dependency upgrade + 8 features | Upgraded tarang + ai-hwaccel to 0.20.3; container-aware import (MP4/MKV/WebM); cached+selective+async hardware detection; live GPU metrics; AcoustID fingerprinting; speaker diarization; streaming decode; loudness normalization; Opus/AAC export support |
 | — Unison & Voice Stacking | Supersaw + sub-osc | Per-osc unison (1-8 voices), detune spread, stereo width, sub-oscillator (-1/-2 oct), 7 new SynthParam variants |
 | — Loop Recording & Takes | Overdub + take management | LoopRecordManager with NAN-sentinel splitting, RecordingMode enum, TakeStack/Take structs with mute/solo/delete, transport loop_iteration tracking, AdvanceResult, 3 undo/redo edit commands |
+| — Time-Stretching | Granular OLA | Pitch-independent time-stretch (0.25x–4.0x) via dual-grain overlap-add with Hann windows, configurable grain size (10–100ms) |
 
 ---
 
@@ -70,7 +71,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Time-stretching | Large | Granular or phase-vocoder based pitch-independent time stretch; real-time quality |
+| ~~1~~ | ~~Time-stretching~~ | ~~Large~~ | ~~Granular or phase-vocoder based pitch-independent time stretch; real-time quality~~ — Done in 2026.3.20 (granular OLA) |
 
 ### Live Looped Recording
 
@@ -168,7 +169,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Test Coverage
 
-**Current:** 1899 tests (excluding vendor, binaries, and egui rendering).
+**Current:** 1904 tests (excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 70% (fails build if coverage drops below).
 

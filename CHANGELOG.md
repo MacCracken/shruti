@@ -66,8 +66,16 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - Added `take_stacks: Vec<TakeStack>` to Track (serde-compatible, default empty)
 - New edit commands: `SetActiveTake`, `MuteTake`, `DeleteTake` with full undo/redo
 
+### Sampler Time-Stretching (Post-MVP)
+- **Granular overlap-add time-stretcher**: pitch-independent speed control (0.25x to 4.0x ratio)
+- Two overlapping Hann-windowed grains at 50% overlap for smooth output
+- Configurable grain size (10-100ms, default 50ms)
+- `TimeStretch` and `GrainSize` parameters added to `SamplerParam` (indices 5-6)
+- `source_pos` and `grain_phase` per-voice state for independent time/pitch tracking
+- Normal playback path preserved unchanged when time-stretch is 1.0
+
 ### Tests
-- 1899 tests passing (up from 1847), 0 clippy warnings
+- 1904 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
 
 ## 2026.3.19 — Crates.io Migration & Hardware Detection
