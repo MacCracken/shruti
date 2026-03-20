@@ -523,7 +523,7 @@ impl SubtractiveSynth {
             let mut unison_phases = voice.unison_phases;
             let mut sub_phase = voice.sub_phase;
 
-            for frame in 0..clamped_frames {
+            for frame in 0..frames {
                 let env_level = self.envelopes[i].tick();
                 let filter_env_level = self.filter_envelopes[i].tick();
 
@@ -533,8 +533,9 @@ impl SubtractiveSynth {
                 }
 
                 // Sum LFO contributions from both LFOs
-                let (c1, p1, v1) = Self::apply_lfo(lfo1_values[frame], lfo1_target);
-                let (c2, p2, v2) = Self::apply_lfo(lfo2_values[frame], lfo2_target);
+                let lfo_idx = frame % clamped_frames;
+                let (c1, p1, v1) = Self::apply_lfo(lfo1_values[lfo_idx], lfo1_target);
+                let (c2, p2, v2) = Self::apply_lfo(lfo2_values[lfo_idx], lfo2_target);
                 let cutoff_lfo_mod = c1 + c2;
                 let pitch_lfo_mod = p1 + p2;
                 let volume_lfo_mod = (v1 + v2).clamp(-1.0, 1.0);
@@ -582,7 +583,9 @@ impl SubtractiveSynth {
                         *u_phase = Oscillator::advance_phase(*u_phase, u_freq, sample_rate);
                     }
                     osc1_sample /= unison_count as f32;
-                    // Use first unison voice phase as primary for sync/wrap detection
+                    // Use the first (center-frequency) unison voice as the primary phase
+                    // for hard sync detection and osc2/osc3 phase reference. Voice[0] has
+                    // the least detune offset and best represents the fundamental pitch.
                     prev_phase1 = phase1;
                     phase1 = unison_phases[0];
                 }
@@ -702,7 +705,9 @@ impl SubtractiveSynth {
             self.voice_manager.voices[i].phase2 = phase2;
             self.voice_manager.voices[i].phase3 = phase3;
             self.voice_manager.voices[i].unison_phases = unison_phases;
-            self.voice_manager.voices[i].sub_phase = sub_phase;
+            if sub_enabled {
+                self.voice_manager.voices[i].sub_phase = sub_phase;
+            }
             self.voice_manager.voices[i].envelope_level = self.envelopes[i].level();
         }
 

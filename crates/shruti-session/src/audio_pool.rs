@@ -60,7 +60,9 @@ impl AudioPool {
         let id = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
+            .ok_or_else(|| -> Box<dyn std::error::Error> {
+                "cannot extract filename from path".into()
+            })?
             .to_string();
 
         let (buffer, _format) = read_audio_file(path)?;

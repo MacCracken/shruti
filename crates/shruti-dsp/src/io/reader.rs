@@ -185,7 +185,11 @@ pub fn probe_container(path: &Path) -> Result<ContainerInfo, Box<dyn std::error:
     {
         use std::io::Read;
         let mut f = std::fs::File::open(path)?;
-        f.read_exact(&mut header)?;
+        f.read_exact(&mut header)
+            .map_err(|e| -> Box<dyn std::error::Error> {
+                format!("failed to read container header (file too small or unreadable): {e}")
+                    .into()
+            })?;
     }
 
     let format = tarang::demux::detect_format(&header)?;

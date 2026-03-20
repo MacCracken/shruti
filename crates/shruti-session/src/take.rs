@@ -143,7 +143,9 @@ impl TakeStack {
         if let Some(pos) = self.takes.iter().position(|t| t.id == id) {
             let take = self.takes.remove(pos);
             // Adjust active_index if needed
-            if self.active_index >= self.takes.len() && !self.takes.is_empty() {
+            if self.takes.is_empty() {
+                self.active_index = 0;
+            } else if self.active_index >= self.takes.len() {
                 self.active_index = self.takes.len() - 1;
             }
             Some(take)

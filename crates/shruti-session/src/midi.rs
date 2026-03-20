@@ -328,6 +328,7 @@ pub mod translate {
 
     /// Convert a 14-bit MIDI 1.0 pitch bend (0-16383, center=8192) to 32-bit.
     pub fn pitch_bend_14_to_32(v: u16) -> u32 {
+        let v = v & 0x3FFF; // mask to 14-bit range
         (v as u32) << 18 | (v as u32) << 4 | (v as u32) >> 10
     }
 

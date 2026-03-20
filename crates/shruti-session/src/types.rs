@@ -2,8 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::{Add, AddAssign, Rem, Sub, SubAssign};
 
-/// A frame position or duration on the timeline. Prevents confusion with
-/// other `u64` values like buffer sizes, sample counts, or arbitrary indices.
+/// Frame position on the timeline (sample-accurate).
+///
+/// Wraps a `u64` frame count. At 48kHz, this supports timelines up to
+/// ~12.2 million years, so overflow is not a practical concern. Standard
+/// arithmetic operators (`+`, `-`) use wrapping semantics; use
+/// `saturating_sub` for cases where underflow must be avoided.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]

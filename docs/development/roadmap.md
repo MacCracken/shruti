@@ -177,29 +177,9 @@ Issues identified in code audit, triaged as Medium/Low. Critical/High issues wer
 
 All 21 medium-priority items (M1–M21) fixed. See CHANGELOG for details.
 
-### Low Priority
+### ~~Low Priority~~ (All resolved — 2026.3.20)
 
-| # | Crate | Issue | Notes |
-|---|-------|-------|-------|
-| L1 | shruti-ml | Inefficient string allocation in HooshRuntime per call | Reuse buffer or format directly |
-| L2 | shruti-ml | StubRuntime unreachable!() for modulo 4 match | Replace with default arm |
-| L3 | shruti-session | Active index stale when take stack empties | Reset to 0 explicitly |
-| L4 | shruti-session | Pitch bend 14-to-32 encoding not validated (>16383 input) | Mask to 14 bits or document |
-| L5 | shruti-instruments | Sub-oscillator phase always advanced even when disabled | Skip advance when disabled |
-| L6 | shruti-instruments | LFO pre-computation truncated at 8192 frames | Wrap around or allocate dynamically |
-| L7 | shruti-instruments | Grain boundary semantics undocumented (fades to silence) | Document or add boundary envelope |
-| L8 | shruti-engine | Unconventional temp ring buffer in finish() | Add explanatory comment |
-| L9 | shruti-engine | No thread join timeout (could hang if consumer deadlocks) | Consider timeout mechanism |
-| L10 | shruti-engine | Empty takes skipped without documentation | Document in docstring |
-| L11 | shruti-dsp | read_exact() error message could be more descriptive | Add "file too small?" hint |
-
-*Second audit + full sweep — remaining Low items:*
-
-| L12 | shruti-session | loop_iteration u32 overflow after 4.3B wraps | Use saturating_add |
-| L13 | shruti-ml | Hoosh timeout hardcoded to 10s | Make configurable via GenerationConfig |
-| L14 | shruti-instruments | Unison phase tracking choice (voice[0]) undocumented | Document why first voice is primary |
-| L15 | shruti-session | FramePos Add/Sub can overflow u64 silently | Document u64 limit (~19hr at 48kHz) or use checked arithmetic |
-| L16 | shruti-session | AudioPool filename defaults to "unknown" on None | Return error instead of silent default |
+All 16 low-priority items (L1–L16) fixed. See CHANGELOG for details.
 
 ---
 

@@ -104,7 +104,7 @@ impl Transport {
                 }
                 let overshoot = end - self.loop_end;
                 self.position = self.loop_start + (overshoot % loop_length);
-                self.loop_iteration += 1;
+                self.loop_iteration = self.loop_iteration.saturating_add(1);
                 loop_wrapped = true;
             } else {
                 self.position = end;

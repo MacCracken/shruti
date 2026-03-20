@@ -39,6 +39,8 @@ pub struct GenerationConfig {
     pub repetition_penalty: f32,
     /// Maximum tokens to generate per call.
     pub max_tokens: u32,
+    /// Inference timeout in seconds (for remote backends like hoosh).
+    pub timeout_secs: u64,
 }
 
 impl Default for GenerationConfig {
@@ -48,6 +50,7 @@ impl Default for GenerationConfig {
             top_k: 40,
             repetition_penalty: 1.1,
             max_tokens: 256,
+            timeout_secs: 30,
         }
     }
 }
@@ -130,7 +133,7 @@ impl ModelRuntime for StubRuntime {
                 MidiToken::NoteOn(scale[idx]).to_id()
             }
             3 => MidiToken::TimeShift(25).to_id(), // 250ms gap
-            _ => unreachable!(),
+            _ => MidiToken::TimeShift(25).to_id(),
         };
         self.step += 1;
         token_id
@@ -334,16 +337,20 @@ mod hoosh_runtime {
 
         fn generate_next(&mut self, context: &[u32], config: &GenerationConfig) -> u32 {
             // Build a prompt from the token context
-            let token_strings: Vec<String> = context
-                .iter()
-                .filter_map(|id| MidiToken::from_id(*id))
-                .map(|t| format!("{t:?}"))
-                .collect();
+            let mut token_str = String::with_capacity(context.len() * 16);
+            for id in context {
+                if let Some(t) = MidiToken::from_id(*id) {
+                    if !token_str.is_empty() {
+                        token_str.push(' ');
+                    }
+                    use std::fmt::Write;
+                    let _ = write!(token_str, "{t:?}");
+                }
+            }
             let prompt = format!(
                 "You are a music token generator. Given a sequence of music tokens, output ONLY the next token. \
                  Valid token formats: NoteOn(0-127), NoteOff(0-127), Velocity(0-31), Duration(0-63), TimeShift(0-99), Bar. \
-                 Sequence: {}",
-                token_strings.join(" ")
+                 Sequence: {token_str}",
             );
 
             let request = hoosh::InferenceRequest {
@@ -356,8 +363,11 @@ mod hoosh_runtime {
 
             let client = self.client.clone();
             let response = self.tokio_rt.block_on(async {
-                tokio::time::timeout(std::time::Duration::from_secs(10), client.infer(&request))
-                    .await
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(config.timeout_secs),
+                    client.infer(&request),
+                )
+                .await
             });
 
             match response {

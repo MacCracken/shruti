@@ -616,7 +616,11 @@ impl Sampler {
         s0 * (1.0 - frac) + s1 * frac
     }
 
-    /// Read a sample from a zone using granular overlap-add time-stretching.
+    /// Read a sample using granular overlap-add time-stretching.
+    ///
+    /// Uses two overlapping Hann-windowed grains at 50% phase offset.
+    /// Grains that extend beyond the sample boundary fade to silence
+    /// naturally, as `read_sample` returns 0.0 for out-of-bounds positions.
     fn read_grain_sample(
         zone: &SampleZone,
         source_pos: f64,

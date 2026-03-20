@@ -52,8 +52,13 @@ impl RecordManager {
     }
 
     /// Stop recording and write the accumulated audio to a WAV file.
+    ///
+    /// Note: this method blocks until the accumulator thread completes.
+    /// If the thread is stuck, this call will hang. In practice, the thread
+    /// exits promptly once the producer is dropped.
     pub fn finish(mut self, path: &Path, format: &AudioFormat) -> Result<(), EngineError> {
-        // Drop the producer to signal the consumer thread to finish
+        // Replace producer with a dummy and drop the original to signal the consumer thread.
+        // The consumer detects abandonment via `is_abandoned()` and finishes draining.
         drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
 
         let handle = self
@@ -82,6 +87,8 @@ impl Drop for RecordManager {
     fn drop(&mut self) {
         // Signal consumer thread to finish by dropping producer
         if self.accumulator_handle.is_some() {
+            // Replace producer with a dummy and drop the original to signal the consumer thread.
+            // The consumer detects abandonment via `is_abandoned()` and finishes draining.
             let _ = std::mem::replace(&mut self.producer, RingBuffer::new(1).0);
             // Don't join — just let the thread finish naturally
         }
@@ -183,14 +190,20 @@ impl LoopRecordManager {
 
     /// Stop recording and write each take as a separate WAV file.
     ///
-    /// Returns the paths of the written files, one per take.
+    /// Empty takes (containing no audio samples) are skipped and not written.
+    /// Returns the paths of the written files, one per non-empty take.
+    ///
+    /// Note: this method blocks until the accumulator thread completes.
+    /// If the thread is stuck, this call will hang. In practice, the thread
+    /// exits promptly once the producer is dropped.
     pub fn finish_all(
         mut self,
         dir: &Path,
         base_name: &str,
         format: &AudioFormat,
     ) -> Result<Vec<std::path::PathBuf>, EngineError> {
-        // Drop the producer to signal the consumer thread to finish
+        // Replace producer with a dummy and drop the original to signal the consumer thread.
+        // The consumer detects abandonment via `is_abandoned()` and finishes draining.
         drop(std::mem::replace(&mut self.producer, RingBuffer::new(1).0));
 
         let handle = self

@@ -143,6 +143,24 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
   - M20: `debug_assert!` added before all `.max(1)` channel clamps
   - M21: `debug_assert!` bounds checks in AudioBuffer get/set
 
+- **All 16 low-priority issues fixed** (L1–L16):
+  - L1: HooshRuntime string allocation optimized (pre-allocated String with fmt::Write)
+  - L2: StubRuntime unreachable!() replaced with safe default arm
+  - L3: TakeStack active_index reset to 0 on empty
+  - L4: Pitch bend 14-to-32 input masked to 14 bits
+  - L5: Sub-oscillator phase write-back gated on sub_enabled
+  - L6: LFO render loop uses full frame count with modulo wrap-around
+  - L7: Grain boundary semantics documented in read_grain_sample
+  - L8: Temp ring buffer pattern in finish() documented
+  - L9: Blocking behavior of finish()/finish_all() documented
+  - L10: Empty take skipping documented in finish_all()
+  - L11: probe_container read_exact error message improved
+  - L12: loop_iteration uses saturating_add (prevents u32 overflow)
+  - L13: Hoosh timeout configurable via GenerationConfig.timeout_secs (default 30s)
+  - L14: Unison phase[0] primary selection documented
+  - L15: FramePos overflow behavior documented (~12.2M years at 48kHz)
+  - L16: AudioPool filename extraction returns error instead of defaulting to "unknown"
+
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
