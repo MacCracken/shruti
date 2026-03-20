@@ -104,8 +104,8 @@ fn write_flac_tarang(
     buffer: &AudioBuffer,
     config: &ExportConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use tarang_audio::{AudioEncoder, EncoderConfig, FlacEncoder};
-    use tarang_core::AudioCodec;
+    use tarang::audio::{AudioEncoder, EncoderConfig, FlacEncoder};
+    use tarang::core::AudioCodec;
 
     let bits = match config.bit_depth {
         BitDepth::Int16 => 16,
@@ -125,9 +125,9 @@ fn write_flac_tarang(
     // Build a tarang AudioBuffer from shruti's interleaved f32 samples.
     let interleaved = buffer.as_interleaved();
     let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
-    let tarang_buf = tarang_core::AudioBuffer {
+    let tarang_buf = tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),
-        sample_format: tarang_core::SampleFormat::F32,
+        sample_format: tarang::core::SampleFormat::F32,
         channels: config.channels,
         sample_rate: config.sample_rate,
         num_samples: interleaved.len(),

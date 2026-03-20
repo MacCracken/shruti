@@ -23,22 +23,22 @@ pub fn mix_channels(
     target: ChannelLayout,
 ) -> Result<AudioBuffer, Box<dyn std::error::Error>> {
     let target_layout = match target {
-        ChannelLayout::Mono => tarang_audio::ChannelLayout::Mono,
-        ChannelLayout::Stereo => tarang_audio::ChannelLayout::Stereo,
+        ChannelLayout::Mono => tarang::audio::ChannelLayout::Mono,
+        ChannelLayout::Stereo => tarang::audio::ChannelLayout::Stereo,
     };
 
     let interleaved = buffer.as_interleaved();
     let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
-    let tarang_buf = tarang_core::AudioBuffer {
+    let tarang_buf = tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),
-        sample_format: tarang_core::SampleFormat::F32,
+        sample_format: tarang::core::SampleFormat::F32,
         channels: buffer.channels(),
         sample_rate: source_rate,
         num_samples: interleaved.len(),
         timestamp: std::time::Duration::ZERO,
     };
 
-    let mixed = tarang_audio::mix_channels(&tarang_buf, target_layout)?;
+    let mixed = tarang::audio::mix_channels(&tarang_buf, target_layout)?;
 
     let float_bytes = &mixed.data;
     let num_floats = float_bytes.len() / 4;

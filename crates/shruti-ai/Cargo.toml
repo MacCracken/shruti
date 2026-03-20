@@ -7,15 +7,15 @@ license = "GPL-3.0"
 
 [features]
 default = []
-tarang = ["dep:tarang-ai", "dep:tarang-core", "dep:bytes", "dep:uuid"]
+tarang = ["dep:tarang", "dep:bytes", "dep:uuid"]
 
 [dependencies]
 shruti-session = { path = "../shruti-session" }
 shruti-engine = { path = "../shruti-engine" }
 shruti-dsp = { path = "../shruti-dsp" }
 shruti-plugin = { path = "../shruti-plugin" }
-tarang-ai = { path = "../../../tarang/crates/tarang-ai", optional = true }
-tarang-core = { path = "../../../tarang/crates/tarang-core", optional = true }
+tarang = { version = "0.19.3", optional = true }
+ai-hwaccel = "0.19.3"
 bytes = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 serde = { workspace = true }

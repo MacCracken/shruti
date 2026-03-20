@@ -6,9 +6,9 @@
 use serde::{Deserialize, Serialize};
 
 // Re-export tarang-ai types for convenience
-pub use tarang_ai::{AudioFingerprint, FingerprintConfig};
-pub use tarang_ai::{ContentType, MediaAnalysis, TranscriptionResult, TranscriptionSegment};
-pub use tarang_ai::{HooshClient, HooshConfig, WhisperModel};
+pub use tarang::ai::{AudioFingerprint, FingerprintConfig};
+pub use tarang::ai::{ContentType, MediaAnalysis, TranscriptionResult, TranscriptionSegment};
+pub use tarang::ai::{HooshClient, HooshConfig, WhisperModel};
 
 /// Audio content analysis for a decoded file.
 ///
@@ -32,7 +32,7 @@ pub fn analyze_audio(
     codec_name: &str,
 ) -> AudioAnalysis {
     use std::time::Duration;
-    use tarang_core::*;
+    use tarang::core::*;
 
     let codec = match codec_name.to_lowercase().as_str() {
         "wav" | "pcm" => AudioCodec::Pcm,
@@ -63,7 +63,7 @@ pub fn analyze_audio(
         album: None,
     };
 
-    let result = tarang_ai::analyze_media(&info);
+    let result = tarang::ai::analyze_media(&info);
 
     AudioAnalysis {
         content_type: result.content_type,
@@ -81,9 +81,9 @@ pub fn fingerprint_audio(
     channels: u16,
 ) -> Result<AudioFingerprint, Box<dyn std::error::Error>> {
     let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-    let buf = tarang_core::AudioBuffer {
+    let buf = tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),
-        sample_format: tarang_core::SampleFormat::F32,
+        sample_format: tarang::core::SampleFormat::F32,
         channels,
         sample_rate,
         num_samples: samples.len(),
@@ -91,18 +91,18 @@ pub fn fingerprint_audio(
     };
 
     let config = FingerprintConfig::default();
-    let fp = tarang_ai::compute_fingerprint(&buf, &config)?;
+    let fp = tarang::ai::compute_fingerprint(&buf, &config)?;
     Ok(fp)
 }
 
 /// Compute similarity between two fingerprints (0.0 = different, 1.0 = identical).
 pub fn fingerprint_similarity(a: &AudioFingerprint, b: &AudioFingerprint) -> f64 {
-    tarang_ai::fingerprint_match(a, b)
+    tarang::ai::fingerprint_match(a, b)
 }
 
 /// Check if two fingerprints match (similarity > 0.8).
 pub fn fingerprints_match(a: &AudioFingerprint, b: &AudioFingerprint) -> bool {
-    tarang_ai::fingerprint_match(a, b) > 0.8
+    tarang::ai::fingerprint_match(a, b) > 0.8
 }
 
 /// Prepare a transcription request for an audio track.
@@ -115,9 +115,9 @@ pub fn prepare_transcription(
     duration_secs: f64,
     codec_name: &str,
     language_hint: Option<String>,
-) -> Option<tarang_ai::TranscriptionRequest> {
+) -> Option<tarang::ai::TranscriptionRequest> {
     use std::time::Duration;
-    use tarang_core::*;
+    use tarang::core::*;
 
     let codec = match codec_name.to_lowercase().as_str() {
         "wav" | "pcm" => AudioCodec::Pcm,
@@ -148,7 +148,7 @@ pub fn prepare_transcription(
         album: None,
     };
 
-    tarang_ai::prepare_transcription(&info, language_hint)
+    tarang::ai::prepare_transcription(&info, language_hint)
 }
 
 #[cfg(test)]

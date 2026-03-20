@@ -19,7 +19,7 @@ pub fn resample(
     }
 
     let tarang_buf = shruti_to_tarang(buffer, source_rate);
-    let resampled = tarang_audio::resample(&tarang_buf, target_rate)?;
+    let resampled = tarang::audio::resample(&tarang_buf, target_rate)?;
     Ok(tarang_to_shruti(&resampled))
 }
 
@@ -39,19 +39,19 @@ pub fn resample_sinc(
     }
 
     let tarang_buf = shruti_to_tarang(buffer, source_rate);
-    let resampled = tarang_audio::resample_sinc(&tarang_buf, target_rate, window_size)?;
+    let resampled = tarang::audio::resample_sinc(&tarang_buf, target_rate, window_size)?;
     Ok(tarang_to_shruti(&resampled))
 }
 
 // ── buffer conversion helpers ──────────────────────────────────────────────
 
 #[cfg(feature = "tarang")]
-fn shruti_to_tarang(buffer: &AudioBuffer, sample_rate: u32) -> tarang_core::AudioBuffer {
+fn shruti_to_tarang(buffer: &AudioBuffer, sample_rate: u32) -> tarang::core::AudioBuffer {
     let interleaved = buffer.as_interleaved();
     let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
-    tarang_core::AudioBuffer {
+    tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),
-        sample_format: tarang_core::SampleFormat::F32,
+        sample_format: tarang::core::SampleFormat::F32,
         channels: buffer.channels(),
         sample_rate,
         num_samples: interleaved.len(),
@@ -60,7 +60,7 @@ fn shruti_to_tarang(buffer: &AudioBuffer, sample_rate: u32) -> tarang_core::Audi
 }
 
 #[cfg(feature = "tarang")]
-fn tarang_to_shruti(tarang_buf: &tarang_core::AudioBuffer) -> AudioBuffer {
+fn tarang_to_shruti(tarang_buf: &tarang::core::AudioBuffer) -> AudioBuffer {
     let float_bytes = &tarang_buf.data;
     let num_floats = float_bytes.len() / 4;
     let mut samples = Vec::with_capacity(num_floats);

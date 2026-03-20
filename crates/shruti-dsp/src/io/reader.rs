@@ -68,7 +68,7 @@ fn read_audio_file_tarang(
 fn read_audio_file_tarang_inner(
     path: &Path,
 ) -> Result<(AudioBuffer, AudioFormat), Box<dyn std::error::Error>> {
-    use tarang_audio::FileDecoder;
+    use tarang::audio::FileDecoder;
 
     let mut decoder = FileDecoder::open_path(path)?;
 
@@ -77,7 +77,7 @@ fn read_audio_file_tarang_inner(
 
     let tarang_buf = match decoder.decode_all() {
         Ok(buf) => buf,
-        Err(tarang_core::TarangError::DecodeError(ref msg)) if msg == "no audio decoded" => {
+        Err(tarang::core::TarangError::DecodeError(ref msg)) if msg == "no audio decoded" => {
             let audio_format = AudioFormat::new(sample_rate, channels, 0);
             let buffer = AudioBuffer::new(channels, 0);
             return Ok((buffer, audio_format));
