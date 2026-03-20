@@ -14,6 +14,7 @@ pub use tarang::ai::{HooshClient, HooshConfig, WhisperModel};
 
 /// Convert interleaved f32 samples into a tarang `AudioBuffer`.
 fn to_tarang_buffer(samples: &[f32], sample_rate: u32, channels: u16) -> tarang::core::AudioBuffer {
+    let channels = channels.max(1); // prevent division by zero
     let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
     tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),

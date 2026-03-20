@@ -91,7 +91,7 @@ pub enum RecordingMode {
 
 /// Manages loop-aware recording where each loop iteration produces a separate take.
 ///
-/// Uses a lock-free ring buffer with NAN sentinels to mark loop boundaries.
+/// Uses a lock-free ring buffer with infinity sentinels to mark loop boundaries.
 /// The accumulator thread splits the stream at these sentinels to produce
 /// one `Vec<f32>` per take.
 pub struct LoopRecordManager {
@@ -125,11 +125,11 @@ impl LoopRecordManager {
         }
     }
 
-    /// Push a loop boundary marker. Call this when the transport wraps past loop_end.
-    ///
-    /// The accumulator thread uses NAN as a sentinel to split takes.
+    /// Push a loop boundary marker using f32::INFINITY as sentinel.
+    /// Infinity cannot occur in valid audio (unlike NaN which can result from DSP errors),
+    /// making it a safe out-of-band marker.
     pub fn push_loop_marker(&mut self) {
-        let _ = self.producer.push(f32::NAN);
+        let _ = self.producer.push(f32::INFINITY);
     }
 
     /// Stop recording and write each take as a separate WAV file.
@@ -166,15 +166,15 @@ impl LoopRecordManager {
     }
 }
 
-/// Accumulate samples, splitting on NAN sentinels into separate takes.
+/// Accumulate samples, splitting on infinity sentinels into separate takes.
 fn accumulate_loop_samples(mut consumer: Consumer<f32>) -> Vec<Vec<f32>> {
     let mut takes: Vec<Vec<f32>> = vec![Vec::new()];
 
     loop {
         match consumer.pop() {
             Ok(sample) => {
-                if sample.is_nan() {
-                    // NAN sentinel: start a new take
+                if sample.is_infinite() {
+                    // Infinity sentinel: start a new take
                     takes.push(Vec::new());
                 } else if let Some(current) = takes.last_mut() {
                     current.push(sample);
@@ -183,7 +183,7 @@ fn accumulate_loop_samples(mut consumer: Consumer<f32>) -> Vec<Vec<f32>> {
             Err(_) => {
                 if consumer.is_abandoned() {
                     while let Ok(sample) = consumer.pop() {
-                        if sample.is_nan() {
+                        if sample.is_infinite() {
                             takes.push(Vec::new());
                         } else if let Some(current) = takes.last_mut() {
                             current.push(sample);
@@ -484,7 +484,7 @@ mod tests {
         for &s in &[1.0f32, 2.0] {
             let _ = producer.push(s);
         }
-        let _ = producer.push(f32::NAN); // boundary
+        let _ = producer.push(f32::INFINITY); // boundary
         for &s in &[3.0f32, 4.0, 5.0] {
             let _ = producer.push(s);
         }

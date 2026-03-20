@@ -185,9 +185,9 @@ impl InferenceScheduler {
 
             // Trim context if it exceeds max_seq_len
             let max_len = self.runtime.info().max_seq_len as usize;
-            if self.context.len() > max_len {
-                let trim = self.context.len() - max_len / 2;
-                self.context.drain(..trim);
+            if max_len > 0 && self.context.len() > max_len {
+                let keep = max_len / 2;
+                self.context.drain(..self.context.len() - keep);
             }
 
             if let Some(token) = MidiToken::from_id(token_id) {
@@ -351,16 +351,20 @@ mod hoosh_runtime {
                 ..Default::default()
             };
 
-            let response = self.tokio_rt.block_on(self.client.infer(&request));
+            let client = self.client.clone();
+            let response = self.tokio_rt.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(10), client.infer(&request))
+                    .await
+            });
 
             match response {
-                Ok(resp) => {
+                Ok(Ok(resp)) => {
                     // Parse the response text back to a token
                     parse_token_response(&resp.text)
                         .unwrap_or_else(|| MidiToken::TimeShift(25).to_id())
                 }
-                Err(_) => {
-                    // Fallback: generate a time shift on error
+                _ => {
+                    // Timeout or error: fallback to time shift
                     MidiToken::TimeShift(25).to_id()
                 }
             }

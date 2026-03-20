@@ -190,6 +190,11 @@ pub fn probe_container(path: &Path) -> Result<ContainerInfo, Box<dyn std::error:
 
     let format = tarang::demux::detect_format(&header)?;
 
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > 4 * 1024 * 1024 * 1024 {
+        return Err("file too large for container probing (>4GB)".into());
+    }
+
     let file = std::fs::File::open(path)?;
     let info = match format {
         tarang::core::ContainerFormat::Mp4 => {

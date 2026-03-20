@@ -678,15 +678,16 @@ impl SubtractiveSynth {
                     // Approximate stereo spread: detune creates phase differences
                     // that naturally produce width. Amplify L/R difference slightly.
                     let width = unison_spread * 0.3;
+                    let norm = 1.0 / ((1.0 + width * width).sqrt());
                     output.set(
                         frame as u32,
                         0,
-                        output.get(frame as u32, 0) + out * (1.0 + width),
+                        output.get(frame as u32, 0) + out * (1.0 + width) * norm,
                     );
                     output.set(
                         frame as u32,
                         1,
-                        output.get(frame as u32, 1) + out * (1.0 - width),
+                        output.get(frame as u32, 1) + out * (1.0 - width) * norm,
                     );
                     for ch in 2..channels {
                         output.set(frame as u32, ch, output.get(frame as u32, ch) + out);

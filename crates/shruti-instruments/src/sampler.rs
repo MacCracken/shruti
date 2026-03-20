@@ -149,7 +149,7 @@ impl SampleZone {
 
             running_sum += energy;
             running_count += 1;
-            if running_count > avg_len {
+            if running_count > avg_len && i + 1 >= running_count {
                 running_sum -= energies[i + 1 - running_count];
                 running_count = avg_len;
             }
@@ -509,7 +509,7 @@ impl Sampler {
 
             let time_stretch = self.params[SamplerParam::TimeStretch.index()].value;
             let grain_ms = self.params[SamplerParam::GrainSize.index()].value;
-            let grain_size = (grain_ms as f64 / 1000.0) * self.sample_rate as f64;
+            let grain_size = ((grain_ms as f64 / 1000.0) * self.sample_rate as f64).max(1.0);
 
             for frame in 0..frames {
                 let env_level = self.voices[i].envelope.tick();

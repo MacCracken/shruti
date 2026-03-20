@@ -169,7 +169,47 @@ When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
 
 ---
 
-## ~~Engineering Backlog~~ (Complete)
+## Engineering Backlog (2026.3.20 Audit)
+
+Issues identified in code audit, triaged as Medium/Low. Critical/High issues were fixed inline.
+
+### Medium Priority
+
+| # | Crate | Issue | Notes |
+|---|-------|-------|-------|
+| M1 | shruti-ml | Quantization loss not documented in tokenizer API | Encode/decode is lossy; add doc warning |
+| M2 | shruti-ml | No input validation for AiPlayerConfig.key (accepts > 11) | Use newtype or clamp |
+| M3 | shruti-ml | Hoosh prompt hardcodes token names; breaks if MidiToken changes | Generate token list dynamically |
+| M4 | shruti-session | `secs_to_frames` overflow on large/negative floats | Clamp to valid range before cast |
+| M5 | shruti-session | No MIDI spec range validation (note/velocity/channel > 127/15) | Validate or document as unchecked |
+| M6 | shruti-session | `loop_iteration` should be `#[serde(skip)]` (runtime-only state) | Prevent stale values in saved sessions |
+| M7 | shruti-instruments | Pitch bend unbounded (±100 possible, ±17 octaves) | Clamp to ±1.0 on write |
+| M8 | shruti-instruments | CC#74 brightness applied mid-block without smoothing | Add linear ramp over ~5ms |
+| M9 | shruti-instruments | Pressure gain has -3dB floor at zero pressure | Clarify intent or change to 1.0 base |
+| M10 | shruti-instruments | Brightness + LFO + filter env octave stacking ambiguous | Cap total modulation at ±8 octaves |
+| M11 | shruti-engine | Ring buffer overflow silent data loss (no metrics) | Return dropped count or add counter |
+| M12 | shruti-engine | No Drop impl for RecordManager/LoopRecordManager | Add Drop to join background thread |
+| M13 | shruti-engine | Thread panic messages discarded in join error handler | Extract panic payload for diagnostics |
+| M14 | shruti-engine | Unbounded accumulator growth (long recordings → OOM) | Add size cap or stream to disk |
+| M15 | shruti-dsp | 24-bit audio cast safety (float → i32 edge) | Add explicit clamp before cast |
+| M16 | shruti-ai | Hoosh health check race condition (check → use gap) | Remove pre-check; let request fail naturally |
+| M17 | shruti-ai | detect_async() ignores shared cache | Synchronize with CACHE like detect() |
+
+### Low Priority
+
+| # | Crate | Issue | Notes |
+|---|-------|-------|-------|
+| L1 | shruti-ml | Inefficient string allocation in HooshRuntime per call | Reuse buffer or format directly |
+| L2 | shruti-ml | StubRuntime unreachable!() for modulo 4 match | Replace with default arm |
+| L3 | shruti-session | Active index stale when take stack empties | Reset to 0 explicitly |
+| L4 | shruti-session | Pitch bend 14-to-32 encoding not validated (>16383 input) | Mask to 14 bits or document |
+| L5 | shruti-instruments | Sub-oscillator phase always advanced even when disabled | Skip advance when disabled |
+| L6 | shruti-instruments | LFO pre-computation truncated at 8192 frames | Wrap around or allocate dynamically |
+| L7 | shruti-instruments | Grain boundary semantics undocumented (fades to silence) | Document or add boundary envelope |
+| L8 | shruti-engine | Unconventional temp ring buffer in finish() | Add explanatory comment |
+| L9 | shruti-engine | No thread join timeout (could hang if consumer deadlocks) | Consider timeout mechanism |
+| L10 | shruti-engine | Empty takes skipped without documentation | Document in docstring |
+| L11 | shruti-dsp | read_exact() error message could be more descriptive | Add "file too small?" hint |
 
 ---
 

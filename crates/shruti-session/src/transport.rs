@@ -93,6 +93,15 @@ impl Transport {
             let end = start + FramePos::from(frames);
             if end >= self.loop_end {
                 let loop_length = self.loop_end - self.loop_start;
+                if loop_length == FramePos::ZERO {
+                    self.position = self.loop_start;
+                    return AdvanceResult {
+                        start,
+                        end: self.position,
+                        loop_wrapped: false,
+                        loop_iteration: self.loop_iteration,
+                    };
+                }
                 let overshoot = end - self.loop_end;
                 self.position = self.loop_start + (overshoot % loop_length);
                 self.loop_iteration += 1;
@@ -114,6 +123,9 @@ impl Transport {
 
     /// Convert a frame position to seconds.
     pub fn frames_to_secs(&self, frames: FramePos) -> f64 {
+        if self.sample_rate == 0 {
+            return 0.0;
+        }
         frames.as_f64() / self.sample_rate as f64
     }
 
@@ -130,6 +142,9 @@ impl Transport {
 
     /// Convert beats to frame position.
     pub fn beats_to_frames(&self, beats: f64) -> FramePos {
+        if self.bpm <= 0.0 {
+            return FramePos::ZERO;
+        }
         let secs = beats * 60.0 / self.bpm;
         self.secs_to_frames(secs)
     }

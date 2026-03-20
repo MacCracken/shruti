@@ -106,6 +106,19 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - **Feature gate**: `--features hoosh` enables both; path-based dependency (switches to crates.io when hoosh is published)
 - `shruti-ml` added as workspace dependency of main binary
 
+### Code Audit (2026.3.20)
+- 5-crate parallel audit: shruti-ml, shruti-session, shruti-instruments, shruti-dsp/ai, shruti-engine
+- **11 Critical/High fixes applied**:
+  - Division by zero guards: `to_tarang_buffer` (channels=0), transport `frames_to_secs`/`beats_to_frames` (sample_rate=0, bpm=0), sampler `grain_size` (0ms), transport `advance` (loop_length=0)
+  - Array index underflow in sampler `auto_slice_by_transients` (running average subtraction)
+  - NaN→Infinity sentinel in `LoopRecordManager` (NaN can occur in valid DSP; infinity cannot)
+  - Unbounded context vector in `InferenceScheduler` (cap at max_seq_len/2)
+  - File size limit (4GB) in `probe_container` (prevents OOM on large files)
+  - Stereo spread energy normalization (equal-power preservation)
+  - Hoosh inference timeout (10s) in `HooshRuntime::generate_next`
+  - Channels validation (.max(1)) in loudness/mix/resample tarang buffer construction
+- **28 Medium/Low issues** triaged to engineering backlog (M1–M17, L1–L11)
+
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
