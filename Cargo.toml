@@ -93,3 +93,7 @@ harness = false
 name = "tarang_audio"
 harness = false
 required-features = ["tarang"]
+
+[[bench]]
+name = "ml"
+harness = false

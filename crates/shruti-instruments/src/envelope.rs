@@ -424,7 +424,7 @@ mod tests {
         };
 
         // At 44100
-        let mut env1 = Envelope::new(params.clone(), 44100.0);
+        let mut env1 = Envelope::new(params, 44100.0);
         env1.trigger();
         let samples1 = samples_in_state(&mut env1, EnvelopeState::Attack, 100000);
 

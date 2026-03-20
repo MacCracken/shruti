@@ -173,6 +173,13 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - Removed blanket `#![allow(dead_code)]` from shruti-ml; targeted allows on specific fields
 - **19 performance + architecture items** added to engineering backlog (P1-P9, A1-A10)
 
+### Benchmarks
+- **13 new criterion benchmarks** added (instruments + ML):
+  - Synth: unison×4 (30µs), unison×8 (50µs), sub-osc (21µs), full stack (118µs), 16-voice polyphony (145µs)
+  - Sampler: time-stretch (164ns/frame)
+  - ML: tokenizer encode 100 notes (2.7µs), decode (1.3µs), roundtrip (2.0µs), scheduler fill 64 tokens (670ns), AI player render 256 (26µs)
+- Total: **36 benchmarks** across 5 files (dsp, instruments, timeline, tarang_audio, ml)
+
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
