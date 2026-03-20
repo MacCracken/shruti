@@ -7,6 +7,10 @@ use std::thread;
 
 use crate::error::EngineError;
 
+/// Maximum accumulated recording size (500MB of f32 samples ≈ ~47 min stereo 44.1kHz)
+const MAX_ACCUMULATOR_BYTES: usize = 500 * 1024 * 1024;
+const MAX_ACCUMULATOR_SAMPLES: usize = MAX_ACCUMULATOR_BYTES / 4;
+
 /// Manages recording from the RT thread to disk.
 ///
 /// Uses a lock-free ring buffer: the RT callback pushes samples
@@ -15,6 +19,7 @@ use crate::error::EngineError;
 pub struct RecordManager {
     producer: Producer<f32>,
     accumulator_handle: Option<thread::JoinHandle<Vec<f32>>>,
+    dropped_samples: u64,
 }
 
 impl RecordManager {
@@ -27,6 +32,7 @@ impl RecordManager {
         Self {
             producer,
             accumulator_handle: Some(handle),
+            dropped_samples: 0,
         }
     }
 
@@ -34,8 +40,15 @@ impl RecordManager {
     /// Drops samples if the ring buffer is full (preferable to blocking the RT thread).
     pub fn push_samples(&mut self, data: &[f32]) {
         for &sample in data {
-            let _ = self.producer.push(sample);
+            if self.producer.push(sample).is_err() {
+                self.dropped_samples += 1;
+            }
         }
+    }
+
+    /// Returns the number of samples dropped due to ring buffer overflow.
+    pub fn dropped_samples(&self) -> u64 {
+        self.dropped_samples
     }
 
     /// Stop recording and write the accumulated audio to a WAV file.
@@ -47,9 +60,16 @@ impl RecordManager {
             .accumulator_handle
             .take()
             .ok_or_else(|| EngineError::Recording("recorder already finalized".into()))?;
-        let samples = handle
-            .join()
-            .map_err(|_| EngineError::Recording("recording thread panicked".into()))?;
+        let samples = handle.join().map_err(|e| {
+            let msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "unknown panic".to_string()
+            };
+            EngineError::Recording(format!("recording thread panicked: {msg}"))
+        })?;
 
         let buffer = AudioBuffer::from_interleaved(samples, format.channels);
         write_wav_file(path, &buffer, format).map_err(|e| EngineError::Recording(e.to_string()))?;
@@ -58,18 +78,35 @@ impl RecordManager {
     }
 }
 
+impl Drop for RecordManager {
+    fn drop(&mut self) {
+        // Signal consumer thread to finish by dropping producer
+        if self.accumulator_handle.is_some() {
+            let _ = std::mem::replace(&mut self.producer, RingBuffer::new(1).0);
+            // Don't join — just let the thread finish naturally
+        }
+    }
+}
+
 fn accumulate_samples(mut consumer: Consumer<f32>) -> Vec<f32> {
     let mut samples = Vec::new();
 
     loop {
         match consumer.pop() {
-            Ok(sample) => samples.push(sample),
+            Ok(sample) => {
+                if samples.len() < MAX_ACCUMULATOR_SAMPLES {
+                    samples.push(sample);
+                }
+                // else: silently drop (recording too long)
+            }
             Err(_) => {
                 // Buffer empty — if the producer is gone, we're done
                 if consumer.is_abandoned() {
                     // Drain any remaining
                     while let Ok(sample) = consumer.pop() {
-                        samples.push(sample);
+                        if samples.len() < MAX_ACCUMULATOR_SAMPLES {
+                            samples.push(sample);
+                        }
                     }
                     break;
                 }
@@ -101,6 +138,7 @@ pub struct LoopRecordManager {
     producer: Producer<f32>,
     accumulator_handle: Option<thread::JoinHandle<Vec<Vec<f32>>>>,
     mode: RecordingMode,
+    dropped_samples: u64,
 }
 
 impl LoopRecordManager {
@@ -113,6 +151,7 @@ impl LoopRecordManager {
             producer,
             accumulator_handle: Some(handle),
             mode,
+            dropped_samples: 0,
         }
     }
 
@@ -124,11 +163,18 @@ impl LoopRecordManager {
     /// Push interleaved samples from the RT callback. Non-blocking.
     pub fn push_samples(&mut self, data: &[f32]) {
         for &sample in data {
-            let _ = self.producer.push(sample);
+            if self.producer.push(sample).is_err() {
+                self.dropped_samples += 1;
+            }
         }
     }
 
-    /// Push a loop boundary marker using f32::INFINITY as sentinel.
+    /// Returns the number of samples dropped due to ring buffer overflow.
+    pub fn dropped_samples(&self) -> u64 {
+        self.dropped_samples
+    }
+
+    /// Push a loop boundary marker using positive `f32::INFINITY` as sentinel.
     /// Infinity cannot occur in valid audio (unlike NaN which can result from DSP errors),
     /// making it a safe out-of-band marker.
     pub fn push_loop_marker(&mut self) {
@@ -151,9 +197,16 @@ impl LoopRecordManager {
             .accumulator_handle
             .take()
             .ok_or_else(|| EngineError::Recording("loop recorder already finalized".into()))?;
-        let takes = handle
-            .join()
-            .map_err(|_| EngineError::Recording("loop recording thread panicked".into()))?;
+        let takes = handle.join().map_err(|e| {
+            let msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "unknown panic".to_string()
+            };
+            EngineError::Recording(format!("loop recording thread panicked: {msg}"))
+        })?;
 
         let mut paths = Vec::new();
         for (i, samples) in takes.into_iter().enumerate() {
@@ -172,6 +225,14 @@ impl LoopRecordManager {
     }
 }
 
+impl Drop for LoopRecordManager {
+    fn drop(&mut self) {
+        if self.accumulator_handle.is_some() {
+            let _ = std::mem::replace(&mut self.producer, RingBuffer::new(1).0);
+        }
+    }
+}
+
 /// Accumulate samples, splitting on infinity sentinels into separate takes.
 fn accumulate_loop_samples(mut consumer: Consumer<f32>) -> Vec<Vec<f32>> {
     let mut takes: Vec<Vec<f32>> = vec![Vec::new()];
@@ -179,20 +240,30 @@ fn accumulate_loop_samples(mut consumer: Consumer<f32>) -> Vec<Vec<f32>> {
     loop {
         match consumer.pop() {
             Ok(sample) => {
-                if sample.is_infinite() {
-                    // Infinity sentinel: start a new take
+                if sample == f32::INFINITY {
+                    // Positive infinity sentinel: start a new take
                     takes.push(Vec::new());
-                } else if let Some(current) = takes.last_mut() {
-                    current.push(sample);
+                } else {
+                    let total: usize = takes.iter().map(|t| t.len()).sum();
+                    if total < MAX_ACCUMULATOR_SAMPLES
+                        && let Some(current) = takes.last_mut()
+                    {
+                        current.push(sample);
+                    }
                 }
             }
             Err(_) => {
                 if consumer.is_abandoned() {
                     while let Ok(sample) = consumer.pop() {
-                        if sample.is_infinite() {
+                        if sample == f32::INFINITY {
                             takes.push(Vec::new());
-                        } else if let Some(current) = takes.last_mut() {
-                            current.push(sample);
+                        } else {
+                            let total: usize = takes.iter().map(|t| t.len()).sum();
+                            if total < MAX_ACCUMULATOR_SAMPLES
+                                && let Some(current) = takes.last_mut()
+                            {
+                                current.push(sample);
+                            }
                         }
                     }
                     break;

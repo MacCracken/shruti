@@ -24,7 +24,10 @@ fn to_tarang(buffer: &AudioBuffer, format: &AudioFormat) -> tarang::core::AudioB
     tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),
         sample_format: tarang::core::SampleFormat::F32,
-        channels: buffer.channels().max(1),
+        channels: {
+            debug_assert!(buffer.channels() > 0, "AudioBuffer has 0 channels");
+            buffer.channels().max(1)
+        },
         sample_rate: format.sample_rate,
         num_frames: buffer.frames() as usize,
         timestamp: std::time::Duration::ZERO,

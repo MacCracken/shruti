@@ -156,6 +156,9 @@ impl MidiTokenizer {
     /// Events should be sorted by position. The output includes BOS/EOS
     /// markers, time shifts between events, and velocity/duration tokens
     /// before each note-on.
+    ///
+    /// Note: encoding involves quantization of velocity (32 bins), duration (64 bins),
+    /// and timing (10ms resolution). Exact round-tripping is not guaranteed.
     pub fn encode(&self, events: &[NoteEvent]) -> Vec<MidiToken> {
         let mut tokens = vec![MidiToken::Bos];
         let mut last_pos: u64 = 0;
@@ -193,6 +196,9 @@ impl MidiTokenizer {
     ///
     /// Reconstructs note events from the token stream, resolving
     /// velocity, duration, and time shifts.
+    ///
+    /// Note: decoded events reflect quantized values from the token stream;
+    /// they will not exactly match original events due to binning.
     pub fn decode(&self, tokens: &[MidiToken]) -> Vec<NoteEvent> {
         let mut events = Vec::new();
         let mut current_pos: u64 = 0;

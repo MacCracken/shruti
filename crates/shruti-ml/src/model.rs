@@ -340,9 +340,9 @@ mod hoosh_runtime {
                 .map(|t| format!("{t:?}"))
                 .collect();
             let prompt = format!(
-                "Continue this music token sequence. Output ONLY the next token name \
-                 (e.g., NoteOn(60), Velocity(16), Duration(8), TimeShift(25)). \
-                 Sequence so far: {}",
+                "You are a music token generator. Given a sequence of music tokens, output ONLY the next token. \
+                 Valid token formats: NoteOn(0-127), NoteOff(0-127), Velocity(0-31), Duration(0-63), TimeShift(0-99), Bar. \
+                 Sequence: {}",
                 token_strings.join(" ")
             );
 

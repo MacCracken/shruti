@@ -119,7 +119,29 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
   - Channels validation (.max(1)) in loudness/mix/resample tarang buffer construction
 - **34 Medium/Low issues** triaged to engineering backlog (M1–M20, L1–L14)
 - **Second audit pass**: fixed stereo spread energy conservation (constant-power panning law, L²+R²=1), context trim data loss (keep 75% instead of 50%, use `>=` boundary)
-- **Full codebase sweep** (131 files, 55K LOC): fixed `accumulator_handle.take().unwrap()` → `ok_or_else` in RecordManager/LoopRecordManager (prevents panic on double-finalize), `AudioFormat::buffer_duration_secs` division by zero guard (sample_rate=0), `AudioBuffer::from_interleaved` channels=0 guard. Confirmed `chunks_exact` is safe (returns partial, no panic). Added 3 items to backlog (M21, L15-L16). **37 total backlog items** (M1-M21, L1-L16)
+- **Full codebase sweep** (131 files, 55K LOC): fixed `accumulator_handle.take().unwrap()` → `ok_or_else` in RecordManager/LoopRecordManager (prevents panic on double-finalize), `AudioFormat::buffer_duration_secs` division by zero guard (sample_rate=0), `AudioBuffer::from_interleaved` channels=0 guard. Confirmed `chunks_exact` is safe (returns partial, no panic).
+- **All 21 medium-priority issues fixed** (M1–M21):
+  - M1: Quantization loss documented in tokenizer encode/decode APIs
+  - M2: AiPlayerConfig.key clamped to 0–11
+  - M3: Hoosh prompt uses generic token format spec instead of hardcoded examples
+  - M4: `secs_to_frames` guards against negative/overflow (returns ZERO/MAX)
+  - M5: MIDI `add_note`/`add_cc` clamp note/velocity to 127, channel to 15
+  - M6: `loop_iteration` changed to `#[serde(skip)]` (runtime-only)
+  - M7: Pitch bend clamped to ±1.0 at read site
+  - M8: CC#74 block-granularity documented (standard DAW behavior)
+  - M9: Pressure gain changed to unity base (1.0 + pressure * 0.3)
+  - M10: Total filter modulation capped at ±8 octaves from base cutoff
+  - M11: Ring buffer dropped sample counter added to RecordManager/LoopRecordManager
+  - M12: Drop impls added for RecordManager/LoopRecordManager (signals consumer thread)
+  - M13: Thread panic messages extracted instead of discarded
+  - M14: Accumulator growth capped at 500MB (~47 min stereo 44.1kHz)
+  - M15: 24-bit audio i32 cast clamped to valid i24 range
+  - M16: Hoosh health check race removed (let request fail naturally)
+  - M17: `detect_async()` now uses shared cache with TTL
+  - M18: Unison detune frequency clamped to [20Hz, sr/2.1]
+  - M19: Infinity sentinel uses `== f32::INFINITY` (positive only)
+  - M20: `debug_assert!` added before all `.max(1)` channel clamps
+  - M21: `debug_assert!` bounds checks in AudioBuffer get/set
 
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings

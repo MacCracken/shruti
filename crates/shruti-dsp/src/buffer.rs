@@ -47,12 +47,24 @@ impl AudioBuffer {
     /// Get a single sample at (frame, channel).
     #[inline]
     pub fn get(&self, frame: u32, channel: u16) -> Sample {
+        debug_assert!(
+            (frame as usize * self.channels as usize + channel as usize) < self.data.len(),
+            "AudioBuffer::get out of bounds: frame={frame}, channel={channel}, frames={}, channels={}",
+            self.frames,
+            self.channels
+        );
         self.data[frame as usize * self.channels as usize + channel as usize]
     }
 
     /// Set a single sample at (frame, channel).
     #[inline]
     pub fn set(&mut self, frame: u32, channel: u16, value: Sample) {
+        debug_assert!(
+            (frame as usize * self.channels as usize + channel as usize) < self.data.len(),
+            "AudioBuffer::set out of bounds: frame={frame}, channel={channel}, frames={}, channels={}",
+            self.frames,
+            self.channels
+        );
         self.data[frame as usize * self.channels as usize + channel as usize] = value;
     }
 

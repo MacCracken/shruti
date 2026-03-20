@@ -83,13 +83,40 @@ pub fn detect() -> HardwareInfo {
 /// Async variant of [`detect`] — non-blocking subprocess I/O via tokio.
 ///
 /// Uses the selective CUDA+ROCm builder. Falls back to sync detection on error.
+/// Results are cached for 5 minutes, same as [`detect`].
 pub async fn detect_async() -> HardwareInfo {
-    let registry = DetectBuilder::none()
-        .with_cuda()
-        .with_rocm()
-        .detect_async()
-        .await
-        .unwrap_or_else(|_| detect_selective());
+    // Check cache first
+    {
+        let guard = CACHE.lock().unwrap_or_else(|p| {
+            let mut g = p.into_inner();
+            g.0 = None;
+            g.1 = None;
+            g
+        });
+        if let (Some(reg), Some(ts)) = &*guard
+            && ts.elapsed() < CACHE_TTL
+        {
+            return build_info(reg);
+        }
+    }
+
+    let registry = Arc::new(
+        DetectBuilder::none()
+            .with_cuda()
+            .with_rocm()
+            .detect_async()
+            .await
+            .unwrap_or_else(|_| detect_selective()),
+    );
+
+    // Update cache
+    let mut guard = CACHE.lock().unwrap_or_else(|p| {
+        let mut g = p.into_inner();
+        g.0 = None;
+        g.1 = None;
+        g
+    });
+    *guard = (Some(Arc::clone(&registry)), Some(Instant::now()));
     build_info(&registry)
 }
 

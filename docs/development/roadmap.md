@@ -173,27 +173,9 @@ When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
 
 Issues identified in code audit, triaged as Medium/Low. Critical/High issues were fixed inline.
 
-### Medium Priority
+### ~~Medium Priority~~ (All resolved — 2026.3.20)
 
-| # | Crate | Issue | Notes |
-|---|-------|-------|-------|
-| M1 | shruti-ml | Quantization loss not documented in tokenizer API | Encode/decode is lossy; add doc warning |
-| M2 | shruti-ml | No input validation for AiPlayerConfig.key (accepts > 11) | Use newtype or clamp |
-| M3 | shruti-ml | Hoosh prompt hardcodes token names; breaks if MidiToken changes | Generate token list dynamically |
-| M4 | shruti-session | `secs_to_frames` overflow on large/negative floats | Clamp to valid range before cast |
-| M5 | shruti-session | No MIDI spec range validation (note/velocity/channel > 127/15) | Validate or document as unchecked |
-| M6 | shruti-session | `loop_iteration` should be `#[serde(skip)]` (runtime-only state) | Prevent stale values in saved sessions |
-| M7 | shruti-instruments | Pitch bend unbounded (±100 possible, ±17 octaves) | Clamp to ±1.0 on write |
-| M8 | shruti-instruments | CC#74 brightness applied mid-block without smoothing | Add linear ramp over ~5ms |
-| M9 | shruti-instruments | Pressure gain has -3dB floor at zero pressure | Clarify intent or change to 1.0 base |
-| M10 | shruti-instruments | Brightness + LFO + filter env octave stacking ambiguous | Cap total modulation at ±8 octaves |
-| M11 | shruti-engine | Ring buffer overflow silent data loss (no metrics) | Return dropped count or add counter |
-| M12 | shruti-engine | No Drop impl for RecordManager/LoopRecordManager | Add Drop to join background thread |
-| M13 | shruti-engine | Thread panic messages discarded in join error handler | Extract panic payload for diagnostics |
-| M14 | shruti-engine | Unbounded accumulator growth (long recordings → OOM) | Add size cap or stream to disk |
-| M15 | shruti-dsp | 24-bit audio cast safety (float → i32 edge) | Add explicit clamp before cast |
-| M16 | shruti-ai | Hoosh health check race condition (check → use gap) | Remove pre-check; let request fail naturally |
-| M17 | shruti-ai | detect_async() ignores shared cache | Synchronize with CACHE like detect() |
+All 21 medium-priority items (M1–M21) fixed. See CHANGELOG for details.
 
 ### Low Priority
 
@@ -211,18 +193,11 @@ Issues identified in code audit, triaged as Medium/Low. Critical/High issues wer
 | L10 | shruti-engine | Empty takes skipped without documentation | Document in docstring |
 | L11 | shruti-dsp | read_exact() error message could be more descriptive | Add "file too small?" hint |
 
-*Second audit pass (2026.3.20):*
+*Second audit + full sweep — remaining Low items:*
 
-| M18 | shruti-instruments | Unison detune lacks frequency bounds check | Clamp u_freq to [20, sr/2.1] |
-| M19 | shruti-engine | Infinity sentinel ambiguity (±∞ both trigger) | Use `== f32::INFINITY` instead of `is_infinite()` |
-| M20 | shruti-dsp/ai | channels.max(1) masks upstream bugs silently | Add debug logging when clamped |
 | L12 | shruti-session | loop_iteration u32 overflow after 4.3B wraps | Use saturating_add |
 | L13 | shruti-ml | Hoosh timeout hardcoded to 10s | Make configurable via GenerationConfig |
 | L14 | shruti-instruments | Unison phase tracking choice (voice[0]) undocumented | Document why first voice is primary |
-
-*Full codebase sweep (2026.3.20):*
-
-| M21 | shruti-dsp | AudioBuffer::get/set unchecked index in hot paths | Use debug_assert! for bounds in debug builds |
 | L15 | shruti-session | FramePos Add/Sub can overflow u64 silently | Document u64 limit (~19hr at 48kHz) or use checked arithmetic |
 | L16 | shruti-session | AudioPool filename defaults to "unknown" on None | Return error instead of silent default |
 

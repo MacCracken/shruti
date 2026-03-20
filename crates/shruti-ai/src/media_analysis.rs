@@ -14,6 +14,7 @@ pub use tarang::ai::{HooshClient, HooshConfig, WhisperModel};
 
 /// Convert interleaved f32 samples into a tarang `AudioBuffer`.
 fn to_tarang_buffer(samples: &[f32], sample_rate: u32, channels: u16) -> tarang::core::AudioBuffer {
+    debug_assert!(channels > 0, "channels must be > 0");
     let channels = channels.max(1); // prevent division by zero
     let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
     tarang::core::AudioBuffer {
@@ -201,12 +202,6 @@ mod hoosh_transcription {
         language: Option<String>,
     ) -> Result<hoosh::inference::TranscriptionResponse, Box<dyn std::error::Error>> {
         let client = hoosh::HooshClient::new(hoosh_url);
-
-        // Check server health first
-        let healthy = client.health().await.unwrap_or(false);
-        if !healthy {
-            return Err("hoosh server not available".into());
-        }
 
         // For now, use the chat API to request transcription
         // (full /v1/transcribe endpoint will be available in hoosh 0.22.3)

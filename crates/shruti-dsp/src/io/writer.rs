@@ -307,6 +307,7 @@ fn write_wav_with_depth(
             for &sample in buffer.as_interleaved() {
                 let clamped = sample.clamp(-1.0, 1.0);
                 let int_sample = (clamped * 8_388_607.0) as i32;
+                let int_sample = int_sample.clamp(-8_388_608, 8_388_607);
                 writer.write_sample(int_sample)?;
             }
         }

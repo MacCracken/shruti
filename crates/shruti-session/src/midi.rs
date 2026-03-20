@@ -71,6 +71,9 @@ impl MidiClip {
     ) {
         let position = position.into();
         let duration = duration.into();
+        let note = note.min(127);
+        let velocity = velocity.min(127);
+        let channel = channel.min(15);
         let event = NoteEvent {
             position,
             duration,
@@ -94,6 +97,9 @@ impl MidiClip {
         channel: u8,
     ) {
         let position = position.into();
+        let controller = controller.min(127);
+        let value = value.min(127);
+        let channel = channel.min(15);
         let event = ControlChange {
             position,
             controller,

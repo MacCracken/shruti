@@ -45,7 +45,7 @@ pub struct Transport {
     /// Loop end position in frames.
     pub loop_end: FramePos,
     /// Current loop iteration (0-indexed, increments on each wrap).
-    #[serde(default)]
+    #[serde(skip)]
     pub loop_iteration: u32,
 }
 
@@ -131,7 +131,14 @@ impl Transport {
 
     /// Convert seconds to frame position.
     pub fn secs_to_frames(&self, secs: f64) -> FramePos {
-        FramePos((secs * self.sample_rate as f64) as u64)
+        if secs <= 0.0 {
+            return FramePos::ZERO;
+        }
+        let frames = secs * self.sample_rate as f64;
+        if frames > u64::MAX as f64 {
+            return FramePos(u64::MAX);
+        }
+        FramePos(frames as u64)
     }
 
     /// Convert a frame position to beats.

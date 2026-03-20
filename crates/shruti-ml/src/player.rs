@@ -135,7 +135,7 @@ impl AiPlayer {
         let params = vec![
             InstrumentParam::new("Volume", 0.0, 1.0, 0.8, ""),
             InstrumentParam::new("Creativity", 0.0, 1.0, config.creativity, ""),
-            InstrumentParam::new("Key", 0.0, 11.0, config.key as f32, ""),
+            InstrumentParam::new("Key", 0.0, 11.0, config.key.min(11) as f32, ""),
             InstrumentParam::new("Minor", 0.0, 1.0, if config.minor { 1.0 } else { 0.0 }, ""),
             InstrumentParam::new("Mode", 0.0, 2.0, config.mode as u8 as f32, ""),
         ];

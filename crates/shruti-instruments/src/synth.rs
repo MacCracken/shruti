@@ -469,6 +469,8 @@ impl SubtractiveSynth {
                     self.lfo1.depth = depth;
                 }
                 // CC#74 = Brightness -> apply to all active voices on matching channel
+                // CC changes are applied at block boundaries (standard DAW granularity).
+                // Per-sample smoothing would require additional state per voice.
                 74 => {
                     let val = cc.value as f32 / 127.0;
                     for voice in &mut self.voice_manager.voices {
@@ -546,7 +548,7 @@ impl SubtractiveSynth {
                 };
 
                 // Apply per-note pitch bend (+-2 semitones by default)
-                let voice_bend = self.voice_manager.voices[i].pitch_bend;
+                let voice_bend = self.voice_manager.voices[i].pitch_bend.clamp(-1.0, 1.0);
                 let effective_freq = if voice_bend.abs() > 0.0001 {
                     effective_freq * Self::fast_exp2(voice_bend * 2.0 / 12.0) as f64
                 } else {
@@ -572,8 +574,9 @@ impl SubtractiveSynth {
                         } else {
                             0.0
                         };
-                        let u_freq =
-                            effective_freq * Oscillator::fast_exp2_f64(detune_offset / 1200.0);
+                        let u_freq = (effective_freq
+                            * Oscillator::fast_exp2_f64(detune_offset / 1200.0))
+                        .clamp(20.0, sample_rate / 2.1);
                         let s = self.oscillators[i].sample(*u_phase, u_freq);
                         osc1_sample += s;
                         *u_phase = Oscillator::advance_phase(*u_phase, u_freq, sample_rate);
@@ -655,9 +658,14 @@ impl SubtractiveSynth {
                 let brightness = self.voice_manager.voices[i].brightness;
                 if brightness > 0.001 {
                     let brightness_octaves = brightness * 4.0; // up to +4 octaves
-                    modulated_cutoff = (modulated_cutoff * Self::fast_exp2(brightness_octaves))
-                        .clamp(20.0, 20000.0);
+                    modulated_cutoff *= Self::fast_exp2(brightness_octaves);
                 }
+
+                // Cap total filter modulation to ±8 octaves from base cutoff
+                let min_cutoff = (filter_cutoff * Self::fast_exp2(-8.0)).max(20.0);
+                let max_cutoff = (filter_cutoff * Self::fast_exp2(8.0)).min(20000.0);
+                modulated_cutoff = modulated_cutoff.clamp(min_cutoff, max_cutoff);
+
                 self.filters[i].cutoff = modulated_cutoff;
 
                 let filtered = self.filters[i].process_sample(after_env);
@@ -667,11 +675,7 @@ impl SubtractiveSynth {
 
                 // Apply per-note pressure as volume modifier
                 let pressure = self.voice_manager.voices[i].pressure;
-                let pressure_gain = if pressure > 0.001 {
-                    0.7 + 0.3 * pressure
-                } else {
-                    1.0
-                };
+                let pressure_gain = 1.0 + pressure * 0.3; // pressure adds up to +2.5dB boost
                 let out = filtered * vel_gain * volume * vol_mod * pressure_gain;
 
                 if unison_count > 1 && channels >= 2 && unison_spread > 0.001 {
@@ -1838,7 +1842,7 @@ mod tests {
         synth.note_on(60, 100, 0);
 
         // Apply pitch bend to the voice
-        synth.voice_manager.voices[0].pitch_bend = 0.5; // bend up
+        synth.voice_manager.voices[0].pitch_bend = (0.5f32).clamp(-1.0, 1.0); // bend up
 
         let mut buf = AudioBuffer::new(2, 256);
         synth.process(&[], &[], &mut buf);

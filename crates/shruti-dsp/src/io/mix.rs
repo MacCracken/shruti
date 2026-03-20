@@ -32,7 +32,10 @@ pub fn mix_channels(
     let tarang_buf = tarang::core::AudioBuffer {
         data: bytes::Bytes::from(byte_data),
         sample_format: tarang::core::SampleFormat::F32,
-        channels: buffer.channels().max(1),
+        channels: {
+            debug_assert!(buffer.channels() > 0, "AudioBuffer has 0 channels");
+            buffer.channels().max(1)
+        },
         sample_rate: source_rate,
         num_frames: buffer.frames() as usize,
         timestamp: std::time::Duration::ZERO,
