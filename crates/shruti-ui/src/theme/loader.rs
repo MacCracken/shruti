@@ -2,6 +2,30 @@ use std::path::Path;
 
 use super::colors::ThemeColors;
 
+/// Compute WCAG 2.0 relative luminance from an sRGB [u8; 4] color.
+pub(crate) fn relative_luminance(rgba: [u8; 4]) -> f64 {
+    let to_linear = |c_u8: u8| -> f64 {
+        let c = f64::from(c_u8) / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let r = to_linear(rgba[0]);
+    let g = to_linear(rgba[1]);
+    let b = to_linear(rgba[2]);
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// Compute WCAG 2.0 contrast ratio between two colors.
+pub(crate) fn contrast_ratio(a: [u8; 4], b: [u8; 4]) -> f64 {
+    let l_a = relative_luminance(a);
+    let l_b = relative_luminance(b);
+    let (lighter, darker) = if l_a > l_b { (l_a, l_b) } else { (l_b, l_a) };
+    (lighter + 0.05) / (darker + 0.05)
+}
+
 /// A complete theme definition.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Theme {
@@ -53,6 +77,15 @@ impl Theme {
                 ));
             }
         }
+
+        // WCAG AA large-text contrast check between background and text
+        let ratio = contrast_ratio(self.colors.bg_primary, self.colors.text_primary);
+        if ratio < 3.0 {
+            return Err(format!(
+                "Insufficient contrast between bg_primary and text_primary ({ratio:.1}:1, minimum 3:1)"
+            ));
+        }
+
         Ok(())
     }
 
@@ -260,5 +293,57 @@ mod tests {
         assert_eq!(theme.colors.bg_primary[3], 255);
         assert_eq!(theme.colors.text_primary[3], 255);
         assert_eq!(theme.colors.accent[3], 255);
+    }
+
+    // ---- contrast validation ----
+
+    #[test]
+    fn validate_good_contrast_passes() {
+        let theme = Theme::default();
+        assert!(theme.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_low_contrast_fails() {
+        let mut theme = Theme::default();
+        theme.colors.bg_primary = [20, 20, 20, 255];
+        theme.colors.text_primary = [30, 30, 30, 255];
+        let result = theme.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient contrast"));
+    }
+
+    #[test]
+    fn validate_identical_bg_text_fails() {
+        let mut theme = Theme::default();
+        theme.colors.bg_primary = [100, 100, 100, 255];
+        theme.colors.text_primary = [100, 100, 100, 255];
+        let result = theme.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient contrast"));
+    }
+
+    #[test]
+    fn test_relative_luminance_black() {
+        let l = relative_luminance([0, 0, 0, 255]);
+        assert!((l - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_relative_luminance_white() {
+        let l = relative_luminance([255, 255, 255, 255]);
+        assert!((l - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_contrast_ratio_black_white() {
+        let ratio = contrast_ratio([0, 0, 0, 255], [255, 255, 255, 255]);
+        assert!((ratio - 21.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_contrast_ratio_same_color() {
+        let ratio = contrast_ratio([128, 128, 128, 255], [128, 128, 128, 255]);
+        assert!((ratio - 1.0).abs() < 1e-6);
     }
 }

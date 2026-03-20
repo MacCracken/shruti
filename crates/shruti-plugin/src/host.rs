@@ -627,4 +627,172 @@ mod tests {
         // Should not panic, may return whatever system has
         let _ = results.len();
     }
+
+    // --- find_plugin with populated registry ---
+
+    #[test]
+    fn find_plugin_after_scan() {
+        let mut host = PluginHost::new();
+        // Scan produces whatever is on the system; just verify no panic
+        host.scan();
+        // Searching for a non-existent name should always return None
+        assert!(
+            host.find_plugin("__definitely_not_a_real_plugin__")
+                .is_none()
+        );
+    }
+
+    // --- load_all_states: valid state but slot missing ---
+
+    #[test]
+    fn load_all_states_valid_state_missing_slot_no_error() {
+        let mut host = PluginHost::new();
+        let mut states = HashMap::new();
+        // A state with empty chunk passes validation, but slot doesn't exist
+        let state = PluginState::new("plugin_x".into());
+        states.insert("slot_a".to_string(), state.clone());
+        states.insert("slot_b".to_string(), state);
+        let errors = host.load_all_states(&states);
+        // No validation errors — states are valid, just no matching slots
+        assert!(errors.is_empty());
+    }
+
+    // --- load_all_states: mix of valid and invalid ---
+
+    #[test]
+    fn load_all_states_mixed_valid_and_invalid() {
+        let mut host = PluginHost::new();
+        let mut states = HashMap::new();
+
+        // Valid state (empty chunk)
+        let valid_state = PluginState::new("valid_plugin".into());
+        states.insert("valid_slot".to_string(), valid_state);
+
+        // Invalid state (oversized)
+        let mut big_state = PluginState::new("big_plugin".into());
+        big_state.chunk = vec![0u8; crate::state::MAX_STATE_BLOB_SIZE + 1];
+        states.insert("big_slot".to_string(), big_state);
+
+        // Invalid state (too small)
+        let mut tiny_state = PluginState::new("tiny_plugin".into());
+        tiny_state.chunk = vec![0x01];
+        states.insert("tiny_slot".to_string(), tiny_state);
+
+        let errors = host.load_all_states(&states);
+        // Should have 2 errors (big + tiny), valid one silently skipped (no slot)
+        assert_eq!(errors.len(), 2);
+    }
+
+    // --- save_all_states on empty host ---
+
+    #[test]
+    fn save_all_states_returns_empty_map() {
+        let host = PluginHost::new();
+        let states = host.save_all_states();
+        assert!(states.is_empty());
+    }
+
+    // --- active_slots ---
+
+    #[test]
+    fn active_slots_empty_host() {
+        let host = PluginHost::new();
+        assert!(host.active_slots().is_empty());
+    }
+
+    // --- load error: various formats with nonexistent files ---
+
+    #[test]
+    fn load_clap_error_message_contains_path() {
+        let result = load_clap_plugin(Path::new("/tmp/fake_plugin.clap"), 44100.0, 512);
+        match result {
+            Err(e) => {
+                let err_msg = e.to_string();
+                assert!(
+                    err_msg.contains("fake_plugin.clap"),
+                    "error should contain path: {err_msg}"
+                );
+            }
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn load_native_error_message_contains_path() {
+        let result = load_native_plugin(Path::new("/tmp/fake_native.so"), 44100.0, 512);
+        match result {
+            Err(e) => {
+                let err_msg = e.to_string();
+                assert!(
+                    err_msg.contains("fake_native.so"),
+                    "error should contain path: {err_msg}"
+                );
+            }
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn load_vst3_binary_nonexistent_bundle() {
+        let result = find_vst3_binary(Path::new("/tmp/Bundle.vst3"));
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Bundle"));
+    }
+
+    // --- load_plugin dispatches to correct format ---
+
+    #[test]
+    fn load_plugin_all_formats_fail_gracefully() {
+        for (format, path) in [
+            (PluginFormat::Clap, "/tmp/no.clap"),
+            (PluginFormat::Vst3, "/tmp/no.vst3"),
+            (PluginFormat::Native, "/tmp/no.so"),
+        ] {
+            let plugin = ScannedPlugin {
+                name: "NoPlugin".into(),
+                path: path.into(),
+                format,
+            };
+            let result = load_plugin(&plugin, 48000.0, 256);
+            assert!(result.is_err(), "expected error for format {:?}", format);
+        }
+    }
+
+    // --- PluginHost::load returns error and doesn't add to active_slots ---
+
+    #[test]
+    fn host_load_failure_leaves_no_slot() {
+        let mut host = PluginHost::new();
+        let plugin = ScannedPlugin {
+            name: "Missing".into(),
+            path: "/dev/null/missing.clap".into(),
+            format: PluginFormat::Clap,
+        };
+        let _ = host.load("my_slot", &plugin, 48000.0, 256);
+        assert!(host.instance("my_slot").is_none());
+        assert!(host.instance_mut("my_slot").is_none());
+        assert!(host.active_slots().is_empty());
+    }
+
+    // --- Multiple search paths ---
+
+    #[test]
+    fn add_multiple_search_paths() {
+        let mut host = PluginHost::new();
+        host.add_search_path("/tmp/path1");
+        host.add_search_path("/tmp/path2");
+        host.add_search_path("/tmp/path3");
+        // Just verify no panic
+        let _ = host.scan();
+    }
+
+    // --- unload on empty host ---
+
+    #[test]
+    fn unload_returns_none_for_any_slot() {
+        let mut host = PluginHost::new();
+        assert!(host.unload("a").is_none());
+        assert!(host.unload("b").is_none());
+        assert!(host.unload("").is_none());
+    }
 }

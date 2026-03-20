@@ -596,9 +596,8 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     if let Some(pos) = pointer_pos {
                         let lane_left = available.left() + TRACK_HEADER_WIDTH;
                         let new_x = pos.x - lane_left - grab_offset_px;
-                        let new_frame = FramePos(
-                            ((new_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64,
-                        );
+                        let new_frame =
+                            crate::logic::pixel_to_frame(new_x, scroll_x, pixels_per_frame);
 
                         if new_frame != start_frame && track_index < state.session.tracks.len() {
                             let track_id = state.session.tracks[track_index].id;
@@ -616,8 +615,7 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     // Live preview: move region to current mouse position
                     let lane_left = available.left() + TRACK_HEADER_WIDTH;
                     let new_x = pos.x - lane_left - grab_offset_px;
-                    let new_frame =
-                        FramePos(((new_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64);
+                    let new_frame = crate::logic::pixel_to_frame(new_x, scroll_x, pixels_per_frame);
 
                     if track_index < state.session.tracks.len()
                         && let Some(r) = state.session.tracks[track_index].region_mut(region_id)
@@ -656,12 +654,9 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     {
                         let lane_left = available.left() + TRACK_HEADER_WIDTH;
                         let end_x = pos.x - lane_left;
-                        let end_frame = FramePos(
-                            ((end_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64,
-                        );
-                        let new_duration =
-                            end_frame.saturating_sub(r.timeline_pos).max(FramePos(1));
-                        r.duration = new_duration;
+                        let end_frame =
+                            crate::logic::pixel_to_frame(end_x, scroll_x, pixels_per_frame);
+                        r.duration = crate::logic::calculate_trim_end(r.timeline_pos, end_frame);
                     }
                 }
             }
@@ -697,20 +692,18 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     {
                         let lane_left = available.left() + TRACK_HEADER_WIDTH;
                         let start_x = pos.x - lane_left;
-                        let new_start_frame = FramePos(
-                            ((start_x as f64 + scroll_x) / pixels_per_frame).max(0.0) as u64,
-                        );
-                        let original_end = original_pos + original_duration;
-                        // Don't let start go past the end
-                        let clamped_start =
-                            new_start_frame.min(original_end.saturating_sub(FramePos(1)));
-                        // Don't let start go before the original start minus offset
-                        let clamped_start =
-                            clamped_start.max(original_pos.saturating_sub(original_offset));
-                        let delta = clamped_start.saturating_sub(original_pos);
+                        let new_start_frame =
+                            crate::logic::pixel_to_frame(start_x, scroll_x, pixels_per_frame);
+                        let (clamped_start, new_offset, new_duration) =
+                            crate::logic::calculate_trim_start(
+                                original_pos,
+                                original_offset,
+                                original_duration,
+                                new_start_frame,
+                            );
                         r.timeline_pos = clamped_start;
-                        r.source_offset = original_offset + delta;
-                        r.duration = original_duration.saturating_sub(delta).max(FramePos(1));
+                        r.source_offset = new_offset;
+                        r.duration = new_duration;
                     }
                 }
             }
@@ -722,8 +715,11 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                     if let Some(pos) = pointer_pos {
                         // Determine which track row the mouse is over
                         let row_y = pos.y - content_rect.top();
-                        let to_index = ((row_y / TRACK_HEIGHT).floor() as usize)
-                            .min(state.session.tracks.len().saturating_sub(1));
+                        let to_index = crate::logic::row_index_from_y(
+                            row_y,
+                            TRACK_HEIGHT,
+                            state.session.tracks.len(),
+                        );
                         if to_index != from_index && state.session.tracks.len() > 1 {
                             let cmd = EditCommand::MoveTrack {
                                 from_index: shruti_session::TrackSlot(from_index),
@@ -736,8 +732,11 @@ pub fn arrangement_view(ui: &mut Ui, state: &mut UiState, colors: &ThemeColors) 
                 } else if let Some(pos) = pointer_pos {
                     // Update current_index for visual feedback
                     let row_y = pos.y - content_rect.top();
-                    let to_index = ((row_y / TRACK_HEIGHT).floor() as usize)
-                        .min(state.session.tracks.len().saturating_sub(1));
+                    let to_index = crate::logic::row_index_from_y(
+                        row_y,
+                        TRACK_HEIGHT,
+                        state.session.tracks.len(),
+                    );
                     state.drag = Some(ArrangementDrag::ReorderTrack {
                         from_index,
                         current_index: to_index,

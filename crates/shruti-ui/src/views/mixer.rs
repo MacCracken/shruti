@@ -220,11 +220,7 @@ fn channel_strip(ui: &mut Ui, state: &mut UiState, track_idx: usize, colors: &Th
 
         // dB readout
         ui.vertical_centered(|ui| {
-            let db = if state.session.tracks[track_idx].gain < 1e-10 {
-                "-inf".to_string()
-            } else {
-                format!("{:.1}", 20.0 * state.session.tracks[track_idx].gain.log10())
-            };
+            let db = crate::logic::gain_to_db_string(state.session.tracks[track_idx].gain);
             ui.label(
                 egui::RichText::new(db)
                     .monospace()

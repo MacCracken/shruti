@@ -608,4 +608,225 @@ mod tests {
         assert_eq!(regions[0].vel_range, (0, 63));
         assert_eq!(regions[1].vel_range, (64, 127));
     }
+
+    // ── Additional coverage tests ───────────────────────────────────
+
+    #[test]
+    fn parse_multi_word_sample_path() {
+        let sfz = "<region> sample=My Folder/Grand Piano C4.wav lokey=48 hikey=72\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].sample_path, "My Folder/Grand Piano C4.wav");
+        assert_eq!(regions[0].key_range, (48, 72));
+    }
+
+    #[test]
+    fn parse_multi_word_sample_with_trailing_opcodes() {
+        let sfz = "<region> sample=path with spaces/file.wav pitch_keycenter=60\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].sample_path, "path with spaces/file.wav");
+        assert_eq!(regions[0].root_key, Some(60));
+    }
+
+    #[test]
+    fn unknown_opcodes_silently_ignored() {
+        let sfz = "\
+<region> sample=test.wav amp_veltrack=100 fil_type=lpf_2p cutoff=5000 unknown_thing=42
+";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].sample_path, "test.wav");
+        // None of the unknown opcodes should cause errors or
+        // alter the default values for recognized fields.
+        assert_eq!(regions[0].key_range, (0, 127));
+        assert_eq!(regions[0].vel_range, (0, 127));
+    }
+
+    #[test]
+    fn mixed_headers_and_opcodes_same_line() {
+        // Header, opcodes, header, opcodes all on one line
+        let sfz = "<global> volume=-3 <group> lovel=10 hivel=100 <region> sample=a.wav key=60\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].sample_path, "a.wav");
+        assert_eq!(regions[0].key_range, (60, 60));
+        assert_eq!(regions[0].vel_range, (10, 100));
+        assert_eq!(regions[0].volume, Some(-3.0));
+    }
+
+    #[test]
+    fn parse_empty_sample_path_skipped() {
+        let sfz = "<region> sample= lokey=0 hikey=127\n";
+        let regions = parse_sfz(sfz).unwrap();
+        // sample= with no value results in an empty string, which should be skipped.
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn control_header_ignored() {
+        let sfz = "\
+<control> default_path=samples/
+<region> sample=piano.wav
+";
+        let regions = parse_sfz(sfz).unwrap();
+        // The <control> header is ignored, and the <region> that follows
+        // should still be parsed normally.
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].sample_path, "piano.wav");
+    }
+
+    #[test]
+    fn other_unknown_header_ignored() {
+        let sfz = "\
+<region> sample=before.wav
+<curve> v001=0.5
+<region> sample=after.wav
+";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].sample_path, "before.wav");
+        assert_eq!(regions[1].sample_path, "after.wav");
+    }
+
+    #[test]
+    fn key_shorthand_with_explicit_overrides() {
+        // key=60 sets lokey=60, hikey=60, but explicit lokey/hikey override
+        let sfz = "<region> sample=test.wav key=60 lokey=48 hikey=72\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].key_range, (48, 72));
+        assert_eq!(regions[0].root_key, Some(60));
+    }
+
+    #[test]
+    fn parse_note_names_edge_cases() {
+        // Note names with sharps and flats
+        assert_eq!(parse_note_or_number("c#4"), Some(61));
+        assert_eq!(parse_note_or_number("db4"), Some(61));
+        assert_eq!(parse_note_or_number("b4"), Some(71));
+        assert_eq!(parse_note_or_number("g#3"), Some(56));
+        assert_eq!(parse_note_or_number("d3"), Some(50));
+
+        // Invalid note names
+        assert_eq!(parse_note_or_number(""), None);
+        assert_eq!(parse_note_or_number("x4"), None);
+        assert_eq!(parse_note_or_number("c"), None); // no octave
+
+        // Out of MIDI range
+        assert_eq!(parse_note_or_number("c-2"), None); // would be negative
+    }
+
+    #[test]
+    fn parse_loop_mode_variants() {
+        // loop_sustain
+        let sfz = "<region> sample=a.wav loop_mode=loop_sustain\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].loop_mode, Some(LoopMode::Forward));
+
+        // loop_forward alias
+        let sfz = "<region> sample=a.wav loop_mode=loop_forward\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].loop_mode, Some(LoopMode::Forward));
+
+        // no_loop
+        let sfz = "<region> sample=a.wav loop_mode=no_loop\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].loop_mode, Some(LoopMode::NoLoop));
+
+        // unknown loop mode -> None
+        let sfz = "<region> sample=a.wav loop_mode=invalid_mode\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].loop_mode, None);
+    }
+
+    #[test]
+    fn alternate_opcode_names() {
+        // loopmode, loopstart, loopend (without underscores)
+        let sfz = "<region> sample=pad.wav loopmode=loop_continuous loopstart=100 loopend=500\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].loop_mode, Some(LoopMode::Forward));
+        assert_eq!(regions[0].loop_start, Some(100));
+        assert_eq!(regions[0].loop_end, Some(500));
+    }
+
+    #[test]
+    fn global_defaults_reset_by_new_global() {
+        let sfz = "\
+<global> volume=-6
+<region> sample=a.wav
+<global> pan=50
+<region> sample=b.wav
+";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions[0].volume, Some(-6.0));
+        // Second <global> resets, so volume is no longer inherited
+        assert_eq!(regions[1].volume, None);
+        assert_eq!(regions[1].pan, Some(50.0));
+    }
+
+    #[test]
+    fn opcodes_before_any_header() {
+        // Opcodes that appear before any header should be treated
+        // as belonging to a None context (ignored).
+        let sfz = "sample=orphan.wav\n<region> sample=real.wav\n";
+        let regions = parse_sfz(sfz).unwrap();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].sample_path, "real.wav");
+    }
+
+    #[test]
+    fn merge_with_defaults_region_wins() {
+        let sfz = "\
+<group> pitch_keycenter=48 volume=-3 pan=20
+<region> sample=test.wav pitch_keycenter=60 pan=-10
+";
+        let regions = parse_sfz(sfz).unwrap();
+        // Region overrides group
+        assert_eq!(regions[0].root_key, Some(60));
+        assert_eq!(regions[0].pan, Some(-10.0));
+        // Group default inherited
+        assert_eq!(regions[0].volume, Some(-3.0));
+    }
+
+    #[test]
+    fn parse_note_name_with_note_letter_only_no_octave() {
+        // 'c' without octave should return None (octave parse fails)
+        assert_eq!(parse_note_or_number("c"), None);
+        assert_eq!(parse_note_or_number("a"), None);
+    }
+
+    #[test]
+    fn strip_comment_preserves_content_before_comment() {
+        assert_eq!(strip_comment("hello // world"), "hello ");
+        assert_eq!(strip_comment("no comment here"), "no comment here");
+        assert_eq!(strip_comment("//everything is comment"), "");
+    }
+
+    #[test]
+    fn tokenize_line_empty() {
+        let segs = tokenize_line("");
+        assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn tokenize_line_whitespace_only() {
+        let segs = tokenize_line("   ");
+        assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn parse_opcodes_empty_chunk() {
+        let ops = parse_opcodes("");
+        assert!(ops.is_empty());
+        let ops = parse_opcodes("   ");
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn parse_opcodes_non_key_value_tokens_skipped() {
+        // Tokens without '=' are skipped
+        let ops = parse_opcodes("justword another lokey=10");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0], ("lokey", "10"));
+    }
 }

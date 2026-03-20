@@ -6,6 +6,7 @@
 pub mod app;
 pub mod engine;
 pub mod input;
+pub mod logic;
 pub mod state;
 pub mod theme;
 pub mod views;

@@ -1323,4 +1323,264 @@ mod tests {
     fn test_rate_limit_rps_constant() {
         assert_eq!(RATE_LIMIT_RPS, 100);
     }
+
+    // --- Rate limiter: window reset with count verification ---
+
+    #[test]
+    fn test_rate_limiter_resets_count_after_window() {
+        let mut rl = RateLimiter::new(2);
+        assert!(rl.check()); // 1
+        assert!(rl.check()); // 2
+        assert!(!rl.check()); // blocked
+
+        // Simulate window expiry
+        rl.window_start = Instant::now() - std::time::Duration::from_secs(2);
+
+        // After reset, full quota is available again
+        assert!(rl.check()); // 1 (new window)
+        assert!(rl.check()); // 2 (new window)
+        assert!(!rl.check()); // blocked again
+    }
+
+    #[test]
+    fn test_rate_limiter_zero_rps_blocks_all() {
+        let mut rl = RateLimiter::new(0);
+        assert!(!rl.check());
+    }
+
+    // --- Handler error paths: no session for various endpoints ---
+
+    #[tokio::test]
+    async fn test_tracks_gain_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/tracks",
+            serde_json::json!({"action": "gain", "name": "Guitar", "value": 0.5}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_tracks_pan_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/tracks",
+            serde_json::json!({"action": "pan", "name": "Guitar", "value": 0.5}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_tracks_mute_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/tracks",
+            serde_json::json!({"action": "mute", "name": "Guitar"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_tracks_solo_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/tracks",
+            serde_json::json!({"action": "solo", "name": "Guitar"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_transport_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/transport",
+            serde_json::json!({"action": "play"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_transport_seek_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/transport",
+            serde_json::json!({"action": "seek", "value": 1000}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_transport_tempo_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/transport",
+            serde_json::json!({"action": "tempo", "value": 120}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_export_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/export",
+            serde_json::json!({"path": "/tmp/test.wav"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_mixer_undo_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(&app, "/api/mixer", serde_json::json!({"action": "undo"})).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_analysis_spectrum_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/analysis",
+            serde_json::json!({"action": "spectrum", "track": "Guitar"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_analysis_dynamics_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/analysis",
+            serde_json::json!({"action": "dynamics", "track": "Guitar"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_analysis_auto_mix_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(
+            &app,
+            "/api/analysis",
+            serde_json::json!({"action": "auto_mix"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    // --- Request with missing optional fields uses defaults ---
+
+    #[tokio::test]
+    async fn test_tracks_add_defaults() {
+        let state = test_state();
+        let app = app(state);
+
+        post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Test"}),
+        )
+        .await;
+
+        // Add track with no name/kind — uses defaults
+        let (s, j) = post_json(&app, "/api/tracks", serde_json::json!({"action": "add"})).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(j["success"], true);
+        // Default name is "New Track", default kind is "audio"
+        assert!(j["message"].as_str().unwrap().contains("audio"));
+    }
+
+    #[tokio::test]
+    async fn test_transport_seek_default_value() {
+        let state = test_state();
+        let app = app(state);
+
+        post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create", "name": "Test"}),
+        )
+        .await;
+
+        // Seek without value — defaults to 0
+        let (s, j) = post_json(
+            &app,
+            "/api/transport",
+            serde_json::json!({"action": "seek"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(j["success"], true);
+    }
+
+    // --- Session create with defaults (no name) ---
+
+    #[tokio::test]
+    async fn test_session_create_default_name() {
+        let state = test_state();
+        let app = app(state);
+
+        // Create without name — defaults to "Untitled"
+        let (s, j) = post_json(
+            &app,
+            "/api/session",
+            serde_json::json!({"action": "create"}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(j["message"].as_str().unwrap().contains("Untitled"));
+    }
+
+    // --- Session open with empty path ---
+
+    #[tokio::test]
+    async fn test_session_open_empty_path() {
+        let app = test_app();
+        let (s, j) = post_json(&app, "/api/session", serde_json::json!({"action": "open"})).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
+
+    // --- Session save with empty path ---
+
+    #[tokio::test]
+    async fn test_session_save_empty_path_no_session() {
+        let app = test_app();
+        let (s, j) = post_json(&app, "/api/session", serde_json::json!({"action": "save"})).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert_eq!(j["success"], false);
+    }
 }

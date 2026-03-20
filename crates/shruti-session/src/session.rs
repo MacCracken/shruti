@@ -1655,4 +1655,203 @@ mod tests {
             "expected pan issue: {issues:?}"
         );
     }
+
+    // --- Session length edge cases ---
+
+    #[test]
+    fn test_session_length_multiple_tracks_different_ends() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Short");
+        let t2 = session.add_audio_track("Long");
+
+        session
+            .track_mut(t1)
+            .unwrap()
+            .add_region(Region::new("f1".into(), 0u64, 0u64, 1000u64));
+        session.track_mut(t2).unwrap().add_region(Region::new(
+            "f2".into(),
+            5000u64,
+            0u64,
+            10000u64,
+        ));
+
+        // Length should be max(1000, 5000+10000) = 15000
+        assert_eq!(session.session_length(), FramePos(15000));
+    }
+
+    #[test]
+    fn test_session_length_tracks_no_regions() {
+        let mut session = Session::new("Test", 48000, 256);
+        session.add_audio_track("Empty1");
+        session.add_audio_track("Empty2");
+        session.add_midi_track("EmptyMidi");
+        assert_eq!(session.session_length(), FramePos::ZERO);
+    }
+
+    // --- Track query edge cases ---
+
+    #[test]
+    fn test_audio_tracks_empty_session() {
+        let session = Session::new("Test", 48000, 256);
+        assert!(session.audio_tracks().is_empty());
+    }
+
+    #[test]
+    fn test_midi_tracks_empty_session() {
+        let session = Session::new("Test", 48000, 256);
+        assert!(session.midi_tracks().is_empty());
+    }
+
+    #[test]
+    fn test_instrument_tracks_empty_session() {
+        let session = Session::new("Test", 48000, 256);
+        assert!(session.instrument_tracks().is_empty());
+    }
+
+    #[test]
+    fn test_track_count_only_master() {
+        let session = Session::new("Test", 48000, 256);
+        assert_eq!(session.track_count(), 1);
+    }
+
+    // --- Master track safety ---
+
+    #[test]
+    fn test_master_is_always_last_after_many_adds() {
+        let mut session = Session::new("Test", 48000, 256);
+        session.add_audio_track("A");
+        session.add_midi_track("M");
+        session.add_bus_track("B");
+        session.add_instrument_track("I", None);
+        session.add_drum_machine_track("D", None);
+        session.add_sampler_track("S", None);
+        session.add_ai_player_track("AI", None, None);
+
+        assert_eq!(session.tracks.last().unwrap().kind, TrackKind::Master);
+        assert_eq!(session.track_count(), 8); // 7 tracks + master
+    }
+
+    #[test]
+    fn test_remove_all_tracks_except_master() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("A");
+        let t2 = session.add_audio_track("B");
+        let t3 = session.add_midi_track("C");
+
+        session.remove_track(t1);
+        session.remove_track(t2);
+        session.remove_track(t3);
+
+        assert_eq!(session.track_count(), 1);
+        assert!(session.master().is_some());
+    }
+
+    // --- Group operations: group_mut mutation ---
+
+    #[test]
+    fn test_group_mut_add_track_directly() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Guitar");
+        let gid = session.add_group("Band");
+
+        // Use group_mut to add track directly
+        let group = session.group_mut(gid).unwrap();
+        group.add_track(t1);
+        assert_eq!(group.tracks.len(), 1);
+
+        // Verify via immutable accessor
+        assert!(session.group(gid).unwrap().contains(t1));
+    }
+
+    #[test]
+    fn test_track_group_returns_none_for_ungrouped() {
+        let mut session = Session::new("Test", 48000, 256);
+        let t1 = session.add_audio_track("Solo");
+        session.add_group("Empty Group");
+        assert!(session.track_group(t1).is_none());
+    }
+
+    #[test]
+    fn test_track_group_returns_none_for_master() {
+        let session = Session::new("Test", 48000, 256);
+        let master_id = session.master().unwrap().id;
+        assert!(session.track_group(master_id).is_none());
+    }
+
+    // --- Validate: additional edge cases ---
+
+    #[test]
+    fn test_validate_catches_empty_session_name() {
+        let session = Session::new("   ", 48000, 256);
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("session name is empty")),
+            "expected empty name issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_empty_track_name() {
+        let mut session = Session::new("Test", 48000, 256);
+        let _id = session.add_audio_track("");
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("empty name")),
+            "expected empty track name issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_pan_below_range() {
+        let mut session = Session::new("Test", 48000, 256);
+        let id = session.add_audio_track("Bad");
+        session.track_mut(id).unwrap().pan = -1.5;
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("pan")),
+            "expected pan issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_catches_multiple_masters() {
+        let mut session = Session::new("Test", 48000, 256);
+        // Manually push a second master
+        session.tracks.push(Track::new_master());
+        let issues = session.validate();
+        assert!(
+            issues.iter().any(|i| i.contains("master tracks")),
+            "expected multiple master issue: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_high_sample_rate_boundary() {
+        let session = Session::new("Test", 384_000, 256);
+        let issues = session.validate();
+        assert!(
+            !issues.iter().any(|i| i.contains("sample_rate")),
+            "384000 should be valid: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_low_sample_rate_boundary() {
+        let session = Session::new("Test", 1000, 256);
+        let issues = session.validate();
+        assert!(
+            !issues.iter().any(|i| i.contains("sample_rate")),
+            "1000 should be valid: {issues:?}"
+        );
+    }
+
+    // --- Sidechain: nonexistent target track ---
+
+    #[test]
+    fn test_sidechain_nonexistent_target_fails() {
+        let mut session = Session::new("Test", 48000, 256);
+        let bogus = TrackId::new();
+        let result = session.set_sidechain_input(bogus, None);
+        assert!(result.is_err());
+    }
 }

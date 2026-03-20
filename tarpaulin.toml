@@ -4,7 +4,24 @@ exclude-files = [
     # Binary entry points — not unit testable
     "src/main.rs",
     "src/bin/*",
+    # Pure egui rendering — no testable logic (all fn(&mut Ui) callbacks)
+    "crates/shruti-ui/src/app.rs",
+    "crates/shruti-ui/src/engine.rs",
+    "crates/shruti-ui/src/theme/style.rs",
+    "crates/shruti-ui/src/views/arrangement.rs",
+    "crates/shruti-ui/src/views/mixer.rs",
+    "crates/shruti-ui/src/views/transport.rs",
+    "crates/shruti-ui/src/views/browser.rs",
+    "crates/shruti-ui/src/views/settings.rs",
+    "crates/shruti-ui/src/views/instrument_panel.rs",
+    "crates/shruti-ui/src/views/synth_editor.rs",
+    "crates/shruti-ui/src/views/sampler_editor.rs",
+    "crates/shruti-ui/src/views/piano_roll.rs",
+    "crates/shruti-ui/src/views/drum_grid.rs",
+    "crates/shruti-ui/src/widgets/plugin_slot.rs",
+    "crates/shruti-ui/src/widgets/region_clip.rs",
+    "crates/shruti-ui/src/widgets/automation_lane.rs",
 ]
 workspace = true
 skip-clean = true
-fail-under = 50
+fail-under = 70

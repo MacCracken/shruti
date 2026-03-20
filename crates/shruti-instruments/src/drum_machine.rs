@@ -1481,4 +1481,194 @@ mod tests {
         dm.process(&[], &cc, &mut buf);
         // Should not panic; CC handling is a no-op but shouldn't crash
     }
+
+    // ── Additional coverage tests ───────────────────────────────────
+
+    #[test]
+    fn pad_effects_filter_processes_stereo() {
+        let mut effects = PadEffects {
+            filter_cutoff: 0.3,
+            ..PadEffects::default()
+        };
+        // First sample through a low-pass filter with zero state
+        let (l, r) = effects.process(1.0, -1.0);
+        // With coeff=0.3, state starts at 0, so output = 0 + 0.3*(1.0-0) = 0.3
+        assert!((l - 0.3).abs() < 0.01, "left filter output: {l}");
+        assert!((r - (-0.3)).abs() < 0.01, "right filter output: {r}");
+
+        // Second sample: state is now 0.3, input still 1.0
+        // new_state = 0.3 + 0.3*(1.0-0.3) = 0.3 + 0.21 = 0.51
+        let (l2, _) = effects.process(1.0, -1.0);
+        assert!(l2 > l, "filter should converge toward input: {l2} > {l}");
+    }
+
+    #[test]
+    fn pad_effects_drive_distortion_both_channels() {
+        let mut effects = PadEffects {
+            drive: 10.0,
+            ..PadEffects::default()
+        };
+        let (l, r) = effects.process(0.5, -0.5);
+        // tanh(0.5 * 10) = tanh(5) ~= 0.9999
+        assert!(l > 0.99, "drive should saturate left: {l}");
+        assert!(r < -0.99, "drive should saturate right: {r}");
+    }
+
+    #[test]
+    fn pad_effects_combined_filter_and_drive() {
+        let mut effects = PadEffects {
+            filter_cutoff: 0.5,
+            drive: 3.0,
+            ..PadEffects::default()
+        };
+        let (l, _) = effects.process(1.0, 0.0);
+        // Filter reduces to 0.5, then drive: tanh(0.5 * 3.0) = tanh(1.5) ~= 0.905
+        assert!(
+            l > 0.0,
+            "combined effects should produce positive output: {l}"
+        );
+        assert!(l < 1.0, "combined effects should not exceed 1.0: {l}");
+    }
+
+    #[test]
+    fn round_robin_with_partial_velocity_match() {
+        let mut pad = DrumPad::new("Snare", 38);
+        pad.layer_selection = LayerSelection::RoundRobin;
+        // Two layers match velocity 64, one does not
+        pad.add_layer(SampleLayer::new(vec![0.1; 50], 44100, 0, 63)); // won't match vel=64
+        pad.add_layer(SampleLayer::new(vec![0.2; 50], 44100, 50, 100)); // matches vel=64
+        pad.add_layer(SampleLayer::new(vec![0.3; 50], 44100, 60, 127)); // matches vel=64
+
+        let mut selected = Vec::new();
+        for _ in 0..4 {
+            pad.trigger(64);
+            selected.push(pad.active_layer);
+        }
+        // Should cycle between layers 1 and 2 (the two that match vel=64)
+        assert_eq!(selected[0], 1);
+        assert_eq!(selected[1], 2);
+        assert_eq!(selected[2], 1);
+        assert_eq!(selected[3], 2);
+    }
+
+    #[test]
+    fn random_selection_with_partial_match() {
+        let mut pad = DrumPad::new("HH", 42);
+        pad.layer_selection = LayerSelection::Random;
+        // Only layers 1 and 2 match velocity 100
+        pad.add_layer(SampleLayer::new(vec![0.1; 50], 44100, 0, 50));
+        pad.add_layer(SampleLayer::new(vec![0.2; 50], 44100, 80, 127));
+        pad.add_layer(SampleLayer::new(vec![0.3; 50], 44100, 90, 127));
+
+        for _ in 0..20 {
+            pad.trigger(100);
+            assert!(
+                pad.active_layer == 1 || pad.active_layer == 2,
+                "random should only pick matching layers, got {}",
+                pad.active_layer
+            );
+        }
+    }
+
+    #[test]
+    fn tick_with_decay_reduces_envelope() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![1.0; 1000], 44100);
+        pad.decay = 0.5; // moderate decay
+        pad.trigger(127);
+
+        let (first_l, _) = pad.tick();
+        // Tick several more times — output should decrease
+        for _ in 0..50 {
+            pad.tick();
+        }
+        let (later_l, _) = pad.tick();
+        assert!(
+            later_l.abs() < first_l.abs(),
+            "decay should reduce output over time: first={first_l}, later={later_l}"
+        );
+    }
+
+    #[test]
+    fn tick_with_zero_decay_maintains_volume() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![1.0; 1000], 44100);
+        pad.decay = 0.0;
+        pad.trigger(127);
+
+        let (first_l, _) = pad.tick();
+        for _ in 0..50 {
+            pad.tick();
+        }
+        let (later_l, _) = pad.tick();
+        // With zero decay, envelope stays at 1.0
+        assert!(
+            (first_l.abs() - later_l.abs()).abs() < 0.01,
+            "zero decay should maintain volume: first={first_l}, later={later_l}"
+        );
+    }
+
+    #[test]
+    fn tick_empty_samples_returns_silence() {
+        let mut pad = DrumPad::new("Empty", 36);
+        // No samples loaded
+        pad.trigger(127);
+        let (l, r) = pad.tick();
+        assert_eq!(l, 0.0);
+        assert_eq!(r, 0.0);
+    }
+
+    #[test]
+    fn tick_not_playing_returns_silence() {
+        let mut pad = DrumPad::new("Kick", 36);
+        pad.load_sample(vec![1.0; 100], 44100);
+        // Don't trigger — not playing
+        let (l, r) = pad.tick();
+        assert_eq!(l, 0.0);
+        assert_eq!(r, 0.0);
+    }
+
+    #[test]
+    fn tick_with_velocity_and_decay_combined() {
+        let mut pad = DrumPad::new("Snare", 38);
+        pad.load_sample(vec![1.0; 500], 44100);
+        pad.decay = 0.3;
+        // Low velocity
+        pad.trigger(32);
+
+        let (l, _) = pad.tick();
+        let expected_vel = 32.0 / 127.0;
+        // First tick: sample=1.0, envelope=1.0, velocity=32/127, gain=1.0
+        assert!(
+            (l.abs() - expected_vel).abs() < 0.1,
+            "first tick should reflect velocity: got {l}, expected ~{expected_vel}"
+        );
+    }
+
+    #[test]
+    fn active_samples_uses_layer_when_set() {
+        let mut pad = DrumPad::new("Test", 36);
+        pad.load_sample(vec![0.1; 50], 44100);
+        pad.add_layer(SampleLayer::new(vec![0.9; 50], 44100, 0, 127));
+        pad.decay = 0.0;
+
+        // Trigger — should select layer 0
+        pad.trigger(100);
+        assert_eq!(pad.active_layer, 0);
+
+        let (l, r) = pad.tick();
+        // Center pan: pan_gain_l = pan_gain_r ~= 0.707
+        // mono value = sample * envelope * velocity * gain = 0.9 * 1.0 * (100/127) * 1.0
+        let mono = 0.9 * (100.0 / 127.0);
+        let pan_gain = std::f32::consts::FRAC_PI_4.cos(); // ~0.707
+        let expected = mono * pan_gain;
+        assert!(
+            (l - expected).abs() < 0.05,
+            "should use layer sample (0.9) with pan: got l={l}, expected ~{expected}"
+        );
+        assert!(
+            (l - r).abs() < 0.01,
+            "center pan should give equal L/R: l={l}, r={r}"
+        );
+    }
 }

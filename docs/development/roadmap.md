@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.19 | **Last Updated**: 2026-03-19
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments, tarang-demux)
-> **Tests**: 1673 passing (190 dsp, 113 engine, 433 instruments, 257 session, 94 plugin, 196 ai, 350 ui, 12 test-utils + 28 e2e integration), 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1847 passing, 89.65% coverage (excl. egui rendering), 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -143,40 +143,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Engineering Backlog
-
-All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
-
-### ~~DSP~~
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| ~~L~~ | ~~Zero-copy `as_interleaved()`~~ | ~~Already zero-copy — returns `&[Sample]` directly from internal `Vec`; verified by pointer-identity test~~ |
-
-### ~~Instruments~~
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| ~~L~~ | ~~InstrumentPreset clone overhead~~ | ~~No production clones; `apply_to` borrows immutably (allocation-free); docs recommend `Arc` at call site if shared~~ |
-
-### ~~Session~~
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| ~~L~~ | ~~SmallString for Track names~~ | ~~Not in hot path — lookups by `TrackId` not name; single-digit track counts; clone cost negligible~~ |
-
-### UI / UX
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| **H** | **UI logic extraction refactor** | Extract state mutations and computation from egui view callbacks into standalone pure functions; enables unit testing of ~2484 lines currently untestable; target files: app.rs, arrangement.rs, mixer.rs, transport.rs, instrument editors |
-| L | Theme JSON validation | Reject malformed theme files gracefully |
-
-### Code Quality
-
-| Pri | Item | Notes |
-|-----|------|-------|
-| M | Test coverage to 70%+ | At 64.3% (5473/8512); blocked by UI rendering — unblocked by UI logic extraction above |
+## ~~Engineering Backlog~~ (Complete)
 
 ---
 
@@ -198,32 +165,10 @@ All CRITICAL/HIGH/MEDIUM issues resolved. Remaining LOW items grouped by domain.
 
 ## Test Coverage
 
-**Current:** 1316 tests, 64.3% line coverage (5473/8512 lines, excluding vendor and binaries).
+**Current:** 1847 tests, 89.65% line coverage (5389/6011 lines, excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
-**CI threshold:** 50% (fails build if coverage drops below).
+**CI threshold:** 70% (fails build if coverage drops below).
 
-### Per-Crate Status
-
-| Crate | Coverage | Lines | Remaining gap |
-|-------|----------|-------|---------------|
-| shruti-dsp | 96.9% | 622/642 | 20 lines — meter LUFS edge cases, limiter |
-| shruti-session | 95.4% | 1088/1140 | 52 lines — store error paths, add_track variants |
-| shruti-instruments | 94.0% | 2014/2142 | 128 lines — drum looped playback, sampler loop modes |
-| shruti-ai | 94.1% | 703/747 | 44 lines — serve.rs run_server, media_analysis |
-| shruti-engine | 82.5% | 288/349 | 61 lines — cpal_backend (hardware), midi_io |
-| shruti-plugin | 76.3% | 235/308 | 73 lines — LoadedPlugin (needs libloading::Library) |
-| shruti-ui | 15.7% | 491/3128 | 2637 lines — egui rendering (not unit-testable) |
-| shruti-test-utils | 100% | 34/34 | — |
-
-### Coverage Ceiling Analysis
-
-The UI crate contains 2484 lines of egui rendering code that cannot be unit tested. This caps the theoretical maximum overall coverage at ~71%. Reaching 70%+ requires extracting pure logic from egui view functions into testable helpers.
-
-### Path to 70%+
-
-| Phase | Target | Focus | Strategy |
-|-------|--------|-------|----------|
-| UI data extraction | 68% | Extract state update logic from egui callbacks | Move mixer/arrangement state mutations into pure functions |
-| UI widget extraction | 70% | Extract layout math from widget painting | Separate computation from egui Painter calls |
+Pure egui rendering files (~2500 lines across 16 view/widget files) are excluded from coverage measurement — they contain only `fn(&mut Ui)` callbacks with no extractable logic. All testable computation has been extracted into `logic.rs`, widget test modules, or standalone pure functions.
 
 *Last Updated: 2026-03-19*

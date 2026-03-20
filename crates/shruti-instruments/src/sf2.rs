@@ -185,10 +185,13 @@ impl<'a> Iterator for ChunkIter<'a> {
         let data_start = self.offset + 8;
         let data_end = data_start + size;
         if data_end > self.data.len() {
+            let err_offset = self.offset;
+            // Stop iteration after this error to avoid looping on the same bad chunk.
+            self.offset = self.data.len();
             return Some(Err(format!(
                 "chunk {:?} at offset {} extends beyond data (size={size}, available={})",
                 String::from_utf8_lossy(&id),
-                self.offset,
+                err_offset,
                 self.data.len() - data_start,
             )));
         }
@@ -1015,5 +1018,263 @@ mod tests {
         // loop_start should be 0 (0 - 0 = 0), loop_end should be 50 (50 - 0 = 50)
         assert_eq!(zone.loop_start, Some(0));
         assert_eq!(zone.loop_end, Some(50));
+    }
+
+    // ── Additional coverage tests ───────────────────────────────────
+
+    #[test]
+    fn read_u8_out_of_bounds() {
+        let data: &[u8] = &[];
+        assert!(read_u8(data, 0).is_err());
+        assert!(read_u8(&[42], 1).is_err());
+    }
+
+    #[test]
+    fn read_u8_valid() {
+        assert_eq!(read_u8(&[0xAB], 0).unwrap(), 0xAB);
+    }
+
+    #[test]
+    fn read_i8_valid() {
+        // 0xFF as i8 is -1
+        assert_eq!(read_i8(&[0xFF], 0).unwrap(), -1);
+        assert_eq!(read_i8(&[0x7F], 0).unwrap(), 127);
+    }
+
+    #[test]
+    fn read_u16_le_out_of_bounds() {
+        assert!(read_u16_le(&[], 0).is_err());
+        assert!(read_u16_le(&[0x01], 0).is_err());
+        // Offset pushes past end
+        assert!(read_u16_le(&[0x01, 0x02], 1).is_err());
+    }
+
+    #[test]
+    fn read_u16_le_valid() {
+        assert_eq!(read_u16_le(&[0x34, 0x12], 0).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn read_i16_le_valid() {
+        // 0xFFFF as i16 is -1
+        assert_eq!(read_i16_le(&[0xFF, 0xFF], 0).unwrap(), -1);
+        assert_eq!(read_i16_le(&[0x00, 0x80], 0).unwrap(), -32768);
+    }
+
+    #[test]
+    fn read_i16_le_out_of_bounds() {
+        assert!(read_i16_le(&[0x01], 0).is_err());
+    }
+
+    #[test]
+    fn read_u32_le_out_of_bounds() {
+        assert!(read_u32_le(&[], 0).is_err());
+        assert!(read_u32_le(&[1, 2, 3], 0).is_err());
+        // Offset makes it extend past end
+        assert!(read_u32_le(&[1, 2, 3, 4], 1).is_err());
+    }
+
+    #[test]
+    fn read_u32_le_valid() {
+        assert_eq!(
+            read_u32_le(&[0x78, 0x56, 0x34, 0x12], 0).unwrap(),
+            0x12345678
+        );
+    }
+
+    #[test]
+    fn read_fourcc_out_of_bounds() {
+        assert!(read_fourcc(&[1, 2, 3], 0).is_err());
+        assert!(read_fourcc(&[1, 2, 3, 4], 1).is_err());
+    }
+
+    #[test]
+    fn read_fixed_string_out_of_bounds() {
+        assert!(read_fixed_string(&[0x41, 0x42], 0, 5).is_err());
+    }
+
+    #[test]
+    fn read_fixed_string_with_nuls() {
+        // String with trailing NULs is trimmed
+        let data = [0x48, 0x69, 0x00, 0x00]; // "Hi\0\0"
+        assert_eq!(read_fixed_string(&data, 0, 4).unwrap(), "Hi");
+    }
+
+    #[test]
+    fn read_fixed_string_no_nul() {
+        let data = [0x41, 0x42, 0x43]; // "ABC"
+        assert_eq!(read_fixed_string(&data, 0, 3).unwrap(), "ABC");
+    }
+
+    #[test]
+    fn gen_record_amount_range() {
+        let rec = GenRecord {
+            oper: 0,
+            amount: 0x5020_u16 as i16, // lo=0x20, hi=0x50
+        };
+        assert_eq!(rec.amount_range(), (0x20, 0x50));
+    }
+
+    #[test]
+    fn chunk_iter_truncated_chunk_returns_error() {
+        // Chunk header says size=100, but only 4 bytes of data follow
+        let mut data = Vec::new();
+        data.extend_from_slice(b"test");
+        data.extend_from_slice(&100u32.to_le_bytes());
+        data.extend_from_slice(&[0u8; 4]); // only 4 bytes, not 100
+
+        let mut iter = iter_chunks(&data);
+        let first = iter.next();
+        assert!(first.is_some());
+        assert!(first.unwrap().is_err());
+    }
+
+    #[test]
+    fn chunk_iter_empty_data() {
+        let data: &[u8] = &[];
+        let results: Vec<_> = iter_chunks(data).collect();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn chunk_iter_less_than_header() {
+        // Only 4 bytes — not enough for a chunk header (needs 8)
+        let results: Vec<_> = iter_chunks(&[0u8; 4]).collect();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn chunk_iter_odd_sized_chunk_padded() {
+        // Odd-sized chunk (3 bytes) should be padded to even for next chunk
+        let c1 = make_chunk(b"aaaa", &[1, 2, 3]); // 3 bytes data -> padded
+        let c2 = make_chunk(b"bbbb", &[4, 5]);
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&c1);
+        combined.extend_from_slice(&c2);
+
+        let chunks: Vec<_> = iter_chunks(&combined)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(&chunks[0].id, b"aaaa");
+        assert_eq!(chunks[0].data, &[1, 2, 3]);
+        assert_eq!(&chunks[1].id, b"bbbb");
+        assert_eq!(chunks[1].data, &[4, 5]);
+    }
+
+    #[test]
+    fn parse_phdr_records_empty() {
+        let records = parse_phdr_records(&[]).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn parse_bag_records_empty() {
+        let records = parse_bag_records(&[]).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn parse_gen_records_empty() {
+        let records = parse_gen_records(&[]).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn parse_inst_records_empty() {
+        let records = parse_inst_records(&[]).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn parse_shdr_records_empty() {
+        let records = parse_shdr_records(&[]).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn pcm16_start_greater_than_end() {
+        // byte_start > byte_end should return empty
+        let data = [0u8; 20];
+        let result = pcm16_to_f32(&data, 5, 2);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn pingpong_loop_mode() {
+        let sample_data: Vec<f32> = vec![0.0; 100];
+        let sf2 = build_minimal_sf2(
+            "PingPong",
+            "PingPongInst",
+            "PingPongSample",
+            &sample_data,
+            60,
+            0,
+            127,
+            0,
+            127,
+            3, // pingpong
+            10,
+            90,
+        );
+        let presets = parse_sf2(&sf2).unwrap();
+        let zone = &presets[0].zones[0];
+        assert_eq!(zone.loop_mode, LoopMode::PingPong);
+        assert_eq!(zone.loop_start, Some(10));
+        assert_eq!(zone.loop_end, Some(90));
+    }
+
+    #[test]
+    fn no_loop_mode_has_no_loop_points() {
+        let sample_data: Vec<f32> = vec![0.0; 50];
+        let sf2 = build_minimal_sf2(
+            "NoLoop",
+            "NoLoopInst",
+            "NoLoopSample",
+            &sample_data,
+            60,
+            0,
+            127,
+            0,
+            127,
+            0, // no_loop
+            10,
+            40,
+        );
+        let presets = parse_sf2(&sf2).unwrap();
+        let zone = &presets[0].zones[0];
+        assert_eq!(zone.loop_mode, LoopMode::NoLoop);
+        assert_eq!(zone.loop_start, None);
+        assert_eq!(zone.loop_end, None);
+    }
+
+    #[test]
+    fn parse_bag_record_values() {
+        let mut data = Vec::new();
+        write_u16_le(&mut data, 5); // gen_index
+        write_u16_le(&mut data, 3); // mod_index
+        let records = parse_bag_records(&data).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].gen_index, 5);
+        assert_eq!(records[0]._mod_index, 3);
+    }
+
+    #[test]
+    fn parse_gen_record_values() {
+        let mut data = Vec::new();
+        write_u16_le(&mut data, 43); // oper = GEN_KEY_RANGE
+        write_i16_le(&mut data, 0x607F_u16 as i16); // lo=0x7F, hi=0x60
+        let records = parse_gen_records(&data).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].oper, 43);
+    }
+
+    #[test]
+    fn parse_inst_record_values() {
+        let rec = make_inst("Piano", 7);
+        let records = parse_inst_records(&rec).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "Piano");
+        assert_eq!(records[0].bag_index, 7);
     }
 }

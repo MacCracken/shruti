@@ -1732,4 +1732,106 @@ mod tests {
         // data field should be absent (skip_serializing_if)
         assert!(!json2.contains("data"));
     }
+
+    // --- Path validation edge cases ---
+
+    #[test]
+    fn test_validate_path_allows_dot_component() {
+        // Single dot (current dir) is harmless and should be allowed
+        let r = AgentApi::validate_path("/tmp/./file.wav");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_validate_path_allows_relative_path() {
+        let r = AgentApi::validate_path("sessions/my_song.shruti");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_validate_path_rejects_double_dot_in_middle() {
+        let r = AgentApi::validate_path("sessions/../../../etc/passwd");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_validate_path_allows_empty_path() {
+        // Empty string is technically a valid path (current dir)
+        let r = AgentApi::validate_path("");
+        assert!(r.is_ok());
+    }
+
+    // --- create_session boundary values ---
+
+    #[test]
+    fn test_create_session_accepts_min_sample_rate() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 1000, 256);
+        assert!(r.success);
+    }
+
+    #[test]
+    fn test_create_session_accepts_max_sample_rate() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 384_000, 256);
+        assert!(r.success);
+    }
+
+    #[test]
+    fn test_create_session_rejects_below_min_sample_rate() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 999, 256);
+        assert!(!r.success);
+        assert!(r.message.contains("sample_rate"));
+    }
+
+    #[test]
+    fn test_create_session_rejects_above_max_sample_rate() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 384_001, 256);
+        assert!(!r.success);
+        assert!(r.message.contains("sample_rate"));
+    }
+
+    #[test]
+    fn test_create_session_accepts_min_buffer_size() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 48000, 16);
+        assert!(r.success);
+    }
+
+    #[test]
+    fn test_create_session_accepts_max_buffer_size() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 48000, 8192);
+        assert!(r.success);
+    }
+
+    #[test]
+    fn test_create_session_rejects_below_min_buffer_size() {
+        let mut api = AgentApi::new();
+        let r = api.create_session("Test", 48000, 8);
+        assert!(!r.success);
+        assert!(r.message.contains("buffer_size"));
+    }
+
+    #[test]
+    fn test_create_session_rejects_above_max_buffer_size() {
+        let mut api = AgentApi::new();
+        // 16384 is a power of two but above 8192
+        let r = api.create_session("Test", 48000, 16384);
+        assert!(!r.success);
+        assert!(r.message.contains("buffer_size"));
+    }
+
+    // --- set_track_gain / set_track_pan with track not found ---
+
+    #[test]
+    fn test_set_track_gain_not_found() {
+        let mut api = AgentApi::new();
+        api.create_session("Test", 48000, 256);
+        let r = api.set_track_gain("Ghost", 0.5);
+        assert!(!r.success);
+        assert!(r.message.contains("not found"));
+    }
 }

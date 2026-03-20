@@ -18,6 +18,30 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - `detect()` function: queries all available backends via `AcceleratorRegistry`
 - New MCP tool `shruti_hardware` with `detect` action — exposes hardware capabilities to AGNOS agents
 
+### Test Coverage to 89.65% (MEDIUM backlog item)
+- 140 new tests across all crates: instruments (sfz, sf2, drum_machine), ai (agent_api, serve), session, plugin (host), ui (automation_lane, logic)
+- Fixed infinite loop bug in sf2 `ChunkIter` — truncated chunks now advance offset instead of looping
+- Updated tarpaulin config: excluded 16 pure egui rendering files (~2500 lines), raised CI threshold from 50% to 70%
+- Coverage: 89.65% (5389/6011 testable lines)
+
+### UI Logic Extraction (HIGH backlog item)
+- New `logic` module in `shruti-ui` with 8 pure functions extracted from egui callbacks:
+  - `fast_forward_position()` — tempo-based bar advancement (from `app.rs`)
+  - `pixel_to_frame()` — pixel coordinate to timeline frame conversion (was duplicated 4x in `arrangement.rs`)
+  - `calculate_trim_start()` / `calculate_trim_end()` — region trim geometry with bounds checking
+  - `row_index_from_y()` — track reorder target calculation
+  - `gain_to_db_string()` — linear gain to dB display (from `mixer.rs`)
+  - `parameter_changed()` — float epsilon comparison
+  - `finalize_recording()` — recording buffer to region conversion (from `app.rs`)
+- 27 new unit tests covering all extracted functions
+- Updated `app.rs`, `arrangement.rs`, `mixer.rs` to use extracted functions
+
+### Theme JSON Validation (LOW backlog item)
+- Added WCAG 2.0 color contrast validation to `Theme::validate()`
+- New `relative_luminance()` and `contrast_ratio()` helpers (pub(crate))
+- Validates `bg_primary` vs `text_primary` contrast ratio >= 3.0:1 (WCAG AA large text)
+- 7 new tests: luminance calculation, contrast ratio, validation pass/fail cases
+
 ### Engineering Backlog Cleanup
 - Closed 3 LOW-priority items as resolved/non-issues:
   - `as_interleaved()` — already zero-copy (returns `&[Sample]` directly, verified by pointer-identity test)

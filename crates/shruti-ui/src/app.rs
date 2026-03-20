@@ -159,25 +159,16 @@ impl ShrutiApp {
                     {
                         let position = self.state.session.transport.position;
                         let channels = engine.recording_channels();
-                        let frames = samples.len() / channels as usize;
 
-                        if frames > 0 {
+                        if let Some((recording_id, region)) =
+                            crate::logic::finalize_recording(&samples, channels, position)
+                        {
                             let buf = shruti_dsp::AudioBuffer::from_interleaved(samples, channels);
-                            let recording_id = format!("recording_{}", uuid::Uuid::new_v4());
-                            self.state
-                                .session
-                                .audio_pool
-                                .insert(recording_id.clone(), buf);
+                            self.state.session.audio_pool.insert(recording_id, buf);
 
                             // Add region to the first armed track
                             for track in &mut self.state.session.tracks {
                                 if track.armed {
-                                    let region = shruti_session::Region::new(
-                                        recording_id.clone(),
-                                        position,
-                                        0u64,
-                                        frames as u64,
-                                    );
                                     track.add_region(region);
                                     break;
                                 }
@@ -301,12 +292,12 @@ impl ShrutiApp {
                 }
             }
             Action::FastForward => {
-                let frames_per_beat = (self.state.session.sample_rate as f64 * 60.0)
-                    / self.state.session.transport.bpm;
-                let frames_per_bar =
-                    frames_per_beat * self.state.session.transport.time_sig_num as f64;
-                let new_pos = self.state.session.transport.position
-                    + shruti_session::FramePos(frames_per_bar as u64);
+                let new_pos = crate::logic::fast_forward_position(
+                    self.state.session.transport.position,
+                    self.state.session.transport.bpm,
+                    self.state.session.sample_rate,
+                    self.state.session.transport.time_sig_num,
+                );
                 self.state.session.transport.position = new_pos;
                 if let Some(engine) = &self.engine {
                     engine.seek(new_pos.0);
