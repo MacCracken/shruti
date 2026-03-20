@@ -30,7 +30,7 @@ fn eq_process(c: &mut Criterion) {
 
     c.bench_function("eq_process", |b| {
         b.iter_batched(
-            || sine_buffer_1s(),
+            sine_buffer_1s,
             |mut buf| {
                 eq.reset();
                 eq.process(&mut buf);
@@ -53,7 +53,7 @@ fn compressor_process(c: &mut Criterion) {
 
     c.bench_function("compressor_process", |b| {
         b.iter_batched(
-            || sine_buffer_1s(),
+            sine_buffer_1s,
             |mut buf| {
                 comp.reset();
                 comp.process(&mut buf);
@@ -74,7 +74,7 @@ fn reverb_process(c: &mut Criterion) {
 
     c.bench_function("reverb_process", |b| {
         b.iter_batched(
-            || sine_buffer_1s(),
+            sine_buffer_1s,
             |mut buf| {
                 reverb.reset();
                 reverb.process(&mut buf);
@@ -94,7 +94,7 @@ fn delay_process(c: &mut Criterion) {
 
     c.bench_function("delay_process", |b| {
         b.iter_batched(
-            || sine_buffer_1s(),
+            sine_buffer_1s,
             |mut buf| {
                 delay.reset();
                 delay.process(&mut buf);
@@ -113,7 +113,7 @@ fn limiter_process(c: &mut Criterion) {
 
     c.bench_function("limiter_process", |b| {
         b.iter_batched(
-            || sine_buffer_1s(),
+            sine_buffer_1s,
             |mut buf| {
                 limiter.reset();
                 limiter.process(&mut buf);
@@ -154,7 +154,7 @@ fn buffer_mix_from(c: &mut Criterion) {
 fn buffer_apply_gain(c: &mut Criterion) {
     c.bench_function("buffer_apply_gain", |b| {
         b.iter_batched(
-            || sine_buffer_1s(),
+            sine_buffer_1s,
             |mut buf| buf.apply_gain(0.8),
             criterion::BatchSize::SmallInput,
         );
