@@ -181,6 +181,13 @@ pub enum EditCommand {
         take: Box<Take>,
         was_at_index: usize,
     },
+    /// Create a comp from a take stack by adding regions to a track.
+    ///
+    /// Stores the created region IDs for undo (removal).
+    CreateComp {
+        track_id: TrackId,
+        regions: Vec<Box<Region>>,
+    },
     /// Compound command (multiple edits as one undoable action).
     Compound { commands: Vec<EditCommand> },
 }

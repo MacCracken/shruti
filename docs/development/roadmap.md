@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
-> **Tests**: 1904 passing, 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1913 passing, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -46,6 +46,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — Unison & Voice Stacking | Supersaw + sub-osc | Per-osc unison (1-8 voices), detune spread, stereo width, sub-oscillator (-1/-2 oct), 7 new SynthParam variants |
 | — Loop Recording & Takes | Overdub + take management | LoopRecordManager with NAN-sentinel splitting, RecordingMode enum, TakeStack/Take structs with mute/solo/delete, transport loop_iteration tracking, AdvanceResult, 3 undo/redo edit commands |
 | — Time-Stretching | Granular OLA | Pitch-independent time-stretch (0.25x–4.0x) via dual-grain overlap-add with Hann windows, configurable grain size (10–100ms) |
+| — Comp Editing | Take compositing | CompSection-based comp building from TakeStack, build_comp/build_comp_split/build_comp_from_active, CreateComp edit command with undo/redo |
 
 ---
 
@@ -79,7 +80,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 |---|------|--------|-------|
 | ~~1~~ | ~~Loop-aware overdub recording~~ | ~~Medium~~ | ~~When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks~~ — Done in 2026.3.20 |
 | ~~2~~ | ~~Take/layer management~~ | ~~Medium~~ | ~~Stack, mute, solo, delete individual takes per track per loop pass~~ — Done in 2026.3.20 |
-| 3 | Comp editing | Large | Select best sections across takes to build a composite region |
+| ~~3~~ | ~~Comp editing~~ | ~~Large~~ | ~~Select best sections across takes to build a composite region~~ — Done in 2026.3.20 |
 
 ### MIDI 2.0
 
@@ -169,7 +170,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Test Coverage
 
-**Current:** 1904 tests (excluding vendor, binaries, and egui rendering).
+**Current:** 1913 tests (excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 70% (fails build if coverage drops below).
 

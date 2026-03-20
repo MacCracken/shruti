@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::region::Region;
 use crate::types::FramePos;
 
 /// Unique identifier for a take.
@@ -175,6 +176,106 @@ impl TakeStack {
     }
 }
 
+/// A section of a comp: a time range assigned to a specific take.
+///
+/// `offset` is relative to the take stack's `timeline_pos` (0 = stack start).
+/// `duration` is how long this section lasts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompSection {
+    /// Offset from the take stack's start (in frames).
+    pub offset: FramePos,
+    /// Duration of this section (in frames).
+    pub duration: FramePos,
+    /// Index of the take to use for this section.
+    pub take_index: usize,
+}
+
+impl TakeStack {
+    /// Build a composite from a list of sections, each assigned to a different take.
+    ///
+    /// Returns a list of `Region` objects that together form the comp.
+    /// Each region points to the audio file of the assigned take, with the
+    /// correct `source_offset` and `timeline_pos`.
+    ///
+    /// Sections must not overlap and should be sorted by offset.
+    /// Sections referencing invalid take indices are skipped.
+    pub fn build_comp(&self, sections: &[CompSection]) -> Vec<Region> {
+        let mut regions = Vec::with_capacity(sections.len());
+
+        for section in sections {
+            let take = match self.takes.get(section.take_index) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            let region = Region::new(
+                take.audio_file_id.clone(),
+                self.timeline_pos + section.offset,
+                section.offset,
+                section.duration,
+            );
+            regions.push(region);
+        }
+
+        regions
+    }
+
+    /// Build a simple comp that uses the active take for the entire duration.
+    ///
+    /// Equivalent to calling `build_comp` with a single section covering
+    /// the full stack duration, assigned to the active take.
+    pub fn build_comp_from_active(&self) -> Option<Region> {
+        let take = self.active_take()?;
+        Some(Region::new(
+            take.audio_file_id.clone(),
+            self.timeline_pos,
+            FramePos(0),
+            self.duration,
+        ))
+    }
+
+    /// Build a two-section comp by splitting at a frame offset.
+    ///
+    /// `split_offset` is relative to the stack start. The left section uses
+    /// `left_take_index` and the right section uses `right_take_index`.
+    pub fn build_comp_split(
+        &self,
+        split_offset: FramePos,
+        left_take_index: usize,
+        right_take_index: usize,
+    ) -> Vec<Region> {
+        if split_offset >= self.duration || split_offset == FramePos(0) {
+            // Degenerate: no actual split, return single region
+            let idx = if split_offset == FramePos(0) {
+                right_take_index
+            } else {
+                left_take_index
+            };
+            let sections = [CompSection {
+                offset: FramePos(0),
+                duration: self.duration,
+                take_index: idx,
+            }];
+            return self.build_comp(&sections);
+        }
+
+        let right_duration = self.duration - split_offset;
+        let sections = [
+            CompSection {
+                offset: FramePos(0),
+                duration: split_offset,
+                take_index: left_take_index,
+            },
+            CompSection {
+                offset: split_offset,
+                duration: right_duration,
+                take_index: right_take_index,
+            },
+        ];
+        self.build_comp(&sections)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +415,165 @@ mod tests {
         assert_eq!(roundtrip.len(), 2);
         assert_eq!(roundtrip.takes[0].audio_file_id, "take1.wav");
         assert_eq!(roundtrip.takes[1].iteration, 1);
+    }
+
+    // --- Comp editing tests ---
+
+    #[test]
+    fn build_comp_single_section() {
+        let mut stack = TakeStack::new(FramePos(0), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+        stack.add_take("take2.wav".into(), 1);
+
+        let sections = vec![CompSection {
+            offset: FramePos(0),
+            duration: FramePos(44100),
+            take_index: 1,
+        }];
+        let regions = stack.build_comp(&sections);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].audio_file_id, "take2.wav");
+        assert_eq!(regions[0].timeline_pos, FramePos(0));
+        assert_eq!(regions[0].duration, FramePos(44100));
+    }
+
+    #[test]
+    fn build_comp_multiple_sections() {
+        let mut stack = TakeStack::new(FramePos(1000), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+        stack.add_take("take2.wav".into(), 1);
+        stack.add_take("take3.wav".into(), 2);
+
+        let sections = vec![
+            CompSection {
+                offset: FramePos(0),
+                duration: FramePos(20000),
+                take_index: 0,
+            },
+            CompSection {
+                offset: FramePos(20000),
+                duration: FramePos(10000),
+                take_index: 2,
+            },
+            CompSection {
+                offset: FramePos(30000),
+                duration: FramePos(14100),
+                take_index: 1,
+            },
+        ];
+        let regions = stack.build_comp(&sections);
+        assert_eq!(regions.len(), 3);
+
+        // First section: take1 at timeline_pos 1000
+        assert_eq!(regions[0].audio_file_id, "take1.wav");
+        assert_eq!(regions[0].timeline_pos, FramePos(1000));
+        assert_eq!(regions[0].source_offset, FramePos(0));
+        assert_eq!(regions[0].duration, FramePos(20000));
+
+        // Second section: take3 at timeline_pos 21000
+        assert_eq!(regions[1].audio_file_id, "take3.wav");
+        assert_eq!(regions[1].timeline_pos, FramePos(21000));
+        assert_eq!(regions[1].source_offset, FramePos(20000));
+
+        // Third section: take2 at timeline_pos 31000
+        assert_eq!(regions[2].audio_file_id, "take2.wav");
+        assert_eq!(regions[2].timeline_pos, FramePos(31000));
+    }
+
+    #[test]
+    fn build_comp_skips_invalid_take_index() {
+        let mut stack = TakeStack::new(FramePos(0), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+
+        let sections = vec![
+            CompSection {
+                offset: FramePos(0),
+                duration: FramePos(22050),
+                take_index: 0,
+            },
+            CompSection {
+                offset: FramePos(22050),
+                duration: FramePos(22050),
+                take_index: 99, // invalid
+            },
+        ];
+        let regions = stack.build_comp(&sections);
+        assert_eq!(regions.len(), 1); // second section skipped
+    }
+
+    #[test]
+    fn build_comp_from_active() {
+        let mut stack = TakeStack::new(FramePos(500), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+        stack.add_take("take2.wav".into(), 1);
+        // active is take2 (index 1)
+
+        let region = stack.build_comp_from_active().unwrap();
+        assert_eq!(region.audio_file_id, "take2.wav");
+        assert_eq!(region.timeline_pos, FramePos(500));
+        assert_eq!(region.duration, FramePos(44100));
+    }
+
+    #[test]
+    fn build_comp_from_active_empty_stack() {
+        let stack = TakeStack::new(FramePos(0), FramePos(44100));
+        assert!(stack.build_comp_from_active().is_none());
+    }
+
+    #[test]
+    fn build_comp_split() {
+        let mut stack = TakeStack::new(FramePos(0), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+        stack.add_take("take2.wav".into(), 1);
+
+        let regions = stack.build_comp_split(FramePos(22050), 0, 1);
+        assert_eq!(regions.len(), 2);
+
+        // Left half: take1
+        assert_eq!(regions[0].audio_file_id, "take1.wav");
+        assert_eq!(regions[0].timeline_pos, FramePos(0));
+        assert_eq!(regions[0].duration, FramePos(22050));
+
+        // Right half: take2
+        assert_eq!(regions[1].audio_file_id, "take2.wav");
+        assert_eq!(regions[1].timeline_pos, FramePos(22050));
+        assert_eq!(regions[1].duration, FramePos(22050));
+    }
+
+    #[test]
+    fn build_comp_split_at_zero() {
+        let mut stack = TakeStack::new(FramePos(0), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+        stack.add_take("take2.wav".into(), 1);
+
+        // Split at 0 = degenerate, whole thing uses right take
+        let regions = stack.build_comp_split(FramePos(0), 0, 1);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].audio_file_id, "take2.wav");
+    }
+
+    #[test]
+    fn build_comp_split_at_end() {
+        let mut stack = TakeStack::new(FramePos(0), FramePos(44100));
+        stack.add_take("take1.wav".into(), 0);
+        stack.add_take("take2.wav".into(), 1);
+
+        // Split at or past duration = degenerate, whole thing uses left take
+        let regions = stack.build_comp_split(FramePos(44100), 0, 1);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].audio_file_id, "take1.wav");
+    }
+
+    #[test]
+    fn comp_section_serializes() {
+        let section = CompSection {
+            offset: FramePos(1000),
+            duration: FramePos(5000),
+            take_index: 2,
+        };
+        let json = serde_json::to_string(&section).unwrap();
+        let rt: CompSection = serde_json::from_str(&json).unwrap();
+        assert_eq!(rt.offset, FramePos(1000));
+        assert_eq!(rt.take_index, 2);
     }
 }

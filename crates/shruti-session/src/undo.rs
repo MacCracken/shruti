@@ -346,6 +346,15 @@ fn apply_command(cmd: &mut EditCommand, session: &mut Session) {
                 }
             }
         }
+        EditCommand::CreateComp {
+            track_id, regions, ..
+        } => {
+            if let Some(track) = session.track_mut(*track_id) {
+                for region in regions.iter() {
+                    track.add_region((**region).clone());
+                }
+            }
+        }
         EditCommand::Compound { commands } => {
             for sub in commands.iter_mut() {
                 apply_command(sub, session);
@@ -614,6 +623,16 @@ fn reverse_command(cmd: &EditCommand, session: &mut Session) {
             {
                 let idx = (*was_at_index).min(stack.takes.len());
                 stack.takes.insert(idx, (**take).clone());
+            }
+        }
+        EditCommand::CreateComp {
+            track_id, regions, ..
+        } => {
+            // Undo comp creation = remove all the created regions
+            if let Some(track) = session.track_mut(*track_id) {
+                for region in regions.iter() {
+                    track.remove_region(region.id);
+                }
             }
         }
         EditCommand::Compound { commands } => {

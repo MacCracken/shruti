@@ -25,7 +25,7 @@ pub use midi::{ControlChange, MidiClip, NoteEvent};
 pub use preferences::{Preferences, RecordingConfig};
 pub use region::{Region, RegionId};
 pub use session::Session;
-pub use take::{Take, TakeId, TakeStack};
+pub use take::{CompSection, Take, TakeId, TakeStack};
 pub use timeline::Timeline;
 pub use track::{
     OutputRouting, Send, SendPosition, Track, TrackGroup, TrackGroupId, TrackId, TrackKind,

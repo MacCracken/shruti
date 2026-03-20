@@ -74,8 +74,16 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - `source_pos` and `grain_phase` per-voice state for independent time/pitch tracking
 - Normal playback path preserved unchanged when time-stretch is 1.0
 
+### Comp Editing (Post-MVP)
+- **`CompSection`** struct: time range assigned to a specific take (offset + duration + take_index)
+- **`build_comp()`**: converts a list of CompSections into playable Regions on the timeline
+- **`build_comp_split()`**: convenience for two-section comps (split at a frame offset)
+- **`build_comp_from_active()`**: single-region comp from the active take
+- **`CreateComp`** edit command with full undo/redo (adds/removes regions)
+- Built entirely on existing Region primitives — no core data structure changes
+
 ### Tests
-- 1904 tests passing (up from 1847), 0 clippy warnings
+- 1913 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
 
 ## 2026.3.19 — Crates.io Migration & Hardware Detection
