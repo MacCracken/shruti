@@ -92,8 +92,10 @@ pub struct MidiTokenizer {
     /// Sample rate for frame-to-time conversion.
     sample_rate: u32,
     /// Tempo in BPM for bar line detection.
+    #[allow(dead_code)]
     bpm: f64,
     /// Time signature numerator.
+    #[allow(dead_code)]
     time_sig_num: u8,
 }
 

@@ -51,6 +51,7 @@ pub struct Filter {
     cached_a1: f32,
     cached_a2: f32,
     cached_a3: f32,
+    update_counter: u8,
 }
 
 impl Filter {
@@ -76,6 +77,7 @@ impl Filter {
             cached_a1: a1,
             cached_a2: a2,
             cached_a3: a3,
+            update_counter: 0,
         }
     }
 
@@ -105,8 +107,12 @@ impl Filter {
     /// Process a single sample through the SVF.
     #[inline]
     pub fn process_sample(&mut self, input: f32) -> f32 {
-        // Only recompute coefficients if cutoff or resonance changed
-        if self.cutoff != self.cached_cutoff || self.resonance != self.cached_resonance {
+        // Only recompute coefficients every 4 samples if cutoff or resonance changed.
+        // 4 samples at 48kHz = 83us, well below audible thresholds.
+        self.update_counter = self.update_counter.wrapping_add(1);
+        if self.update_counter & 3 == 0
+            && (self.cutoff != self.cached_cutoff || self.resonance != self.cached_resonance)
+        {
             self.update_coefficients();
         }
 
@@ -129,6 +135,7 @@ impl Filter {
     pub fn reset(&mut self) {
         self.ic1eq = 0.0;
         self.ic2eq = 0.0;
+        self.update_counter = 0;
     }
 }
 
@@ -256,8 +263,10 @@ mod tests {
         let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.0, SR);
         let g_before = filter.cached_g;
         filter.cutoff = 5000.0;
-        // Processing should trigger recompute
-        filter.process_sample(1.0);
+        // Coefficient recomputation is throttled to every 4 samples
+        for _ in 0..4 {
+            filter.process_sample(1.0);
+        }
         assert_ne!(filter.cached_g, g_before);
         assert_eq!(filter.cached_cutoff, 5000.0);
     }
@@ -266,7 +275,10 @@ mod tests {
     fn resonance_above_one_clamped() {
         let mut filter = Filter::new(FilterMode::LowPass, 1000.0, 0.5, SR);
         filter.resonance = 1.5; // out of range
-        filter.process_sample(1.0); // triggers recompute with clamping
+        // Coefficient recomputation is throttled to every 4 samples
+        for _ in 0..4 {
+            filter.process_sample(1.0);
+        }
         // k = 2 - 2*clamp(1.5, 0, 1) = 2 - 2 = 0
         assert!(
             filter.cached_k.abs() < f32::EPSILON,

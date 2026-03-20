@@ -21,6 +21,7 @@ pub struct Reverb {
 #[derive(Debug, Clone)]
 struct CombFilter {
     buffer: Vec<f32>,
+    mask: usize,
     index: usize,
     feedback: f32,
     damp1: f32,
@@ -30,8 +31,10 @@ struct CombFilter {
 
 impl CombFilter {
     fn new(size: usize) -> Self {
+        let size = size.next_power_of_two();
         Self {
             buffer: vec![0.0; size],
+            mask: size - 1,
             index: 0,
             feedback: 0.7,
             damp1: 0.5,
@@ -45,7 +48,7 @@ impl CombFilter {
         let output = self.buffer[self.index];
         self.filter_store = output * self.damp2 + self.filter_store * self.damp1;
         self.buffer[self.index] = input + self.filter_store * self.feedback;
-        self.index = (self.index + 1) % self.buffer.len();
+        self.index = (self.index + 1) & self.mask;
         output
     }
 
@@ -58,13 +61,16 @@ impl CombFilter {
 #[derive(Debug, Clone)]
 struct AllpassFilter {
     buffer: Vec<f32>,
+    mask: usize,
     index: usize,
 }
 
 impl AllpassFilter {
     fn new(size: usize) -> Self {
+        let size = size.next_power_of_two();
         Self {
             buffer: vec![0.0; size],
+            mask: size - 1,
             index: 0,
         }
     }
@@ -74,7 +80,7 @@ impl AllpassFilter {
         let buffered = self.buffer[self.index];
         let output = -input + buffered;
         self.buffer[self.index] = input + buffered * ALLPASS_FEEDBACK;
-        self.index = (self.index + 1) % self.buffer.len();
+        self.index = (self.index + 1) & self.mask;
         output
     }
 

@@ -114,6 +114,7 @@ impl EqBand {
     }
 
     /// Process a single sample on the given channel. Direct Form II Transposed.
+    #[inline]
     fn process_sample(&mut self, input: f64, channel: usize) -> f64 {
         let output = self.b0 * input + self.state[channel][0];
         self.state[channel][0] = self.b1 * input - self.a1 * output + self.state[channel][1];

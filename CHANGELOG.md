@@ -161,6 +161,18 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
   - L15: FramePos overflow behavior documented (~12.2M years at 48kHz)
   - L16: AudioPool filename extraction returns error instead of defaulting to "unknown"
 
+### Performance Optimizations
+- **`#[inline]` on hot-path functions**: EqBand::process_sample, Envelope::level/is_finished, Compressor::compute_gain_db
+- **Reverb: bitwise AND circular buffers**: CombFilter/AllpassFilter buffer sizes rounded to power-of-2, index uses `& mask` instead of `% len` (eliminates per-sample modulo division)
+- **Synth: cached voice fields**: pitch_bend, brightness, pressure cached as locals before frame loop (reduces indirection)
+- **Filter: coefficient recomputation throttle**: SVF coefficients recalculated every 4 samples instead of every sample (4x reduction in `tan()` calls, 83μs granularity)
+- **AdsrParams marked Copy**: eliminates clone overhead in per-voice render loop
+
+### Architecture Quick Wins
+- Extracted shared `shruti_to_tarang_buf`/`tarang_buf_to_shruti` functions to `shruti-dsp::io` (deduplicated from 5 locations)
+- Removed blanket `#![allow(dead_code)]` from shruti-ml; targeted allows on specific fields
+- **19 performance + architecture items** added to engineering backlog (P1-P9, A1-A10)
+
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::constants::{DEFAULT_ATTACK, DEFAULT_DECAY, DEFAULT_RELEASE, DEFAULT_SUSTAIN};
 
 /// ADSR envelope parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AdsrParams {
     /// Attack time in seconds.
     pub attack: f32,
@@ -66,6 +66,7 @@ impl Envelope {
     }
 
     /// Current envelope level (0.0–1.0).
+    #[inline]
     pub fn level(&self) -> f32 {
         self.level
     }
@@ -136,6 +137,7 @@ impl Envelope {
     }
 
     /// Whether the envelope has finished (returned to idle after release).
+    #[inline]
     pub fn is_finished(&self) -> bool {
         self.state == EnvelopeState::Idle
     }

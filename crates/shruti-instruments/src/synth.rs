@@ -513,10 +513,13 @@ impl SubtractiveSynth {
                 continue;
             }
 
-            self.envelopes[i].params = adsr.clone();
-            self.filter_envelopes[i].params = filter_adsr.clone();
+            self.envelopes[i].params = adsr;
+            self.filter_envelopes[i].params = filter_adsr;
             let freq = voice.frequency();
             let vel_gain = voice.velocity as f32 / 127.0;
+            let voice_pitch_bend = voice.pitch_bend.clamp(-1.0, 1.0);
+            let voice_brightness = voice.brightness;
+            let voice_pressure = voice.pressure;
             let mut phase1 = voice.phase;
             let mut phase2 = voice.phase2;
             let mut phase3 = voice.phase3;
@@ -549,9 +552,8 @@ impl SubtractiveSynth {
                 };
 
                 // Apply per-note pitch bend (+-2 semitones by default)
-                let voice_bend = self.voice_manager.voices[i].pitch_bend.clamp(-1.0, 1.0);
-                let effective_freq = if voice_bend.abs() > 0.0001 {
-                    effective_freq * Self::fast_exp2(voice_bend * 2.0 / 12.0) as f64
+                let effective_freq = if voice_pitch_bend.abs() > 0.0001 {
+                    effective_freq * Self::fast_exp2(voice_pitch_bend * 2.0 / 12.0) as f64
                 } else {
                     effective_freq
                 };
@@ -658,9 +660,8 @@ impl SubtractiveSynth {
                 .clamp(20.0, 20000.0);
 
                 // Apply per-note brightness to filter cutoff
-                let brightness = self.voice_manager.voices[i].brightness;
-                if brightness > 0.001 {
-                    let brightness_octaves = brightness * 4.0; // up to +4 octaves
+                if voice_brightness > 0.001 {
+                    let brightness_octaves = voice_brightness * 4.0; // up to +4 octaves
                     modulated_cutoff *= Self::fast_exp2(brightness_octaves);
                 }
 
@@ -677,8 +678,7 @@ impl SubtractiveSynth {
                 let vol_mod = (1.0 + volume_lfo_mod).clamp(0.0, 2.0) * 0.5;
 
                 // Apply per-note pressure as volume modifier
-                let pressure = self.voice_manager.voices[i].pressure;
-                let pressure_gain = 1.0 + pressure * 0.3; // pressure adds up to +2.5dB boost
+                let pressure_gain = 1.0 + voice_pressure * 0.3; // pressure adds up to +2.5dB boost
                 let out = filtered * vel_gain * volume * vol_mod * pressure_gain;
 
                 if unison_count > 1 && channels >= 2 && unison_spread > 0.001 {

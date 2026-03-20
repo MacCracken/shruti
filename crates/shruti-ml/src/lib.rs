@@ -12,7 +12,6 @@
 //! - **Model manager**: Download, cache, validate models
 
 #![deny(unsafe_code)]
-#![allow(dead_code)]
 
 pub mod model;
 pub mod player;

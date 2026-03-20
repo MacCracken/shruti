@@ -181,6 +181,37 @@ All 21 medium-priority items (M1–M21) fixed. See CHANGELOG for details.
 
 All 16 low-priority items (L1–L16) fixed. See CHANGELOG for details.
 
+## Engineering Backlog — Performance & Architecture (2026.3.20)
+
+### Performance (from hot-path audit)
+
+| # | Crate | Issue | Est. Impact | Notes |
+|---|-------|-------|-------------|-------|
+| P1 | shruti-instruments | Synth per-voice buffer writes: accumulate locally, single write at frame end | 5-10% | Reduce 4→2 memory ops per sample per voice |
+| P2 | shruti-dsp | Compressor: LUT-based dB conversion instead of per-sample exp2/log2 | 5-8% | 256-entry lookup table for -80..+20 dB |
+| P3 | shruti-instruments | Oscillator: cache detuned frequency in voice (update only when detune changes) | 2-4% | Avoids fast_exp2_f64 per sample |
+| P4 | shruti-instruments | Unison: precompute detune ratios per buffer (static during block) | 10-20% when active | 8x fast_exp2_f64 per sample → 8x per buffer |
+| P5 | shruti-instruments | Envelope: cache stage duration (attack_samples etc.) at trigger, not per-tick | 1-2% | Avoids per-sample division |
+| P6 | shruti-dsp | Compressor: specialize compute_gain_db for knee_db=0 vs >0 | 1-3% | Eliminate branch in inner loop |
+| P7 | shruti-instruments | Drum machine: only call update_pan_gains when pan changes | <1% | Skip sin/cos per buffer when unnecessary |
+| P8 | shruti-instruments | Sampler: cache grain_size from param (update only on param change) | <1% | Minor but consistent pattern |
+| P9 | shruti-dsp | All effects: add denormal flushing (flush-to-zero) in filter/reverb feedback loops | Variable | Prevents 50-100x slowdown on silence/reverb tails |
+
+### Architecture & Refactoring
+
+| # | Crate | Issue | Notes |
+|---|-------|-------|-------|
+| A1 | shruti-instruments | Decompose synth.rs render_voices (~350 lines) into SynthVoice::render, OscillatorMix, FilterChain | Testability + readability |
+| A2 | shruti-session | Panics in track.rs enum matching → return Result | 3 panic sites in TrackKind accessors |
+| A3 | shruti-session | Session/Track public fields → encapsulate mutable collections with setter validation | API safety |
+| A4 | shruti-session | session.rs (1857 lines), track.rs (~1000+ lines) → split at logical boundaries | Monolithic files |
+| A5 | shruti-instruments | mem::take workaround for effect_chain → redesign closure API | 4 occurrences across synth/sampler/drum |
+| A6 | all | Add #[must_use] to all public functions returning non-unit types | ~50+ functions need it |
+| A7 | shruti-session | Improve error specificity: typed variants instead of String wrappers | SessionError granularity |
+| A8 | shruti-session | Vec<&Track> returns → impl Iterator in session filtering methods | Avoids allocation per query |
+| A9 | all | Audit manual impl Default → derive(Default) where possible | 29 files with manual impl |
+| A10 | shruti-instruments | Consider SmallVec/ArrayVec for fixed-size collections (voices, effects) | Avoids heap for small arrays |
+
 ---
 
 ## Crate Architecture

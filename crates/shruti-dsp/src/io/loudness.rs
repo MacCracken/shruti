@@ -5,6 +5,7 @@
 
 use crate::buffer::AudioBuffer;
 use crate::format::AudioFormat;
+use crate::io::{shruti_to_tarang_buf, tarang_buf_to_shruti};
 
 /// Loudness measurement results.
 #[derive(Debug, Clone, Copy)]
@@ -17,39 +18,11 @@ pub struct LoudnessMetrics {
     pub rms_db: f64,
 }
 
-/// Convert a shruti AudioBuffer to a tarang AudioBuffer.
-fn to_tarang(buffer: &AudioBuffer, format: &AudioFormat) -> tarang::core::AudioBuffer {
-    let interleaved = buffer.as_interleaved();
-    let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
-    tarang::core::AudioBuffer {
-        data: bytes::Bytes::from(byte_data),
-        sample_format: tarang::core::SampleFormat::F32,
-        channels: {
-            debug_assert!(buffer.channels() > 0, "AudioBuffer has 0 channels");
-            buffer.channels().max(1)
-        },
-        sample_rate: format.sample_rate,
-        num_frames: buffer.frames() as usize,
-        timestamp: std::time::Duration::ZERO,
-    }
-}
-
-/// Convert a tarang AudioBuffer back to a shruti AudioBuffer.
-fn from_tarang(tarang_buf: &tarang::core::AudioBuffer) -> AudioBuffer {
-    let float_bytes = &tarang_buf.data;
-    let num_floats = float_bytes.len() / 4;
-    let mut samples = Vec::with_capacity(num_floats);
-    for chunk in float_bytes.chunks_exact(4) {
-        samples.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-    }
-    AudioBuffer::from_interleaved(samples, tarang_buf.channels)
-}
-
 /// Measure the loudness of an audio buffer.
 ///
 /// Uses simplified ITU-R BS.1770 measurement via tarang.
 pub fn measure_loudness(buffer: &AudioBuffer, format: &AudioFormat) -> LoudnessMetrics {
-    let tarang_buf = to_tarang(buffer, format);
+    let tarang_buf = shruti_to_tarang_buf(buffer, format);
     let m = tarang::audio::loudness::measure_loudness(&tarang_buf);
     LoudnessMetrics {
         integrated_lufs: m.integrated_lufs,
@@ -66,9 +39,9 @@ pub fn apply_gain(
     format: &AudioFormat,
     gain_db: f32,
 ) -> Result<AudioBuffer, Box<dyn std::error::Error>> {
-    let tarang_buf = to_tarang(buffer, format);
+    let tarang_buf = shruti_to_tarang_buf(buffer, format);
     let result = tarang::audio::loudness::apply_gain(&tarang_buf, gain_db)?;
-    Ok(from_tarang(&result))
+    Ok(tarang_buf_to_shruti(&result))
 }
 
 /// Normalize an audio buffer to a target loudness in LUFS.
@@ -80,9 +53,9 @@ pub fn normalize_loudness(
     format: &AudioFormat,
     target_lufs: f64,
 ) -> Result<AudioBuffer, Box<dyn std::error::Error>> {
-    let tarang_buf = to_tarang(buffer, format);
+    let tarang_buf = shruti_to_tarang_buf(buffer, format);
     let result = tarang::audio::loudness::normalize_loudness(&tarang_buf, target_lufs)?;
-    Ok(from_tarang(&result))
+    Ok(tarang_buf_to_shruti(&result))
 }
 
 #[cfg(test)]

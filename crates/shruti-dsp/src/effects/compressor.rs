@@ -49,6 +49,7 @@ impl Compressor {
     ///   gain = (1/ratio - 1) * (input_db - threshold + knee/2)^2 / (2 * knee)
     /// which ensures a smooth C1-continuous transition from 0 dB gain reduction
     /// at the bottom of the knee to full ratio compression at the top.
+    #[inline]
     fn compute_gain_db(&self, input_db: f32) -> f32 {
         let half_knee = self.knee_db / 2.0;
         let over = input_db - self.threshold_db;
