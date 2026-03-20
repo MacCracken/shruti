@@ -36,7 +36,7 @@ pub use mod_matrix::{
 };
 pub use oscillator::{Oscillator, Waveform};
 pub use preset::{InstrumentPreset, PresetParam};
-pub use routing::{MidiRoute, VelocityCurve};
+pub use routing::{CcMapping, MidiRoute, VelocityCurve};
 pub use sampler::{LoopMode, SampleZone, Sampler, SamplerParam, SlicePoint};
 pub use sf2::{Sf2Preset, parse_sf2};
 pub use sfz::{SfzRegion, parse_sfz};

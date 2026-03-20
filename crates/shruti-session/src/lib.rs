@@ -21,7 +21,11 @@ pub mod undo;
 pub use automation::{AutomationLane, AutomationPoint, AutomationTarget, CurveType};
 pub use edit::EditCommand;
 pub use error::SessionError;
-pub use midi::{ControlChange, MidiClip, NoteEvent};
+pub use midi::translate;
+pub use midi::{
+    ChannelPressureV2, ControlChange, ControlChangeV2, MidiClip, NoteEvent, NoteOffV2, NoteOnV2,
+    PerNoteController, PerNotePitchBend, PitchBendV2, PolyPressureV2, UmpMessageType,
+};
 pub use preferences::{Preferences, RecordingConfig};
 pub use region::{Region, RegionId};
 pub use session::Session;

@@ -82,8 +82,17 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - **`CreateComp`** edit command with full undo/redo (adds/removes regions)
 - Built entirely on existing Region primitives — no core data structure changes
 
+### MIDI 2.0 / UMP (Post-MVP)
+- **Universal MIDI Packet types**: `UmpMessageType` enum, `NoteOnV2`/`NoteOffV2` (16-bit velocity), `ControlChangeV2` (32-bit), `PitchBendV2` (32-bit), `ChannelPressureV2`, `PolyPressureV2`
+- **Per-note controllers**: `PerNotePitchBend`, `PerNoteController` structs for MIDI 2.0 per-note expression
+- **32-bit resolution**: All MIDI 2.0 types use full 16/32-bit values instead of 7-bit
+- **Bidirectional translation**: `translate` module with velocity 7↔16-bit, CC 7↔32-bit, pitch bend 14↔32-bit, NoteEvent↔NoteOnV2, ControlChange↔ControlChangeV2 conversions
+- **Per-note expression in synth**: pitch bend (±2 semitones), pressure (volume mod), brightness (CC#74 → filter cutoff)
+- **CC processing**: synth now responds to CC#1 (mod wheel → LFO depth) and CC#74 (brightness)
+- **CC-to-parameter mapping**: `CcMapping` struct with 7-bit and 32-bit value mapping, custom parameter ranges
+
 ### Tests
-- 1913 tests passing (up from 1847), 0 clippy warnings
+- 1933 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
 
 ## 2026.3.19 — Crates.io Migration & Hardware Detection

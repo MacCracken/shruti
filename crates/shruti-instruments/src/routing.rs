@@ -1,5 +1,6 @@
 //! MIDI routing from MIDI tracks to instrument nodes.
 
+use serde::{Deserialize, Serialize};
 use shruti_session::midi::NoteEvent;
 use uuid::Uuid;
 
@@ -83,6 +84,42 @@ impl MidiRoute {
         let mut out = event.clone();
         out.velocity = self.velocity_curve.apply(event.velocity);
         Some(out)
+    }
+}
+
+/// Maps a MIDI CC to an instrument parameter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CcMapping {
+    /// MIDI CC number (0-127).
+    pub cc: u8,
+    /// Target parameter index.
+    pub param_index: usize,
+    /// Minimum parameter value (maps from CC=0).
+    pub min_value: f32,
+    /// Maximum parameter value (maps from CC=127).
+    pub max_value: f32,
+}
+
+impl CcMapping {
+    pub fn new(cc: u8, param_index: usize, min_value: f32, max_value: f32) -> Self {
+        Self {
+            cc,
+            param_index,
+            min_value,
+            max_value,
+        }
+    }
+
+    /// Map a 7-bit CC value to the parameter range.
+    pub fn map_value(&self, cc_value: u8) -> f32 {
+        let t = cc_value as f32 / 127.0;
+        self.min_value + t * (self.max_value - self.min_value)
+    }
+
+    /// Map a 32-bit CC value (MIDI 2.0) to the parameter range.
+    pub fn map_value_32(&self, cc_value: u32) -> f32 {
+        let t = cc_value as f64 / u32::MAX as f64;
+        self.min_value + t as f32 * (self.max_value - self.min_value)
     }
 }
 
@@ -204,5 +241,31 @@ mod tests {
 
         // Fails: note out of range
         assert!(route.filter_event(&make_event(47, 127, 0)).is_none());
+    }
+
+    #[test]
+    fn cc_mapping_maps_value() {
+        let mapping = CcMapping::new(7, 0, 0.0, 1.0);
+        assert!((mapping.map_value(0) - 0.0).abs() < 1e-6);
+        assert!((mapping.map_value(127) - 1.0).abs() < 1e-6);
+        assert!((mapping.map_value(64) - 0.50394).abs() < 0.01);
+    }
+
+    #[test]
+    fn cc_mapping_custom_range() {
+        let mapping = CcMapping::new(74, 5, 20.0, 20000.0);
+        let val = mapping.map_value(127);
+        assert!((val - 20000.0).abs() < 1.0);
+        let val = mapping.map_value(0);
+        assert!((val - 20.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn cc_mapping_32bit() {
+        let mapping = CcMapping::new(1, 0, 0.0, 1.0);
+        let val = mapping.map_value_32(u32::MAX);
+        assert!((val - 1.0).abs() < 0.01);
+        let val = mapping.map_value_32(0);
+        assert!((val - 0.0).abs() < 0.01);
     }
 }

@@ -47,6 +47,12 @@ pub struct Voice {
     pub envelope_level: f32,
     /// Age counter — increments each process block while active.
     pub age: u64,
+    /// Per-note pitch bend (-1.0 to +1.0, 0.0 = no bend).
+    pub pitch_bend: f32,
+    /// Per-note pressure / aftertouch (0.0 to 1.0).
+    pub pressure: f32,
+    /// Per-note brightness (CC#74, 0.0 to 1.0).
+    pub brightness: f32,
 }
 
 impl Voice {
@@ -63,6 +69,9 @@ impl Voice {
             sub_phase: 0.0,
             envelope_level: 0.0,
             age: 0,
+            pitch_bend: 0.0,
+            pressure: 0.0,
+            brightness: 0.0,
         }
     }
 
@@ -72,6 +81,15 @@ impl Voice {
 
     pub fn is_active(&self) -> bool {
         self.state == VoiceState::Active || self.state == VoiceState::Releasing
+    }
+
+    /// Apply a per-note controller value.
+    pub fn apply_per_note_cc(&mut self, controller: u8, value_normalized: f32) {
+        if controller == 74 {
+            // CC#74 = Brightness / Timbre
+            self.brightness = value_normalized;
+        }
+        // Other per-note CCs can be added here
     }
 
     /// Frequency in Hz for this voice's MIDI note.
@@ -197,6 +215,9 @@ impl VoiceManager {
         voice.sub_phase = 0.0;
         voice.envelope_level = 1.0;
         voice.age = 0;
+        voice.pitch_bend = 0.0;
+        voice.pressure = 0.0;
+        voice.brightness = 0.0;
     }
 }
 
@@ -216,6 +237,21 @@ mod tests {
         let mut v = Voice::new();
         v.note = 60;
         assert!((v.frequency() - 261.63).abs() < 0.1);
+    }
+
+    #[test]
+    fn voice_per_note_expression_defaults() {
+        let v = Voice::new();
+        assert_eq!(v.pitch_bend, 0.0);
+        assert_eq!(v.pressure, 0.0);
+        assert_eq!(v.brightness, 0.0);
+    }
+
+    #[test]
+    fn voice_apply_per_note_cc_brightness() {
+        let mut v = Voice::new();
+        v.apply_per_note_cc(74, 0.8);
+        assert!((v.brightness - 0.8).abs() < 1e-6);
     }
 
     #[test]

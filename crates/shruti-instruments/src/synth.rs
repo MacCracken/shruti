@@ -366,7 +366,12 @@ impl SubtractiveSynth {
 
 impl SubtractiveSynth {
     /// Render all active voices into the output buffer (adds to existing content).
-    fn render_voices(&mut self, note_events: &[NoteEvent], output: &mut AudioBuffer) {
+    fn render_voices(
+        &mut self,
+        note_events: &[NoteEvent],
+        control_changes: &[ControlChange],
+        output: &mut AudioBuffer,
+    ) {
         let frames = output.frames() as usize;
         let channels = output.channels();
         let volume = self.params[SynthParam::Volume.index()].value;
@@ -455,6 +460,27 @@ impl SubtractiveSynth {
             self.note_on(event.note, event.velocity, event.channel);
         }
 
+        // Process control changes
+        for cc in control_changes {
+            match cc.controller {
+                // CC#1 = Mod Wheel -> LFO1 depth
+                1 => {
+                    let depth = cc.value as f32 / 127.0;
+                    self.lfo1.depth = depth;
+                }
+                // CC#74 = Brightness -> apply to all active voices on matching channel
+                74 => {
+                    let val = cc.value as f32 / 127.0;
+                    for voice in &mut self.voice_manager.voices {
+                        if voice.is_active() && voice.channel == cc.channel {
+                            voice.brightness = val;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Pre-compute per-frame LFO values into stack-allocated buffer.
         let clamped_frames = frames.min(crate::constants::MAX_LFO_FRAMES);
         let mut lfo1_values = [0.0f32; crate::constants::MAX_LFO_FRAMES];
@@ -517,6 +543,14 @@ impl SubtractiveSynth {
                     freq * Self::fast_exp2(semitones / 12.0) as f64
                 } else {
                     freq
+                };
+
+                // Apply per-note pitch bend (+-2 semitones by default)
+                let voice_bend = self.voice_manager.voices[i].pitch_bend;
+                let effective_freq = if voice_bend.abs() > 0.0001 {
+                    effective_freq * Self::fast_exp2(voice_bend * 2.0 / 12.0) as f64
+                } else {
+                    effective_freq
                 };
 
                 // --- Oscillator 1 (with unison) ---
@@ -613,16 +647,32 @@ impl SubtractiveSynth {
                 // 1.0 therefore sweeps the cutoff by 4 octaves (16x frequency).
                 let env_mod_octaves = filter_env_level * filter_env_depth * 4.0;
                 let lfo_mod_octaves = cutoff_lfo_mod * 4.0;
-                let modulated_cutoff = (filter_cutoff
+                let mut modulated_cutoff = (filter_cutoff
                     * Self::fast_exp2(env_mod_octaves + lfo_mod_octaves))
                 .clamp(20.0, 20000.0);
+
+                // Apply per-note brightness to filter cutoff
+                let brightness = self.voice_manager.voices[i].brightness;
+                if brightness > 0.001 {
+                    let brightness_octaves = brightness * 4.0; // up to +4 octaves
+                    modulated_cutoff = (modulated_cutoff * Self::fast_exp2(brightness_octaves))
+                        .clamp(20.0, 20000.0);
+                }
                 self.filters[i].cutoff = modulated_cutoff;
 
                 let filtered = self.filters[i].process_sample(after_env);
 
                 // Apply volume LFO (bipolar mod mapped to 0..1 range)
                 let vol_mod = (1.0 + volume_lfo_mod).clamp(0.0, 2.0) * 0.5;
-                let out = filtered * vel_gain * volume * vol_mod;
+
+                // Apply per-note pressure as volume modifier
+                let pressure = self.voice_manager.voices[i].pressure;
+                let pressure_gain = if pressure > 0.001 {
+                    0.7 + 0.3 * pressure
+                } else {
+                    1.0
+                };
+                let out = filtered * vel_gain * volume * vol_mod * pressure_gain;
 
                 if unison_count > 1 && channels >= 2 && unison_spread > 0.001 {
                     // Approximate stereo spread: detune creates phase differences
@@ -697,7 +747,7 @@ impl InstrumentNode for SubtractiveSynth {
     fn process(
         &mut self,
         note_events: &[NoteEvent],
-        _control_changes: &[ControlChange],
+        control_changes: &[ControlChange],
         output: &mut AudioBuffer,
     ) {
         let has_active_effects = self.effect_chain.effects().iter().any(|e| e.enabled);
@@ -706,11 +756,11 @@ impl InstrumentNode for SubtractiveSynth {
             // Temporarily take the effect chain to avoid borrow conflict
             let mut chain = std::mem::take(&mut self.effect_chain);
             chain.process_with(output, |buf| {
-                self.render_voices(note_events, buf);
+                self.render_voices(note_events, control_changes, buf);
             });
             self.effect_chain = chain;
         } else {
-            self.render_voices(note_events, output);
+            self.render_voices(note_events, control_changes, output);
         }
     }
 
@@ -1746,5 +1796,105 @@ mod tests {
     #[test]
     fn param_count_includes_new_params() {
         assert_eq!(SynthParam::count(), 41);
+    }
+
+    #[test]
+    fn synth_processes_cc_mod_wheel() {
+        use shruti_session::FramePos;
+
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.set_param(SynthParam::Lfo1Target, 2.0); // pitch
+
+        let cc = ControlChange {
+            position: FramePos(0),
+            controller: 1, // mod wheel
+            value: 127,
+            channel: 0,
+        };
+
+        // Render without CC to get baseline
+        synth.note_on(60, 100, 0);
+        let mut buf_no_cc = AudioBuffer::new(2, 256);
+        synth.process(&[], &[], &mut buf_no_cc);
+
+        // Reset and render with CC
+        synth.reset();
+        synth.note_on(60, 100, 0);
+        let mut buf_cc = AudioBuffer::new(2, 256);
+        synth.process(&[], &[cc], &mut buf_cc);
+
+        // Both should produce audio
+        assert!(buf_no_cc.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+        assert!(buf_cc.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+
+        // The CC should cause a difference in the output (mod wheel affects LFO depth)
+        let diff: f32 = buf_no_cc
+            .as_interleaved()
+            .iter()
+            .zip(buf_cc.as_interleaved().iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(diff > 0.001, "mod wheel CC should produce different output");
+    }
+
+    #[test]
+    fn synth_per_note_pitch_bend() {
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.note_on(60, 100, 0);
+
+        // Apply pitch bend to the voice
+        synth.voice_manager.voices[0].pitch_bend = 0.5; // bend up
+
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn synth_per_note_brightness() {
+        use shruti_session::FramePos;
+
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.set_param(SynthParam::FilterCutoff, 200.0); // low cutoff to make brightness effect obvious
+
+        let cc = ControlChange {
+            position: FramePos(0),
+            controller: 74, // brightness
+            value: 127,
+            channel: 0,
+        };
+
+        // Render without brightness
+        synth.note_on(60, 100, 0);
+        let mut buf_no_bright = AudioBuffer::new(2, 256);
+        synth.process(&[], &[], &mut buf_no_bright);
+
+        // Reset and render with brightness CC
+        synth.reset();
+        synth.note_on(60, 100, 0);
+        let mut buf_bright = AudioBuffer::new(2, 256);
+        synth.process(&[], &[cc], &mut buf_bright);
+
+        // Both should produce audio, but brightness should change timbre
+        assert!(
+            buf_no_bright
+                .as_interleaved()
+                .iter()
+                .any(|&s| s.abs() > 0.001)
+        );
+        assert!(buf_bright.as_interleaved().iter().any(|&s| s.abs() > 0.001));
+    }
+
+    #[test]
+    fn synth_per_note_pressure() {
+        let mut synth = SubtractiveSynth::new(44100.0);
+        synth.note_on(60, 100, 0);
+
+        // Apply pressure to the voice
+        synth.voice_manager.voices[0].pressure = 1.0;
+
+        let mut buf = AudioBuffer::new(2, 256);
+        synth.process(&[], &[], &mut buf);
+        assert!(buf.as_interleaved().iter().any(|&s| s.abs() > 0.001));
     }
 }

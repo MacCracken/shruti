@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
-> **Tests**: 1913 passing, 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1933 passing, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -47,6 +47,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — Loop Recording & Takes | Overdub + take management | LoopRecordManager with NAN-sentinel splitting, RecordingMode enum, TakeStack/Take structs with mute/solo/delete, transport loop_iteration tracking, AdvanceResult, 3 undo/redo edit commands |
 | — Time-Stretching | Granular OLA | Pitch-independent time-stretch (0.25x–4.0x) via dual-grain overlap-add with Hann windows, configurable grain size (10–100ms) |
 | — Comp Editing | Take compositing | CompSection-based comp building from TakeStack, build_comp/build_comp_split/build_comp_from_active, CreateComp edit command with undo/redo |
+| — MIDI 2.0 / UMP | High-res MIDI + per-note expression | UMP message types, 16/32-bit NoteOnV2/ControlChangeV2/PitchBendV2, per-note pitch bend/pressure/brightness, MIDI 1.0↔2.0 translation, CC processing (mod wheel, brightness), CcMapping |
 
 ---
 
@@ -88,13 +89,13 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Universal MIDI Packet (UMP) | Medium | 32/64/96/128-bit message types, message type routing |
+| ~~1~~ | ~~Universal MIDI Packet (UMP)~~ | ~~Medium~~ | ~~32/64/96/128-bit message types, message type routing~~ — Done in 2026.3.20 |
 | 2 | MIDI-CI (Capability Inquiry) | Medium | Profile negotiation, property exchange between devices |
-| 3 | Per-note controllers | Medium | Per-note pitch bend, pressure, CC — higher resolution than MIDI 1.0 |
-| 4 | 32-bit velocity & CC resolution | Small | Upgrade from 7-bit (0-127) to 32-bit resolution |
+| ~~3~~ | ~~Per-note controllers~~ | ~~Medium~~ | ~~Per-note pitch bend, pressure, CC — higher resolution than MIDI 1.0~~ — Done in 2026.3.20 |
+| ~~4~~ | ~~32-bit velocity & CC resolution~~ | ~~Small~~ | ~~Upgrade from 7-bit (0-127) to 32-bit resolution~~ — Done in 2026.3.20 |
 | 5 | Property exchange | Medium | JSON-based device/plugin property queries |
 | 6 | MIDI 2.0 device I/O | Large | Platform MIDI 2.0 drivers (ALSA sequencer, CoreMIDI, WinRT MIDI) |
-| 7 | Backward compatibility | Small | Transparent MIDI 1.0 ↔ 2.0 translation layer |
+| ~~7~~ | ~~Backward compatibility~~ | ~~Small~~ | ~~Transparent MIDI 1.0 ↔ 2.0 translation layer~~ — Done in 2026.3.20 |
 
 ### AI Instruments & Players (Phase 9)
 
@@ -170,7 +171,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Test Coverage
 
-**Current:** 1913 tests (excluding vendor, binaries, and egui rendering).
+**Current:** 1933 tests (excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 70% (fails build if coverage drops below).
 
