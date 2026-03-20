@@ -1,0 +1,419 @@
+//! Model runtime, inference scheduling, and model management.
+//!
+//! Provides a pluggable backend for running music LLM inference.
+//! The default implementation uses a stub that generates random tokens —
+//! replace with ONNX Runtime or candle for real model inference.
+
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::tokenizer::MidiToken;
+
+/// Information about a loaded model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    /// Model name.
+    pub name: String,
+    /// Model version string.
+    pub version: String,
+    /// Number of parameters (approximate).
+    pub parameters: u64,
+    /// Vocabulary size.
+    pub vocab_size: u32,
+    /// Maximum sequence length.
+    pub max_seq_len: u32,
+    /// Style tags (e.g., "jazz", "classical", "electronic").
+    pub styles: Vec<String>,
+}
+
+/// Generation configuration (temperature, sampling, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationConfig {
+    /// Temperature for sampling (0.0 = greedy, 1.0 = creative).
+    pub temperature: f32,
+    /// Top-k sampling (0 = disabled).
+    pub top_k: u32,
+    /// Repetition penalty (1.0 = no penalty).
+    pub repetition_penalty: f32,
+    /// Maximum tokens to generate per call.
+    pub max_tokens: u32,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
+            temperature: 0.8,
+            top_k: 40,
+            repetition_penalty: 1.1,
+            max_tokens: 256,
+        }
+    }
+}
+
+/// Trait for model inference backends.
+///
+/// Implement this trait to plug in ONNX Runtime, candle, or another
+/// inference engine. The default `StubRuntime` generates random tokens
+/// for testing without a real model.
+pub trait ModelRuntime: Send {
+    /// Get model info.
+    fn info(&self) -> &ModelInfo;
+
+    /// Generate the next token given input context.
+    ///
+    /// `context` is the sequence of tokens so far (prompt + generated).
+    /// `config` controls sampling behavior.
+    /// Returns the next token ID.
+    fn generate_next(&mut self, context: &[u32], config: &GenerationConfig) -> u32;
+
+    /// Reset the model's internal state (KV cache, etc.).
+    fn reset(&mut self);
+}
+
+/// Stub runtime that generates musically plausible random token sequences.
+///
+/// Used for testing the pipeline without a real model. Produces simple
+/// ascending/descending note patterns.
+pub struct StubRuntime {
+    info: ModelInfo,
+    step: u32,
+    rng_state: u32,
+}
+
+impl StubRuntime {
+    pub fn new() -> Self {
+        Self {
+            info: ModelInfo {
+                name: "stub-music-model".into(),
+                version: "0.1.0".into(),
+                parameters: 0,
+                vocab_size: MidiToken::VOCAB_SIZE,
+                max_seq_len: 2048,
+                styles: vec!["test".into()],
+            },
+            step: 0,
+            rng_state: 42,
+        }
+    }
+
+    /// Simple xorshift32 RNG for deterministic pseudo-random generation.
+    fn next_rng(&mut self) -> u32 {
+        self.rng_state ^= self.rng_state << 13;
+        self.rng_state ^= self.rng_state >> 17;
+        self.rng_state ^= self.rng_state << 5;
+        self.rng_state
+    }
+}
+
+impl Default for StubRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ModelRuntime for StubRuntime {
+    fn info(&self) -> &ModelInfo {
+        &self.info
+    }
+
+    fn generate_next(&mut self, _context: &[u32], _config: &GenerationConfig) -> u32 {
+        // Generate a simple pattern: velocity, duration, note-on, time-shift, repeat
+        let token_id = match self.step % 4 {
+            0 => MidiToken::Velocity(16).to_id(), // medium velocity
+            1 => MidiToken::Duration(8).to_id(),  // ~400ms
+            2 => {
+                // Random note in C major scale
+                let scale = [60, 62, 64, 65, 67, 69, 71, 72];
+                let idx = (self.next_rng() as usize) % scale.len();
+                MidiToken::NoteOn(scale[idx]).to_id()
+            }
+            3 => MidiToken::TimeShift(25).to_id(), // 250ms gap
+            _ => unreachable!(),
+        };
+        self.step += 1;
+        token_id
+    }
+
+    fn reset(&mut self) {
+        self.step = 0;
+        self.rng_state = 42;
+    }
+}
+
+/// Non-blocking inference scheduler with lookahead buffer.
+///
+/// Runs inference on a background conceptual thread (currently synchronous
+/// for simplicity) and maintains a buffer of pre-generated tokens that
+/// the audio thread can consume without blocking.
+pub struct InferenceScheduler {
+    runtime: Box<dyn ModelRuntime>,
+    config: GenerationConfig,
+    /// Buffer of generated tokens ready for consumption.
+    buffer: VecDeque<MidiToken>,
+    /// Context window (recent tokens for model input).
+    context: Vec<u32>,
+    /// Maximum lookahead buffer size in tokens.
+    lookahead_size: usize,
+}
+
+impl InferenceScheduler {
+    /// Create a new scheduler with the given runtime and config.
+    pub fn new(
+        runtime: Box<dyn ModelRuntime>,
+        config: GenerationConfig,
+        lookahead_size: usize,
+    ) -> Self {
+        Self {
+            runtime,
+            config,
+            buffer: VecDeque::new(),
+            context: vec![MidiToken::Bos.to_id()],
+            lookahead_size,
+        }
+    }
+
+    /// Fill the lookahead buffer up to `lookahead_size` tokens.
+    ///
+    /// Call this periodically (e.g., once per audio block) to keep the
+    /// buffer topped up. Generation stops at EOS or when buffer is full.
+    pub fn fill_buffer(&mut self) {
+        while self.buffer.len() < self.lookahead_size {
+            let token_id = self.runtime.generate_next(&self.context, &self.config);
+            self.context.push(token_id);
+
+            // Trim context if it exceeds max_seq_len
+            let max_len = self.runtime.info().max_seq_len as usize;
+            if self.context.len() > max_len {
+                let trim = self.context.len() - max_len / 2;
+                self.context.drain(..trim);
+            }
+
+            if let Some(token) = MidiToken::from_id(token_id) {
+                if token == MidiToken::Eos {
+                    break;
+                }
+                self.buffer.push_back(token);
+            }
+        }
+    }
+
+    /// Consume the next token from the buffer, if available.
+    pub fn next_token(&mut self) -> Option<MidiToken> {
+        self.buffer.pop_front()
+    }
+
+    /// Number of tokens currently in the buffer.
+    pub fn buffered_count(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Reset the scheduler state (clears buffer and context).
+    pub fn reset(&mut self) {
+        self.buffer.clear();
+        self.context = vec![MidiToken::Bos.to_id()];
+        self.runtime.reset();
+    }
+
+    /// Update the generation config.
+    pub fn set_config(&mut self, config: GenerationConfig) {
+        self.config = config;
+    }
+
+    /// Get the model info.
+    pub fn model_info(&self) -> &ModelInfo {
+        self.runtime.info()
+    }
+}
+
+/// Manages model discovery, caching, and loading.
+#[derive(Debug)]
+pub struct ModelManager {
+    /// Directory where models are stored.
+    model_dir: PathBuf,
+    /// Cached list of available models.
+    available: Vec<ModelInfo>,
+}
+
+impl ModelManager {
+    /// Create a new model manager scanning the given directory.
+    pub fn new(model_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            model_dir: model_dir.into(),
+            available: Vec::new(),
+        }
+    }
+
+    /// Scan the model directory for available models.
+    ///
+    /// Looks for `.shruti-model` files (JSON metadata + weights).
+    pub fn scan(&mut self) {
+        self.available.clear();
+
+        if let Ok(entries) = std::fs::read_dir(&self.model_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "shruti-model")
+                    && let Ok(info) = Self::read_model_info(&path)
+                {
+                    self.available.push(info);
+                }
+            }
+        }
+    }
+
+    /// Get the list of available models.
+    pub fn available_models(&self) -> &[ModelInfo] {
+        &self.available
+    }
+
+    /// Get the model directory path.
+    pub fn model_dir(&self) -> &Path {
+        &self.model_dir
+    }
+
+    /// Read model info from a `.shruti-model` file.
+    fn read_model_info(path: &Path) -> Result<ModelInfo, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let info: ModelInfo = serde_json::from_str(&content)?;
+        Ok(info)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stub_runtime_produces_tokens() {
+        let mut rt = StubRuntime::new();
+        let config = GenerationConfig::default();
+        let ctx = vec![MidiToken::Bos.to_id()];
+
+        for _ in 0..20 {
+            let id = rt.generate_next(&ctx, &config);
+            assert!(MidiToken::from_id(id).is_some(), "invalid token id {id}");
+        }
+    }
+
+    #[test]
+    fn stub_runtime_is_deterministic() {
+        let config = GenerationConfig::default();
+        let ctx = vec![MidiToken::Bos.to_id()];
+
+        let mut rt1 = StubRuntime::new();
+        let mut rt2 = StubRuntime::new();
+
+        let tokens1: Vec<u32> = (0..20).map(|_| rt1.generate_next(&ctx, &config)).collect();
+        let tokens2: Vec<u32> = (0..20).map(|_| rt2.generate_next(&ctx, &config)).collect();
+        assert_eq!(tokens1, tokens2);
+    }
+
+    #[test]
+    fn stub_runtime_reset() {
+        let mut rt = StubRuntime::new();
+        let config = GenerationConfig::default();
+        let ctx = vec![MidiToken::Bos.to_id()];
+
+        let first = rt.generate_next(&ctx, &config);
+        rt.reset();
+        let after_reset = rt.generate_next(&ctx, &config);
+        assert_eq!(first, after_reset);
+    }
+
+    #[test]
+    fn scheduler_fills_buffer() {
+        let rt = Box::new(StubRuntime::new());
+        let config = GenerationConfig::default();
+        let mut sched = InferenceScheduler::new(rt, config, 32);
+
+        assert_eq!(sched.buffered_count(), 0);
+        sched.fill_buffer();
+        assert!(sched.buffered_count() > 0);
+        assert!(sched.buffered_count() <= 32);
+    }
+
+    #[test]
+    fn scheduler_next_token_consumes() {
+        let rt = Box::new(StubRuntime::new());
+        let config = GenerationConfig::default();
+        let mut sched = InferenceScheduler::new(rt, config, 16);
+
+        sched.fill_buffer();
+        let count_before = sched.buffered_count();
+        let token = sched.next_token();
+        assert!(token.is_some());
+        assert_eq!(sched.buffered_count(), count_before - 1);
+    }
+
+    #[test]
+    fn scheduler_reset_clears() {
+        let rt = Box::new(StubRuntime::new());
+        let config = GenerationConfig::default();
+        let mut sched = InferenceScheduler::new(rt, config, 16);
+
+        sched.fill_buffer();
+        assert!(sched.buffered_count() > 0);
+        sched.reset();
+        assert_eq!(sched.buffered_count(), 0);
+    }
+
+    #[test]
+    fn model_info_serializes() {
+        let info = ModelInfo {
+            name: "test-model".into(),
+            version: "1.0".into(),
+            parameters: 7_000_000_000,
+            vocab_size: 584,
+            max_seq_len: 2048,
+            styles: vec!["jazz".into(), "classical".into()],
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let rt: ModelInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(rt.name, "test-model");
+        assert_eq!(rt.parameters, 7_000_000_000);
+    }
+
+    #[test]
+    fn generation_config_default() {
+        let config = GenerationConfig::default();
+        assert!((config.temperature - 0.8).abs() < 0.01);
+        assert_eq!(config.top_k, 40);
+    }
+
+    #[test]
+    fn model_manager_empty_dir() {
+        let dir = std::env::temp_dir().join("shruti_ml_test_empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut mgr = ModelManager::new(&dir);
+        mgr.scan();
+        assert!(mgr.available_models().is_empty());
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn model_manager_finds_model() {
+        let dir = std::env::temp_dir().join("shruti_ml_test_models");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let info = ModelInfo {
+            name: "test".into(),
+            version: "0.1".into(),
+            parameters: 1000,
+            vocab_size: 584,
+            max_seq_len: 512,
+            styles: vec![],
+        };
+        let path = dir.join("test.shruti-model");
+        std::fs::write(&path, serde_json::to_string(&info).unwrap()).unwrap();
+
+        let mut mgr = ModelManager::new(&dir);
+        mgr.scan();
+        assert_eq!(mgr.available_models().len(), 1);
+        assert_eq!(mgr.available_models()[0].name, "test");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+}

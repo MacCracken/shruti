@@ -91,8 +91,17 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - **CC processing**: synth now responds to CC#1 (mod wheel → LFO depth) and CC#74 (brightness)
 - **CC-to-parameter mapping**: `CcMapping` struct with 7-bit and 32-bit value mapping, custom parameter ranges
 
+### Phase 9: AI Instruments — `shruti-ml` Crate (Post-MVP)
+- New `shruti-ml` crate added to workspace (9th crate)
+- **Music tokenizer** (`tokenizer.rs`): Fine-grained MIDI↔token encoding with 584-token vocabulary (128 note-on, 128 note-off, 32 velocity bins, 64 duration bins, 100 time-shift bins, special tokens). Bidirectional encode/decode with quantization.
+- **Model runtime** (`model.rs`): Pluggable `ModelRuntime` trait for inference backends (ONNX/candle). `StubRuntime` generates deterministic C-major patterns for testing.
+- **Inference scheduler**: `InferenceScheduler` with configurable lookahead buffer, context window management, and `GenerationConfig` (temperature, top-k, repetition penalty)
+- **Model manager**: `ModelManager` scans for `.shruti-model` files (JSON metadata), model info serialization
+- **AI Player** (`player.rs`): `InstrumentNode` implementation that generates MIDI via LLM inference. 3 playback modes (Improvisation, Accompaniment, CallAndResponse), sine-tone placeholder rendering, note-on triggers generation
+- **5 AiPlayerParam** controls: Volume, Creativity, Key, Minor, Mode
+
 ### Tests
-- 1933 tests passing (up from 1847), 0 clippy warnings
+- 1963 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)
 
 ## 2026.3.19 — Crates.io Migration & Hardware Detection

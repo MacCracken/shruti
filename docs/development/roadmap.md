@@ -2,7 +2,7 @@
 
 > **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
-> **Tests**: 1933 passing, 0 clippy warnings, 0 audit vulnerabilities
+> **Tests**: 1963 passing, 0 clippy warnings, 0 audit vulnerabilities
 
 ## Vision
 
@@ -48,6 +48,8 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — Time-Stretching | Granular OLA | Pitch-independent time-stretch (0.25x–4.0x) via dual-grain overlap-add with Hann windows, configurable grain size (10–100ms) |
 | — Comp Editing | Take compositing | CompSection-based comp building from TakeStack, build_comp/build_comp_split/build_comp_from_active, CreateComp edit command with undo/redo |
 | — MIDI 2.0 / UMP | High-res MIDI + per-note expression | UMP message types, 16/32-bit NoteOnV2/ControlChangeV2/PitchBendV2, per-note pitch bend/pressure/brightness, MIDI 1.0↔2.0 translation, CC processing (mod wheel, brightness), CcMapping |
+| 9A — Music LLM Integration | `shruti-ml` crate | MidiTokenizer (584-token vocab, MIDI↔token), ModelRuntime trait + StubRuntime, InferenceScheduler (lookahead buffer), ModelManager (.shruti-model), GenerationConfig |
+| 9B — AI Player Agents | AiPlayer InstrumentNode | 3 playback modes (Improvisation/Accompaniment/CallAndResponse), 5 AiPlayerParam controls, sine placeholder rendering, note-on triggers generation |
 
 ---
 
@@ -165,13 +167,13 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | `shruti-ai` | Agent API + MCP tools for AGNOS | Active |
 | `shruti-instruments` | Built-in instruments: synths, drum machine, sampler, InstrumentNode trait | Active |
 | `shruti-test-utils` | Shared test helpers: sine generation, RMS, silence detection | Active |
-| `shruti-ml` | Music LLM runtime, tokenizer, AI player agents | Planned |
+| `shruti-ml` | Music LLM runtime, tokenizer, AI player agents | Active |
 
 ---
 
 ## Test Coverage
 
-**Current:** 1933 tests (excluding vendor, binaries, and egui rendering).
+**Current:** 1963 tests (excluding vendor, binaries, and egui rendering).
 **Tool:** `cargo tarpaulin` with `tarpaulin.toml`.
 **CI threshold:** 70% (fails build if coverage drops below).
 

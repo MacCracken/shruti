@@ -8,6 +8,7 @@ members = [
     "crates/shruti-session",
     "crates/shruti-ai",
     "crates/shruti-instruments",
+    "crates/shruti-ml",
     "crates/shruti-test-utils",
 ]
 

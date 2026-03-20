@@ -3867,6 +3867,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "shruti-ml"
+version = "2026.3.20"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shruti-dsp",
+ "shruti-instruments",
+ "shruti-session",
+ "uuid",
+]
+
+[[package]]
 name = "shruti-plugin"
 version = "2026.3.20"
 dependencies = [
