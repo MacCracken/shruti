@@ -1,6 +1,6 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.19 | **Last Updated**: 2026-03-19
+> **Version**: 2026.3.20 | **Last Updated**: 2026-03-19
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments, tarang-demux)
 > **Tests**: 1847 passing, 89.65% coverage (excl. egui rendering), 0 clippy warnings, 0 audit vulnerabilities
 
