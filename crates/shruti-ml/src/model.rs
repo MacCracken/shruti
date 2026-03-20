@@ -183,11 +183,14 @@ impl InferenceScheduler {
             let token_id = self.runtime.generate_next(&self.context, &self.config);
             self.context.push(token_id);
 
-            // Trim context if it exceeds max_seq_len
+            // Trim context if it exceeds max_seq_len, keeping 75% for overlap
             let max_len = self.runtime.info().max_seq_len as usize;
-            if max_len > 0 && self.context.len() > max_len {
-                let keep = max_len / 2;
-                self.context.drain(..self.context.len() - keep);
+            if max_len > 0 && self.context.len() >= max_len {
+                let keep = (max_len * 3) / 4;
+                let trim = self.context.len().saturating_sub(keep);
+                if trim > 0 {
+                    self.context.drain(..trim);
+                }
             }
 
             if let Some(token) = MidiToken::from_id(token_id) {

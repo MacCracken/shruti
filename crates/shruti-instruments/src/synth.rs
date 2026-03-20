@@ -675,20 +675,14 @@ impl SubtractiveSynth {
                 let out = filtered * vel_gain * volume * vol_mod * pressure_gain;
 
                 if unison_count > 1 && channels >= 2 && unison_spread > 0.001 {
-                    // Approximate stereo spread: detune creates phase differences
-                    // that naturally produce width. Amplify L/R difference slightly.
-                    let width = unison_spread * 0.3;
-                    let norm = 1.0 / ((1.0 + width * width).sqrt());
-                    output.set(
-                        frame as u32,
-                        0,
-                        output.get(frame as u32, 0) + out * (1.0 + width) * norm,
-                    );
-                    output.set(
-                        frame as u32,
-                        1,
-                        output.get(frame as u32, 1) + out * (1.0 - width) * norm,
-                    );
+                    // Equal-power stereo spread using constant-power panning law.
+                    // pan ∈ [0.5-w, 0.5+w] where w = spread * 0.15 (subtle).
+                    // L = sqrt(0.5 + w), R = sqrt(0.5 - w) → L² + R² = 1.0 always.
+                    let w = unison_spread * 0.15;
+                    let gain_l = (0.5 + w).sqrt();
+                    let gain_r = (0.5 - w).sqrt();
+                    output.set(frame as u32, 0, output.get(frame as u32, 0) + out * gain_l);
+                    output.set(frame as u32, 1, output.get(frame as u32, 1) + out * gain_r);
                     for ch in 2..channels {
                         output.set(frame as u32, ch, output.get(frame as u32, ch) + out);
                     }

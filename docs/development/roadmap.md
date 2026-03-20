@@ -211,6 +211,15 @@ Issues identified in code audit, triaged as Medium/Low. Critical/High issues wer
 | L10 | shruti-engine | Empty takes skipped without documentation | Document in docstring |
 | L11 | shruti-dsp | read_exact() error message could be more descriptive | Add "file too small?" hint |
 
+*Second audit pass (2026.3.20):*
+
+| M18 | shruti-instruments | Unison detune lacks frequency bounds check | Clamp u_freq to [20, sr/2.1] |
+| M19 | shruti-engine | Infinity sentinel ambiguity (±∞ both trigger) | Use `== f32::INFINITY` instead of `is_infinite()` |
+| M20 | shruti-dsp/ai | channels.max(1) masks upstream bugs silently | Add debug logging when clamped |
+| L12 | shruti-session | loop_iteration u32 overflow after 4.3B wraps | Use saturating_add |
+| L13 | shruti-ml | Hoosh timeout hardcoded to 10s | Make configurable via GenerationConfig |
+| L14 | shruti-instruments | Unison phase tracking choice (voice[0]) undocumented | Document why first voice is primary |
+
 ---
 
 ## Crate Architecture

@@ -117,7 +117,8 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
   - Stereo spread energy normalization (equal-power preservation)
   - Hoosh inference timeout (10s) in `HooshRuntime::generate_next`
   - Channels validation (.max(1)) in loudness/mix/resample tarang buffer construction
-- **28 Medium/Low issues** triaged to engineering backlog (M1–M17, L1–L11)
+- **34 Medium/Low issues** triaged to engineering backlog (M1–M20, L1–L14)
+- **Second audit pass**: fixed stereo spread energy conservation (constant-power panning law, L²+R²=1), context trim data loss (keep 75% instead of 50%, use `>=` boundary)
 
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings
