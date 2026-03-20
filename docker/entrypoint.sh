@@ -39,5 +39,6 @@ else
     echo "[shruti] TLS disabled — serving plain HTTP"
 
     # Run shruti directly as non-root — no supervisord overhead
-    exec su -s /bin/sh shruti -c 'exec "$0" "$@"' -- "$@"
+    # Use su with --preserve-environment to pass SHRUTI_HOST and other env vars
+    exec su -s /bin/sh --preserve-environment shruti -c 'exec "$0" "$@"' -- "$@"
 fi
