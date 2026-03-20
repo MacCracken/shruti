@@ -42,6 +42,14 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - Validates `bg_primary` vs `text_primary` contrast ratio >= 3.0:1 (WCAG AA large text)
 - 7 new tests: luminance calculation, contrast ratio, validation pass/fail cases
 
+### Criterion Benchmarks
+- New `benches/` directory with 4 benchmark files (criterion 0.5 with HTML reports)
+- **dsp.rs** — 8 benchmarks: EQ, compressor, reverb, delay, limiter processing + AudioBuffer ops (from_interleaved, mix_from, apply_gain)
+- **instruments.rs** — 4 benchmarks: SubtractiveSynth (256/1024 frames), DrumMachine, Sampler rendering
+- **timeline.rs** — 2 benchmarks: 4-track and 16-track mixdown (1024 frames)
+- **tarang_audio.rs** — 9 benchmarks (feature-gated `tarang`): WAV read/write, FLAC export (16/24-bit), linear + sinc resampling, channel mixing
+- Found 2 tarang 0.19.3 bugs via benchmarks: linear resampler off-by-one on stereo, mix_channels stereo→mono size mismatch (filed on tarang roadmap, fixed in 0.20.3)
+
 ### Engineering Backlog Cleanup
 - Closed 3 LOW-priority items as resolved/non-issues:
   - `as_interleaved()` — already zero-copy (returns `&[Sample]` directly, verified by pointer-identity test)

@@ -3756,7 +3756,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shruti"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "clap",
  "criterion",
@@ -3776,7 +3776,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-ai"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "ai-hwaccel",
  "axum",
@@ -3796,7 +3796,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-dsp"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "bytes",
  "hound",
@@ -3807,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-engine"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "cpal",
  "midir",
@@ -3817,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-instruments"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "serde",
  "serde_json",
@@ -3829,7 +3829,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-plugin"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "libloading",
  "serde",
@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-session"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "hound",
  "rusqlite",
@@ -3855,7 +3855,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-test-utils"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "shruti-dsp",
  "shruti-session",
@@ -3863,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-ui"
-version = "2026.3.18"
+version = "2026.3.19"
 dependencies = [
  "eframe",
  "egui",
