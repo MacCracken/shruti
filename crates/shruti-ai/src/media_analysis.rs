@@ -1,14 +1,29 @@
 //! Media analysis integration via tarang-ai.
 //!
 //! Available only with the `tarang` feature. Provides content classification,
-//! audio fingerprinting, and transcription routing for the DAW.
+//! audio fingerprinting, AcoustID identification, speaker diarization,
+//! and transcription routing for the DAW.
 
 use serde::{Deserialize, Serialize};
 
 // Re-export tarang-ai types for convenience
+pub use tarang::ai::{AcoustIdFingerprint, DiarizeConfig, SpeakerSegment};
 pub use tarang::ai::{AudioFingerprint, FingerprintConfig};
 pub use tarang::ai::{ContentType, MediaAnalysis, TranscriptionResult, TranscriptionSegment};
 pub use tarang::ai::{HooshClient, HooshConfig, WhisperModel};
+
+/// Convert interleaved f32 samples into a tarang `AudioBuffer`.
+fn to_tarang_buffer(samples: &[f32], sample_rate: u32, channels: u16) -> tarang::core::AudioBuffer {
+    let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    tarang::core::AudioBuffer {
+        data: bytes::Bytes::from(byte_data),
+        sample_format: tarang::core::SampleFormat::F32,
+        channels,
+        sample_rate,
+        num_frames: samples.len() / channels as usize,
+        timestamp: std::time::Duration::ZERO,
+    }
+}
 
 /// Audio content analysis for a decoded file.
 ///
@@ -34,16 +49,7 @@ pub fn analyze_audio(
     use std::time::Duration;
     use tarang::core::*;
 
-    let codec = match codec_name.to_lowercase().as_str() {
-        "wav" | "pcm" => AudioCodec::Pcm,
-        "flac" => AudioCodec::Flac,
-        "mp3" => AudioCodec::Mp3,
-        "aac" | "m4a" => AudioCodec::Aac,
-        "ogg" | "vorbis" => AudioCodec::Vorbis,
-        "opus" => AudioCodec::Opus,
-        "alac" => AudioCodec::Alac,
-        _ => AudioCodec::Pcm,
-    };
+    let codec = parse_codec(codec_name);
 
     let info = MediaInfo {
         id: uuid::Uuid::new_v4(),
@@ -61,6 +67,7 @@ pub fn analyze_audio(
         title: None,
         artist: None,
         album: None,
+        metadata: std::collections::HashMap::new(),
     };
 
     let result = tarang::ai::analyze_media(&info);
@@ -80,16 +87,7 @@ pub fn fingerprint_audio(
     sample_rate: u32,
     channels: u16,
 ) -> Result<AudioFingerprint, Box<dyn std::error::Error>> {
-    let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-    let buf = tarang::core::AudioBuffer {
-        data: bytes::Bytes::from(byte_data),
-        sample_format: tarang::core::SampleFormat::F32,
-        channels,
-        sample_rate,
-        num_samples: samples.len(),
-        timestamp: std::time::Duration::ZERO,
-    };
-
+    let buf = to_tarang_buffer(samples, sample_rate, channels);
     let config = FingerprintConfig::default();
     let fp = tarang::ai::compute_fingerprint(&buf, &config)?;
     Ok(fp)
@@ -103,6 +101,36 @@ pub fn fingerprint_similarity(a: &AudioFingerprint, b: &AudioFingerprint) -> f64
 /// Check if two fingerprints match (similarity > 0.8).
 pub fn fingerprints_match(a: &AudioFingerprint, b: &AudioFingerprint) -> bool {
     tarang::ai::fingerprint_match(a, b) > 0.8
+}
+
+/// Compute an AcoustID-compatible fingerprint from interleaved f32 samples.
+///
+/// Returns a base64-encoded fingerprint string compatible with the AcoustID
+/// music identification database. Useful for sample identification on import.
+pub fn compute_acoustid(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: u16,
+) -> Result<AcoustIdFingerprint, Box<dyn std::error::Error>> {
+    let buf = to_tarang_buffer(samples, sample_rate, channels);
+    let fp = tarang::ai::compute_acoustid(&buf)?;
+    Ok(fp)
+}
+
+/// Perform speaker diarization on interleaved f32 audio samples.
+///
+/// Detects speech segments and assigns speaker labels based on spectral
+/// similarity. Useful for podcast/vocal track analysis and auto-splitting
+/// multi-speaker recordings into regions.
+pub fn diarize_audio(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: u16,
+    config: &DiarizeConfig,
+) -> Result<Vec<SpeakerSegment>, Box<dyn std::error::Error>> {
+    let buf = to_tarang_buffer(samples, sample_rate, channels);
+    let segments = tarang::ai::diarize(&buf, config)?;
+    Ok(segments)
 }
 
 /// Prepare a transcription request for an audio track.
@@ -119,16 +147,7 @@ pub fn prepare_transcription(
     use std::time::Duration;
     use tarang::core::*;
 
-    let codec = match codec_name.to_lowercase().as_str() {
-        "wav" | "pcm" => AudioCodec::Pcm,
-        "flac" => AudioCodec::Flac,
-        "mp3" => AudioCodec::Mp3,
-        "aac" | "m4a" => AudioCodec::Aac,
-        "ogg" | "vorbis" => AudioCodec::Vorbis,
-        "opus" => AudioCodec::Opus,
-        "alac" => AudioCodec::Alac,
-        _ => AudioCodec::Pcm,
-    };
+    let codec = parse_codec(codec_name);
 
     let info = MediaInfo {
         id: uuid::Uuid::new_v4(),
@@ -146,9 +165,25 @@ pub fn prepare_transcription(
         title: None,
         artist: None,
         album: None,
+        metadata: std::collections::HashMap::new(),
     };
 
     tarang::ai::prepare_transcription(&info, language_hint)
+}
+
+/// Parse a codec name string into a tarang `AudioCodec`.
+fn parse_codec(codec_name: &str) -> tarang::core::AudioCodec {
+    use tarang::core::AudioCodec;
+    match codec_name.to_lowercase().as_str() {
+        "wav" | "pcm" => AudioCodec::Pcm,
+        "flac" => AudioCodec::Flac,
+        "mp3" => AudioCodec::Mp3,
+        "aac" | "m4a" => AudioCodec::Aac,
+        "ogg" | "vorbis" => AudioCodec::Vorbis,
+        "opus" => AudioCodec::Opus,
+        "alac" => AudioCodec::Alac,
+        _ => AudioCodec::Pcm,
+    }
 }
 
 #[cfg(test)]
@@ -177,17 +212,58 @@ mod tests {
 
     #[test]
     fn fingerprint_and_match() {
-        let samples: Vec<f32> = (0..4410).map(|i| (i as f32 * 0.01).sin()).collect();
+        let samples: Vec<f32> = (0..44100)
+            .map(|i| (i as f32 / 44100.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5)
+            .collect();
         let fp1 = fingerprint_audio(&samples, 44100, 1).unwrap();
         let fp2 = fingerprint_audio(&samples, 44100, 1).unwrap();
-        // Identical input should produce high similarity (>0.5).
-        // Note: tarang-ai's fingerprint algorithm may not be fully deterministic
-        // across runs, so we use a relaxed threshold here.
         let similarity = fingerprint_similarity(&fp1, &fp2);
         assert!(
             similarity > 0.5,
             "identical audio should have high similarity, got {similarity}"
         );
+    }
+
+    #[test]
+    fn acoustid_produces_fingerprint() {
+        // Need enough audio for fingerprinting (>= 1 frame of FFT data)
+        let samples: Vec<f32> = (0..32000)
+            .map(|i| (i as f32 / 16000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5)
+            .collect();
+        let result = compute_acoustid(&samples, 16000, 1).unwrap();
+        assert!(!result.fingerprint.is_empty());
+        assert!(result.duration > 0.0);
+    }
+
+    #[test]
+    fn acoustid_same_audio_same_fingerprint() {
+        let samples: Vec<f32> = (0..32000)
+            .map(|i| (i as f32 / 16000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5)
+            .collect();
+        let fp1 = compute_acoustid(&samples, 16000, 1).unwrap();
+        let fp2 = compute_acoustid(&samples, 16000, 1).unwrap();
+        assert_eq!(fp1.fingerprint, fp2.fingerprint);
+    }
+
+    #[test]
+    fn diarize_silence_returns_empty() {
+        let samples = vec![0.0f32; 32000]; // 2 seconds at 16kHz
+        let config = DiarizeConfig::default();
+        let segments = diarize_audio(&samples, 16000, 1, &config).unwrap();
+        assert!(segments.is_empty(), "silence should produce no segments");
+    }
+
+    #[test]
+    fn diarize_tone_produces_segments() {
+        let samples: Vec<f32> = (0..32000)
+            .map(|i| (i as f32 / 16000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5)
+            .collect();
+        let config = DiarizeConfig::default();
+        let segments = diarize_audio(&samples, 16000, 1, &config).unwrap();
+        assert!(!segments.is_empty(), "a tone should produce segments");
+        // All segments should be one speaker
+        let ids: Vec<u32> = segments.iter().map(|s| s.speaker_id).collect();
+        assert!(ids.iter().all(|&id| id == ids[0]));
     }
 
     #[test]

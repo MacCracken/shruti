@@ -14,8 +14,8 @@ shruti-session = { path = "../shruti-session" }
 shruti-engine = { path = "../shruti-engine" }
 shruti-dsp = { path = "../shruti-dsp" }
 shruti-plugin = { path = "../shruti-plugin" }
-tarang = { version = "0.19.3", optional = true }
-ai-hwaccel = "0.19.3"
+tarang = { version = "0.20.3", optional = true }
+ai-hwaccel = { version = "0.20.3", features = ["async-detect"] }
 bytes = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 serde = { workspace = true }

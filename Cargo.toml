@@ -45,6 +45,8 @@ license = "GPL-3.0"
 [features]
 default = []
 tarang = ["shruti-dsp/tarang", "shruti-ai/tarang"]
+opus-enc = ["shruti-dsp/opus-enc"]
+aac-enc = ["shruti-dsp/aac-enc"]
 
 [dependencies]
 shruti-engine = { path = "crates/shruti-engine" }

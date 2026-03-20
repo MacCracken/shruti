@@ -11,6 +11,8 @@ use crate::format::AudioFormat;
 pub enum ExportFormat {
     Wav,
     Flac,
+    Opus,
+    Aac,
 }
 
 /// Bit depth options for export.
@@ -49,6 +51,14 @@ pub fn is_native_export(format: ExportFormat) -> bool {
         ExportFormat::Flac => true,
         #[cfg(not(feature = "tarang"))]
         ExportFormat::Flac => false,
+        #[cfg(feature = "opus-enc")]
+        ExportFormat::Opus => true,
+        #[cfg(not(feature = "opus-enc"))]
+        ExportFormat::Opus => false,
+        #[cfg(feature = "aac-enc")]
+        ExportFormat::Aac => true,
+        #[cfg(not(feature = "aac-enc"))]
+        ExportFormat::Aac => false,
     }
 }
 
@@ -93,6 +103,14 @@ pub fn write_audio_file(
             // FLAC writing requires tarang; fall back to WAV encoding.
             write_wav_with_depth(path, buffer, config)
         }
+        #[cfg(feature = "opus-enc")]
+        ExportFormat::Opus => write_opus_tarang(path, buffer, config),
+        #[cfg(not(feature = "opus-enc"))]
+        ExportFormat::Opus => Err("Opus export requires the `opus-enc` feature".into()),
+        #[cfg(feature = "aac-enc")]
+        ExportFormat::Aac => write_aac_tarang(path, buffer, config),
+        #[cfg(not(feature = "aac-enc"))]
+        ExportFormat::Aac => Err("AAC export requires the `aac-enc` feature".into()),
     }
 }
 
@@ -130,7 +148,7 @@ fn write_flac_tarang(
         sample_format: tarang::core::SampleFormat::F32,
         channels: config.channels,
         sample_rate: config.sample_rate,
-        num_samples: interleaved.len(),
+        num_frames: buffer.frames() as usize,
         timestamp: std::time::Duration::ZERO,
     };
 
@@ -154,6 +172,101 @@ fn write_flac_tarang(
     // Audio frames
     for frame_data in encoded_frames.iter().chain(flushed.iter()) {
         out.extend_from_slice(frame_data);
+    }
+
+    std::fs::write(path, &out)?;
+    Ok(())
+}
+
+// ── tarang Opus export ────────────────────────────────────────────────────
+
+#[cfg(feature = "opus-enc")]
+fn write_opus_tarang(
+    path: &Path,
+    buffer: &AudioBuffer,
+    config: &ExportConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tarang::audio::{AudioEncoder, EncoderConfig, OpusEncoder};
+    use tarang::core::AudioCodec;
+
+    // Opus requires specific sample rates; use 48kHz as the standard
+    let opus_rate = match config.sample_rate {
+        8000 | 12000 | 16000 | 24000 | 48000 => config.sample_rate,
+        _ => 48000, // default to 48kHz
+    };
+
+    let enc_config = EncoderConfig {
+        codec: AudioCodec::Opus,
+        sample_rate: opus_rate,
+        channels: config.channels,
+        bits_per_sample: 16,
+    };
+
+    let mut encoder = OpusEncoder::new(&enc_config)?;
+
+    let interleaved = buffer.as_interleaved();
+    let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let tarang_buf = tarang::core::AudioBuffer {
+        data: bytes::Bytes::from(byte_data),
+        sample_format: tarang::core::SampleFormat::F32,
+        channels: config.channels,
+        sample_rate: opus_rate,
+        num_frames: buffer.frames() as usize,
+        timestamp: std::time::Duration::ZERO,
+    };
+
+    let encoded_packets = encoder.encode(&tarang_buf)?;
+    let flushed = encoder.flush()?;
+
+    // Write as raw OGG/Opus using tarang's OGG muxer
+    let mut out_file = std::fs::File::create(path)?;
+    let mut muxer = tarang::demux::OggMuxer::new(&mut out_file);
+    for packet in encoded_packets.iter().chain(flushed.iter()) {
+        muxer.write_packet(packet, false)?;
+    }
+    muxer.flush()?;
+
+    Ok(())
+}
+
+// ── tarang AAC export ─────────────────────────────────────────────────────
+
+#[cfg(feature = "aac-enc")]
+fn write_aac_tarang(
+    path: &Path,
+    buffer: &AudioBuffer,
+    config: &ExportConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tarang::audio::{AacEncoder, AudioEncoder, EncoderConfig};
+    use tarang::core::AudioCodec;
+
+    let enc_config = EncoderConfig {
+        codec: AudioCodec::Aac,
+        sample_rate: config.sample_rate,
+        channels: config.channels,
+        bits_per_sample: 16,
+    };
+
+    let mut encoder = AacEncoder::new(&enc_config)?;
+
+    let interleaved = buffer.as_interleaved();
+    let byte_data: Vec<u8> = interleaved.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let tarang_buf = tarang::core::AudioBuffer {
+        data: bytes::Bytes::from(byte_data),
+        sample_format: tarang::core::SampleFormat::F32,
+        channels: config.channels,
+        sample_rate: config.sample_rate,
+        num_frames: buffer.frames() as usize,
+        timestamp: std::time::Duration::ZERO,
+    };
+
+    let encoded_packets = encoder.encode(&tarang_buf)?;
+    let flushed = encoder.flush()?;
+
+    // Write raw AAC frames
+    let mut out = Vec::new();
+    for packet in encoded_packets.iter().chain(flushed.iter()) {
+        out.extend_from_slice(packet);
     }
 
     std::fs::write(path, &out)?;

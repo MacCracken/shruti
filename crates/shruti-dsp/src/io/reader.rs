@@ -143,6 +143,97 @@ fn read_audio_file_hound(
     Ok((buffer, audio_format))
 }
 
+// ── streaming reader (tarang, pull-based) ─────────────────────────────────
+
+/// Status returned when the streaming reader has no more data.
+#[cfg(feature = "tarang")]
+#[derive(Debug)]
+pub enum StreamingError {
+    /// The audio stream has ended.
+    EndOfStream,
+    /// A decode or I/O error occurred.
+    Decode(Box<dyn std::error::Error>),
+}
+
+#[cfg(feature = "tarang")]
+impl std::fmt::Display for StreamingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EndOfStream => write!(f, "end of stream"),
+            Self::Decode(e) => write!(f, "decode error: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "tarang")]
+impl std::error::Error for StreamingError {}
+
+/// Pull-based streaming audio reader backed by tarang's `FileDecoder`.
+///
+/// Instead of loading an entire file into memory (like `read_audio_file`),
+/// this yields audio buffers incrementally via `next_buffer()`. Ideal for
+/// playback of long files where loading everything would use too much memory.
+#[cfg(feature = "tarang")]
+pub struct StreamingReader {
+    decoder: tarang::audio::FileDecoder,
+}
+
+#[cfg(feature = "tarang")]
+impl StreamingReader {
+    /// Open an audio file for streaming decode.
+    pub fn open(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let decoder = tarang::audio::FileDecoder::open_path(path)?;
+        Ok(Self { decoder })
+    }
+
+    /// The sample rate of the audio stream.
+    pub fn sample_rate(&self) -> u32 {
+        self.decoder.sample_rate()
+    }
+
+    /// The number of channels in the audio stream.
+    pub fn channels(&self) -> u16 {
+        self.decoder.channels()
+    }
+
+    /// Decode and return the next buffer of audio.
+    ///
+    /// Returns `Err(StreamingError::EndOfStream)` when all audio has been read.
+    pub fn next_buffer(&mut self) -> Result<AudioBuffer, StreamingError> {
+        let tarang_buf = self
+            .decoder
+            .next_buffer()
+            .map_err(|_| StreamingError::EndOfStream)?;
+
+        let float_bytes = &tarang_buf.data;
+        let num_floats = float_bytes.len() / 4;
+        let mut samples = Vec::with_capacity(num_floats);
+        for chunk in float_bytes.chunks_exact(4) {
+            samples.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+        }
+
+        Ok(AudioBuffer::from_interleaved(samples, tarang_buf.channels))
+    }
+
+    /// Collect all remaining buffers into a single `AudioBuffer`.
+    ///
+    /// Equivalent to calling `next_buffer()` in a loop and concatenating.
+    pub fn read_all(&mut self) -> Result<AudioBuffer, Box<dyn std::error::Error>> {
+        let channels = self.channels();
+        let mut all_samples: Vec<f32> = Vec::new();
+
+        loop {
+            match self.next_buffer() {
+                Ok(buf) => all_samples.extend_from_slice(buf.as_interleaved()),
+                Err(StreamingError::EndOfStream) => break,
+                Err(StreamingError::Decode(e)) => return Err(e),
+            }
+        }
+
+        Ok(AudioBuffer::from_interleaved(all_samples, channels))
+    }
+}
+
 /// Check if a file extension is supported for reading.
 pub fn is_supported_extension(ext: &str) -> bool {
     SUPPORTED_EXTENSIONS

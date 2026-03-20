@@ -18,7 +18,7 @@ pub mod voice;
 pub mod media_analysis;
 
 pub use agent_api::AgentApi;
-pub use hardware::HardwareInfo;
+pub use hardware::{DeviceInfo, HardwareInfo};
 pub use mcp::McpTools;
 pub use serve::{MAX_BODY_SIZE, RATE_LIMIT_RPS, RateLimiter};
 pub use voice::{VoiceAction, VoiceIntent, parse_voice_input};

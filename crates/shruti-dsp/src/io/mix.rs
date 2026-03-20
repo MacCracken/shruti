@@ -34,7 +34,7 @@ pub fn mix_channels(
         sample_format: tarang::core::SampleFormat::F32,
         channels: buffer.channels(),
         sample_rate: source_rate,
-        num_samples: interleaved.len(),
+        num_frames: buffer.frames() as usize,
         timestamp: std::time::Duration::ZERO,
     };
 

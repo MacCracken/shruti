@@ -54,7 +54,7 @@ fn shruti_to_tarang(buffer: &AudioBuffer, sample_rate: u32) -> tarang::core::Aud
         sample_format: tarang::core::SampleFormat::F32,
         channels: buffer.channels(),
         sample_rate,
-        num_samples: interleaved.len(),
+        num_frames: buffer.frames() as usize,
         timestamp: std::time::Duration::ZERO,
     }
 }

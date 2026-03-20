@@ -8,9 +8,11 @@ license = "GPL-3.0"
 [features]
 default = []
 tarang = ["dep:tarang", "dep:bytes"]
+opus-enc = ["tarang", "tarang/opus-enc"]
+aac-enc = ["tarang", "tarang/aac-enc"]
 
 [dependencies]
-tarang = { version = "0.19.3", optional = true }
+tarang = { version = "0.20.3", optional = true }
 bytes = { workspace = true, optional = true }
 hound = { workspace = true }
 serde = { workspace = true }
