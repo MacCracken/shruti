@@ -5,6 +5,10 @@ edition = "2024"
 description = "Music LLM runtime, tokenizer, and AI player agents for Shruti"
 license = "GPL-3.0"
 
+[features]
+default = []
+hoosh = ["dep:hoosh", "dep:tokio"]
+
 [dependencies]
 shruti-dsp = { path = "../shruti-dsp" }
 shruti-session = { path = "../shruti-session" }
@@ -12,3 +16,5 @@ shruti-instruments = { path = "../shruti-instruments" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+hoosh = { path = "../../../hoosh", optional = true }
+tokio = { workspace = true, optional = true }

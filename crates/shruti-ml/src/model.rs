@@ -281,6 +281,162 @@ impl ModelManager {
     }
 }
 
+// ── Hoosh inference gateway integration ───────────────────────────────────
+
+#[cfg(feature = "hoosh")]
+mod hoosh_runtime {
+    use super::*;
+
+    /// Model runtime backed by hoosh inference gateway.
+    ///
+    /// Connects to a running hoosh server for real LLM inference.
+    /// Uses blocking runtime for compatibility with the sync ModelRuntime trait.
+    pub struct HooshRuntime {
+        client: hoosh::HooshClient,
+        model_name: String,
+        info: ModelInfo,
+        tokio_rt: tokio::runtime::Runtime,
+    }
+
+    impl HooshRuntime {
+        /// Create a new HooshRuntime connected to the given server.
+        pub fn new(base_url: &str, model_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+            let client = hoosh::HooshClient::new(base_url);
+            let tokio_rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+
+            let info = ModelInfo {
+                name: model_name.to_string(),
+                version: "hoosh-0.20.3".into(),
+                parameters: 0,
+                vocab_size: MidiToken::VOCAB_SIZE,
+                max_seq_len: 4096,
+                styles: vec!["general".into()],
+            };
+
+            Ok(Self {
+                client,
+                model_name: model_name.to_string(),
+                info,
+                tokio_rt,
+            })
+        }
+    }
+
+    impl ModelRuntime for HooshRuntime {
+        fn info(&self) -> &ModelInfo {
+            &self.info
+        }
+
+        fn generate_next(&mut self, context: &[u32], config: &GenerationConfig) -> u32 {
+            // Build a prompt from the token context
+            let token_strings: Vec<String> = context
+                .iter()
+                .filter_map(|id| MidiToken::from_id(*id))
+                .map(|t| format!("{t:?}"))
+                .collect();
+            let prompt = format!(
+                "Continue this music token sequence. Output ONLY the next token name \
+                 (e.g., NoteOn(60), Velocity(16), Duration(8), TimeShift(25)). \
+                 Sequence so far: {}",
+                token_strings.join(" ")
+            );
+
+            let request = hoosh::InferenceRequest {
+                model: self.model_name.clone(),
+                prompt,
+                temperature: Some(config.temperature as f64),
+                max_tokens: Some(16),
+                ..Default::default()
+            };
+
+            let response = self.tokio_rt.block_on(self.client.infer(&request));
+
+            match response {
+                Ok(resp) => {
+                    // Parse the response text back to a token
+                    parse_token_response(&resp.text)
+                        .unwrap_or_else(|| MidiToken::TimeShift(25).to_id())
+                }
+                Err(_) => {
+                    // Fallback: generate a time shift on error
+                    MidiToken::TimeShift(25).to_id()
+                }
+            }
+        }
+
+        fn reset(&mut self) {
+            // No persistent state to reset in the hoosh client
+        }
+    }
+
+    /// Parse a model response text into a token ID.
+    pub(crate) fn parse_token_response(text: &str) -> Option<u32> {
+        let text = text.trim();
+
+        /// Try to parse a "Prefix(N)" style token, returning the inner u8 value.
+        fn parse_paren_u8(text: &str, prefix: &str) -> Option<u8> {
+            text.strip_prefix(prefix)
+                .and_then(|rest| rest.strip_suffix(')'))
+                .and_then(|num_str| num_str.trim().parse::<u8>().ok())
+        }
+
+        if let Some(n) = parse_paren_u8(text, "NoteOn(") {
+            return Some(MidiToken::NoteOn(n).to_id());
+        }
+        if let Some(n) = parse_paren_u8(text, "Velocity(") {
+            return Some(MidiToken::Velocity(n).to_id());
+        }
+        if let Some(n) = parse_paren_u8(text, "Duration(") {
+            return Some(MidiToken::Duration(n).to_id());
+        }
+        if let Some(n) = parse_paren_u8(text, "TimeShift(") {
+            return Some(MidiToken::TimeShift(n).to_id());
+        }
+        if text == "Bar" {
+            return Some(MidiToken::Bar.to_id());
+        }
+        None
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parse_note_on() {
+            assert_eq!(
+                parse_token_response("NoteOn(60)"),
+                Some(MidiToken::NoteOn(60).to_id())
+            );
+        }
+
+        #[test]
+        fn parse_velocity() {
+            assert_eq!(
+                parse_token_response("Velocity(16)"),
+                Some(MidiToken::Velocity(16).to_id())
+            );
+        }
+
+        #[test]
+        fn parse_invalid() {
+            assert_eq!(parse_token_response("garbage"), None);
+        }
+
+        #[test]
+        fn hoosh_runtime_creates() {
+            // This just tests construction, not actual server connectivity
+            let rt = HooshRuntime::new("http://localhost:9999", "test-model");
+            assert!(rt.is_ok());
+        }
+    }
+}
+
+#[cfg(feature = "hoosh")]
+pub use hoosh_runtime::HooshRuntime;
+
 #[cfg(test)]
 mod tests {
     use super::*;

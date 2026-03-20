@@ -18,6 +18,8 @@ pub mod model;
 pub mod player;
 pub mod tokenizer;
 
+#[cfg(feature = "hoosh")]
+pub use model::HooshRuntime;
 pub use model::{GenerationConfig, InferenceScheduler, ModelInfo, ModelManager, ModelRuntime};
 pub use player::{AiPlayer, AiPlayerConfig, PlaybackMode};
 pub use tokenizer::{MidiToken, MidiTokenizer};

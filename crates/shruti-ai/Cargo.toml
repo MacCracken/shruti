@@ -8,6 +8,7 @@ license = "GPL-3.0"
 [features]
 default = []
 tarang = ["dep:tarang", "dep:bytes", "dep:uuid"]
+hoosh = ["dep:hoosh"]
 
 [dependencies]
 shruti-session = { path = "../shruti-session" }
@@ -24,3 +25,4 @@ axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
+hoosh = { path = "../../../hoosh", optional = true }

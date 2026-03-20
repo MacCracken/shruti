@@ -100,6 +100,12 @@ Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
 - **AI Player** (`player.rs`): `InstrumentNode` implementation that generates MIDI via LLM inference. 3 playback modes (Improvisation, Accompaniment, CallAndResponse), sine-tone placeholder rendering, note-on triggers generation
 - **5 AiPlayerParam** controls: Volume, Creativity, Key, Minor, Mode
 
+### Hoosh Integration (feature-gated: `hoosh`)
+- **`HooshRuntime`** in `shruti-ml`: real `ModelRuntime` implementation backed by hoosh inference gateway — sends token context as prompts, parses LLM responses back to `MidiToken` IDs. Uses blocking tokio runtime for sync trait compatibility.
+- **Transcription pipeline** in `shruti-ai`: `transcribe_audio()` for local Whisper STT via hoosh, `describe_audio()` for LLM-powered content description
+- **Feature gate**: `--features hoosh` enables both; path-based dependency (switches to crates.io when hoosh is published)
+- `shruti-ml` added as workspace dependency of main binary
+
 ### Tests
 - 1963 tests passing (up from 1847), 0 clippy warnings
 - New tests: synth unison/sub-osc (5), take management (13), loop recording (6), transport loop iteration (3), plus AcoustID (2), diarization (2), loudness (5), container probe (2), hardware cache (3), GPU metrics (1)

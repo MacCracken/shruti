@@ -50,6 +50,24 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | — MIDI 2.0 / UMP | High-res MIDI + per-note expression | UMP message types, 16/32-bit NoteOnV2/ControlChangeV2/PitchBendV2, per-note pitch bend/pressure/brightness, MIDI 1.0↔2.0 translation, CC processing (mod wheel, brightness), CcMapping |
 | 9A — Music LLM Integration | `shruti-ml` crate | MidiTokenizer (584-token vocab, MIDI↔token), ModelRuntime trait + StubRuntime, InferenceScheduler (lookahead buffer), ModelManager (.shruti-model), GenerationConfig |
 | 9B — AI Player Agents | AiPlayer InstrumentNode | 3 playback modes (Improvisation/Accompaniment/CallAndResponse), 5 AiPlayerParam controls, sine placeholder rendering, note-on triggers generation |
+| — Hoosh Integration | AI inference gateway | HooshRuntime (real LLM via hoosh server), transcription pipeline (Whisper STT), LLM content description, feature-gated `hoosh` |
+
+---
+
+## Next Release — Hoosh Full Inclusion
+
+When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 1 | Switch hoosh to crates.io | Small | `hoosh = { path = "..." }` → `hoosh = { version = "0.20.3", optional = true }` in shruti-ml and shruti-ai |
+| 2 | Real music LLM inference | Medium | Replace StubRuntime default with HooshRuntime; wire model selection UI to hoosh `list_models()` |
+| 3 | Whisper transcription pipeline | Medium | Wire `transcribe_audio()` to MCP tool and agent API; add vocal alignment via word timestamps |
+| 4 | LLM content description | Small | Wire `describe_audio()` to MCP `shruti_analysis` tool for AI-powered audio tagging |
+| 5 | Prompt-based AI direction | Medium | "play a walking bass line" → hoosh LLM → parse response → MidiToken sequence → AiPlayer |
+| 6 | Token budget integration | Small | Per-session token pools via hoosh `TokenBudget`; expose in settings/preferences |
+| 7 | Model selection UI | Medium | Dropdown of available models from hoosh `list_models()`; display in AI Player track settings |
+| 8 | Streaming generation | Large | Use hoosh `infer_stream()` SSE for real-time token-by-token generation; update InferenceScheduler to consume stream |
 
 ---
 

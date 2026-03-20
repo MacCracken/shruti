@@ -46,6 +46,7 @@ license = "GPL-3.0"
 [features]
 default = []
 tarang = ["shruti-dsp/tarang", "shruti-ai/tarang"]
+hoosh = ["shruti-ml/hoosh", "shruti-ai/hoosh"]
 opus-enc = ["shruti-dsp/opus-enc"]
 aac-enc = ["shruti-dsp/aac-enc"]
 
@@ -55,6 +56,7 @@ shruti-dsp = { path = "crates/shruti-dsp" }
 shruti-session = { path = "crates/shruti-session" }
 shruti-ui = { path = "crates/shruti-ui" }
 shruti-ai = { path = "crates/shruti-ai" }
+shruti-ml = { path = "crates/shruti-ml" }
 clap = { workspace = true }
 rtrb = { workspace = true }
 tokio = { workspace = true }
