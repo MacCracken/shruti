@@ -66,7 +66,7 @@ mod tests {
         let mut osc = Oscillator::new(Waveform::Square, 48000.0);
         for _ in 0..4800 {
             let s = osc.sample(440.0);
-            assert!(s >= -1.1 && s <= 1.1, "sample out of range: {s}");
+            assert!((-1.1..=1.1).contains(&s), "sample out of range: {s}");
         }
     }
 
