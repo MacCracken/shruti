@@ -272,5 +272,4 @@ mod tests {
         let ids: Vec<u32> = segments.iter().map(|s| s.speaker_id).collect();
         assert!(ids.iter().all(|&id| id == ids[0]));
     }
-
 }

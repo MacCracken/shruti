@@ -17,8 +17,8 @@ pub mod model;
 pub mod player;
 pub mod tokenizer;
 
-#[cfg(feature = "hoosh")]
-pub use model::{list_available_models, HooshRuntime};
 pub use model::{GenerationConfig, InferenceScheduler, ModelInfo, ModelRuntime};
+#[cfg(feature = "hoosh")]
+pub use model::{HooshRuntime, list_available_models};
 pub use player::{AiPlayer, AiPlayerConfig, PlaybackMode};
 pub use tokenizer::{MidiToken, MidiTokenizer};

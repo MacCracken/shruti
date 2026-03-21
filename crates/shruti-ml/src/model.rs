@@ -4,8 +4,8 @@
 //! The default implementation uses a stub that generates random tokens —
 //! replace with ONNX Runtime or candle for real model inference.
 
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 use crate::tokenizer::MidiToken;
 
@@ -506,5 +506,4 @@ mod tests {
         assert!((config.temperature - 0.8).abs() < 0.01);
         assert_eq!(config.top_k, 40);
     }
-
 }

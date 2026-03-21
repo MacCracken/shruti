@@ -1,6 +1,6 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.20 | **Last Updated**: 2026-03-20
+> **Version**: 2026.3.20-1 | **Last Updated**: 2026-03-20-1
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
 > **Tests**: 1963 passing, 0 clippy warnings, 0 audit vulnerabilities
 
@@ -51,31 +51,22 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 9A — Music LLM Integration | `shruti-ml` crate | MidiTokenizer (584-token vocab, MIDI↔token), ModelRuntime trait + StubRuntime, InferenceScheduler (lookahead buffer), ModelManager (.shruti-model), GenerationConfig |
 | 9B — AI Player Agents | AiPlayer InstrumentNode | 3 playback modes (Improvisation/Accompaniment/CallAndResponse), 5 AiPlayerParam controls, sine placeholder rendering, note-on triggers generation |
 | — Hoosh Integration | AI inference gateway | HooshRuntime (real LLM via hoosh server), transcription pipeline (Whisper STT), LLM content description, feature-gated `hoosh` |
+| — Hoosh Full Inclusion | Inference gateway wiring | hoosh 0.20.4 from crates.io; AgentApi hoosh client; MCP `shruti_models` tool; transcribe/describe actions; `/api/models` endpoint; `list_available_models()`; dead code cleanup (ModelManager, prepare_transcription) |
 
 ---
 
-## Next Release — Hoosh Full Inclusion
-
-When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
+## Next Release — Hoosh Remaining
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 1 | Switch hoosh to crates.io | Small | `hoosh = { path = "..." }` → `hoosh = { version = "0.20.3", optional = true }` in shruti-ml and shruti-ai |
-| 2 | Real music LLM inference | Medium | Replace StubRuntime default with HooshRuntime; wire model selection UI to hoosh `list_models()` |
-| 3 | Whisper transcription pipeline | Medium | Wire `transcribe_audio()` to MCP tool and agent API; add vocal alignment via word timestamps |
-| 4 | LLM content description | Small | Wire `describe_audio()` to MCP `shruti_analysis` tool for AI-powered audio tagging |
-| 5 | Prompt-based AI direction | Medium | "play a walking bass line" → hoosh LLM → parse response → MidiToken sequence → AiPlayer |
-| 6 | Token budget integration | Small | Per-session token pools via hoosh `TokenBudget`; expose in settings/preferences |
-| 7 | Model selection UI | Medium | Dropdown of available models from hoosh `list_models()`; display in AI Player track settings |
-| 8 | Streaming generation | Large | Use hoosh `infer_stream()` SSE for real-time token-by-token generation; update InferenceScheduler to consume stream |
+| 1 | Prompt-based AI direction | Medium | "play a walking bass line" → hoosh LLM → parse response → MidiToken sequence → AiPlayer |
+| 2 | Token budget integration | Small | Per-session token pools via hoosh `TokenBudget`; expose in settings/preferences |
+| 3 | Model selection UI | Medium | Dropdown of available models from hoosh `list_models()`; display in AI Player track settings |
+| 4 | Streaming generation | Large | Use hoosh `infer_stream()` SSE for real-time token-by-token generation; update InferenceScheduler to consume stream |
 
 ---
 
 ## Post-MVP
-
-### ~~Tarang Media Backend (Remaining)~~ (Complete)
-- ~~`tarang-demux` for container-aware import (MP4 audio tracks, MKV, WebM)~~ — Done in 2026.3.20
-- **Benefit**: Shared decode/encode codebase with Tazama and AGNOS media player, wider format support, no ffmpeg dep
 
 ### Synthesizers
 
@@ -86,22 +77,7 @@ When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
 | 3 | Wavetable synth | Large | Wavetable loading (.wav frames, single-cycle), wavetable morphing (smooth interpolation between frames), position modulation via LFO/envelope, built-in factory tables (analog, digital, vocal, organic) |
 | 4 | Physical modeling synth | Large | Karplus-Strong string model, waveguide resonators (plucked/bowed/struck), exciter types (noise burst, impulse, bow), body resonance modeling, material parameters (brightness, decay, stiffness) |
 | 5 | Granular synth | Large | Grain cloud engine (position, density, size, pitch, spread), real-time granulation of loaded samples, freeze/scatter/spray modes, per-grain envelope (Gaussian/trapezoid), stereo grain panning |
-| ~~6~~ | ~~Unison & voice stacking~~ | ~~Medium~~ | ~~Per-oscillator unison voices (up to 8), spread (detune + stereo width), sub-oscillator (-1/-2 octave), supersaw-style detuned stacks~~ — Done in 2026.3.20 |
-| 7 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
-
-### Sampler
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| ~~1~~ | ~~Time-stretching~~ | ~~Large~~ | ~~Granular or phase-vocoder based pitch-independent time stretch; real-time quality~~ — Done in 2026.3.20 (granular OLA) |
-
-### Live Looped Recording
-
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| ~~1~~ | ~~Loop-aware overdub recording~~ | ~~Medium~~ | ~~When loop mode is active and recording, each loop iteration creates a new take/layer on armed tracks~~ — Done in 2026.3.20 |
-| ~~2~~ | ~~Take/layer management~~ | ~~Medium~~ | ~~Stack, mute, solo, delete individual takes per track per loop pass~~ — Done in 2026.3.20 |
-| ~~3~~ | ~~Comp editing~~ | ~~Large~~ | ~~Select best sections across takes to build a composite region~~ — Done in 2026.3.20 |
+| 6 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
 
 ### MIDI 2.0
 
@@ -109,13 +85,9 @@ When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| ~~1~~ | ~~Universal MIDI Packet (UMP)~~ | ~~Medium~~ | ~~32/64/96/128-bit message types, message type routing~~ — Done in 2026.3.20 |
-| 2 | MIDI-CI (Capability Inquiry) | Medium | Profile negotiation, property exchange between devices |
-| ~~3~~ | ~~Per-note controllers~~ | ~~Medium~~ | ~~Per-note pitch bend, pressure, CC — higher resolution than MIDI 1.0~~ — Done in 2026.3.20 |
-| ~~4~~ | ~~32-bit velocity & CC resolution~~ | ~~Small~~ | ~~Upgrade from 7-bit (0-127) to 32-bit resolution~~ — Done in 2026.3.20 |
-| 5 | Property exchange | Medium | JSON-based device/plugin property queries |
-| 6 | MIDI 2.0 device I/O | Large | Platform MIDI 2.0 drivers (ALSA sequencer, CoreMIDI, WinRT MIDI) |
-| ~~7~~ | ~~Backward compatibility~~ | ~~Small~~ | ~~Transparent MIDI 1.0 ↔ 2.0 translation layer~~ — Done in 2026.3.20 |
+| 1 | MIDI-CI (Capability Inquiry) | Medium | Profile negotiation, property exchange between devices |
+| 2 | Property exchange | Medium | JSON-based device/plugin property queries |
+| 3 | MIDI 2.0 device I/O | Large | Platform MIDI 2.0 drivers (ALSA sequencer, CoreMIDI, WinRT MIDI) |
 
 ### AI Instruments & Players (Phase 9)
 
@@ -173,15 +145,7 @@ When hoosh 0.20.3 is published to crates.io, switch from path deps to versioned:
 
 Issues identified in code audit, triaged as Medium/Low. Critical/High issues were fixed inline.
 
-### ~~Medium Priority~~ (All resolved — 2026.3.20)
-
-All 21 medium-priority items (M1–M21) fixed. See CHANGELOG for details.
-
-### ~~Low Priority~~ (All resolved — 2026.3.20)
-
-All 16 low-priority items (L1–L16) fixed. See CHANGELOG for details.
-
-## Engineering Backlog — Performance & Architecture (2026.3.20)
+## Engineering Backlog
 
 ### Performance (from hot-path audit)
 

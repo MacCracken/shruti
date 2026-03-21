@@ -328,8 +328,8 @@ fn effects_chain_eq_compressor_reverb_delay() {
     let original = AudioBuffer::from_interleaved(stereo.clone(), 2);
 
     // --- Stage 1: EQ (12 dB boost at 1kHz) ---
-    let mut eq = ParametricEq::new(sample_rate);
-    eq.add_band(EqBand::new(FilterType::Peak, 1000.0, 12.0, 1.0));
+    let bands = vec![EqBand::new(FilterType::Peak, 1000.0, 12.0, 1.0)];
+    let mut eq = ParametricEq::new(bands, sample_rate, 2);
 
     let mut buf_eq = AudioBuffer::from_interleaved(stereo.clone(), 2);
     eq.process(&mut buf_eq);
@@ -1407,8 +1407,8 @@ fn synth_through_effects_chain() {
     assert!(!is_silent(&buf, 0.001), "Synth should produce audio");
 
     // Run through EQ (in-place)
-    let mut eq = ParametricEq::new(sample_rate);
-    eq.add_band(EqBand::new(FilterType::Peak, 440.0, 6.0, 1.0));
+    let bands = vec![EqBand::new(FilterType::Peak, 440.0, 6.0, 1.0)];
+    let mut eq = ParametricEq::new(bands, sample_rate, 2);
     eq.process(&mut buf);
     assert!(!is_silent(&buf, 0.001), "EQ should not silence audio");
 

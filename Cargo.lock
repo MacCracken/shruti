@@ -1097,6 +1097,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
+name = "dhvani"
+version = "0.20.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30899697e7cb3446a0efba14a17077ebfd355c86d2564293a45dd172e5c625c0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3947,7 +3958,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shruti"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "clap",
  "criterion",
@@ -3968,7 +3979,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-ai"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "ai-hwaccel",
  "axum",
@@ -3989,9 +4000,10 @@ dependencies = [
 
 [[package]]
 name = "shruti-dsp"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "bytes",
+ "dhvani",
  "hound",
  "serde",
  "serde_json",
@@ -4000,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-engine"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "cpal",
  "midir",
@@ -4010,7 +4022,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-instruments"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4022,7 +4034,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-ml"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "hoosh",
  "serde",
@@ -4036,7 +4048,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-plugin"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "libloading",
  "serde",
@@ -4048,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-session"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "hound",
  "rusqlite",
@@ -4062,7 +4074,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-test-utils"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "shruti-dsp",
  "shruti-session",
@@ -4070,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "shruti-ui"
-version = "2026.3.20"
+version = "2026.3.20-1"
 dependencies = [
  "eframe",
  "egui",

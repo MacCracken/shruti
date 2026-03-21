@@ -401,9 +401,9 @@ impl McpTools {
                 let data = serde_json::to_value(&info).unwrap_or_default();
                 ApiResult::ok_with_data("hardware detected", data)
             }
-            "hoosh_health" => ApiResult::err(
-                "hoosh_health requires async — use the /api/hardware HTTP endpoint",
-            ),
+            "hoosh_health" => {
+                ApiResult::err("hoosh_health requires async — use the /api/hardware HTTP endpoint")
+            }
             _ => ApiResult::err(format!("unknown hardware action: {action}")),
         };
         McpToolResult::from_api(result)
@@ -412,9 +412,9 @@ impl McpTools {
     fn handle_models(args: &serde_json::Value) -> McpToolResult {
         let action = args["action"].as_str().unwrap_or("");
         let result = match action {
-            "list" => ApiResult::err(
-                "model listing requires async — use the /api/models HTTP endpoint",
-            ),
+            "list" => {
+                ApiResult::err("model listing requires async — use the /api/models HTTP endpoint")
+            }
             _ => ApiResult::err(format!("unknown models action: {action}")),
         };
         McpToolResult::from_api(result)
@@ -449,12 +449,10 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Agent Song" }),
-        )
-        ;
+        );
         assert!(!result.is_error);
 
-        let result =
-            McpTools::dispatch(&mut api, "shruti_session", &json!({ "action": "info" }));
+        let result = McpTools::dispatch(&mut api, "shruti_session", &json!({ "action": "info" }));
         assert!(!result.is_error);
         assert!(result.content[0].text.contains("Agent Song"));
     }
@@ -466,27 +464,23 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Test" }),
-        )
-        ;
+        );
 
         let result = McpTools::dispatch(
             &mut api,
             "shruti_tracks",
             &json!({ "action": "add", "name": "Drums", "kind": "audio" }),
-        )
-        ;
+        );
         assert!(!result.is_error);
 
         let result = McpTools::dispatch(
             &mut api,
             "shruti_tracks",
             &json!({ "action": "gain", "name": "Drums", "value": 0.7 }),
-        )
-        ;
+        );
         assert!(!result.is_error);
 
-        let result =
-            McpTools::dispatch(&mut api, "shruti_tracks", &json!({ "action": "list" }));
+        let result = McpTools::dispatch(&mut api, "shruti_tracks", &json!({ "action": "list" }));
         assert!(!result.is_error);
         assert!(result.content[0].text.contains("Drums"));
     }
@@ -498,8 +492,7 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Test" }),
-        )
-        ;
+        );
 
         assert!(
             !McpTools::dispatch(&mut api, "shruti_transport", &json!({ "action": "play" }))
@@ -523,15 +516,13 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Test" }),
-        )
-        ;
+        );
 
         let result = McpTools::dispatch(
             &mut api,
             "shruti_analysis",
             &json!({ "action": "composition" }),
-        )
-        ;
+        );
         assert!(!result.is_error);
     }
 
