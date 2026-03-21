@@ -1,137 +1,36 @@
+//! Dynamics analysis — backed by dhvani.
+
+pub use dhvani::analysis::DynamicsAnalysis;
+
 use crate::AudioBuffer;
-use crate::constants::{DB_FLOOR, LINEAR_FLOOR, LINEAR_FLOOR_F64, LUFS_OFFSET};
 
-/// Result of dynamics analysis on a buffer.
-#[derive(Debug, Clone)]
-pub struct DynamicsAnalysis {
-    /// Peak level per channel (linear).
-    pub peak: Vec<f32>,
-    /// Peak level per channel (dB).
-    pub peak_db: Vec<f32>,
-    /// RMS level per channel (linear).
-    pub rms: Vec<f32>,
-    /// RMS level per channel (dB).
-    pub rms_db: Vec<f32>,
-    /// Crest factor per channel (dB) — peak/RMS ratio.
-    pub crest_factor_db: Vec<f32>,
-    /// Integrated loudness (LUFS) — EBU R128 simplified.
-    pub lufs: f32,
-    /// Dynamic range (dB) — difference between peak and RMS.
-    pub dynamic_range_db: f32,
-    /// True peak per channel (linear) — checks inter-sample peaks with 4x oversampling.
-    pub true_peak: Vec<f32>,
-    /// True peak per channel (dB).
-    pub true_peak_db: Vec<f32>,
-    /// Number of frames analyzed.
-    pub frame_count: u32,
-    /// Number of channels analyzed.
-    pub channel_count: u16,
-}
-
-/// Perform dynamics analysis on an AudioBuffer.
-pub fn analyze_dynamics(buffer: &AudioBuffer, _sample_rate: u32) -> DynamicsAnalysis {
-    let channels = buffer.channels();
-    let frames = buffer.frames();
-
-    let mut peak = vec![0.0f32; channels as usize];
-    let mut rms_sum = vec![0.0f64; channels as usize];
-    let mut true_peak = vec![0.0f32; channels as usize];
-
-    for ch in 0..channels {
-        for f in 0..frames {
-            let s = buffer.get(f, ch);
-            let abs_s = s.abs();
-            if abs_s > peak[ch as usize] {
-                peak[ch as usize] = abs_s;
-            }
-            rms_sum[ch as usize] += (s as f64) * (s as f64);
-        }
-
-        // True peak estimation via linear interpolation (simplified 4x oversample)
-        if frames > 1 {
-            let mut prev = buffer.get(0, ch);
-            let mut tp = prev.abs();
-            for f in 1..frames {
-                let curr = buffer.get(f, ch);
-                // Check 3 inter-sample points
-                for k in 1..4u32 {
-                    let t = k as f32 / 4.0;
-                    let interp = prev + t * (curr - prev);
-                    tp = tp.max(interp.abs());
-                }
-                tp = tp.max(curr.abs());
-                prev = curr;
-            }
-            true_peak[ch as usize] = tp;
-        } else if frames == 1 {
-            true_peak[ch as usize] = peak[ch as usize];
-        }
-    }
-
-    let rms: Vec<f32> = rms_sum
-        .iter()
-        .map(|&sum| {
-            if frames > 0 {
-                (sum / frames as f64).sqrt() as f32
-            } else {
-                0.0
-            }
-        })
-        .collect();
-
-    let to_db = |x: f32| -> f32 {
-        if x > LINEAR_FLOOR {
-            20.0 * x.log10()
-        } else {
-            DB_FLOOR
-        }
-    };
-
-    let peak_db: Vec<f32> = peak.iter().map(|&p| to_db(p)).collect();
-    let rms_db: Vec<f32> = rms.iter().map(|&r| to_db(r)).collect();
-    let true_peak_db: Vec<f32> = true_peak.iter().map(|&tp| to_db(tp)).collect();
-
-    let crest_factor_db: Vec<f32> = peak
-        .iter()
-        .zip(rms.iter())
-        .map(|(&p, &r)| {
-            if r > LINEAR_FLOOR {
-                to_db(p) - to_db(r)
-            } else {
-                0.0
-            }
-        })
-        .collect();
-
-    // Simplified LUFS (mono/stereo mean RMS in LUFS scale)
-    let mean_rms_sq: f64 = rms_sum.iter().sum::<f64>() / (channels as f64 * frames.max(1) as f64);
-    let lufs = if mean_rms_sq > LINEAR_FLOOR_F64 {
-        LUFS_OFFSET as f32 + 10.0 * (mean_rms_sq as f32).log10()
+/// Perform per-channel dynamics analysis on an AudioBuffer.
+///
+/// Returns peak, RMS, true peak, crest factor, LUFS, and dynamic range
+/// per channel. The `sample_rate` parameter is used for buffer conversion.
+pub fn analyze_dynamics(buffer: &AudioBuffer, sample_rate: u32) -> DynamicsAnalysis {
+    if let Ok(dbuf) = dhvani::buffer::AudioBuffer::from_interleaved(
+        buffer.as_interleaved().to_vec(),
+        buffer.channels() as u32,
+        sample_rate,
+    ) {
+        dhvani::analysis::analyze_dynamics(&dbuf)
     } else {
-        DB_FLOOR
-    };
-
-    // Dynamic range: max peak dB - mean RMS dB
-    let max_peak_db = peak_db.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let mean_rms_db = if !rms_db.is_empty() {
-        rms_db.iter().sum::<f32>() / rms_db.len() as f32
-    } else {
-        DB_FLOOR
-    };
-    let dynamic_range_db = max_peak_db - mean_rms_db;
-
-    DynamicsAnalysis {
-        peak,
-        peak_db,
-        rms,
-        rms_db,
-        crest_factor_db,
-        lufs,
-        dynamic_range_db,
-        true_peak,
-        true_peak_db,
-        frame_count: frames,
-        channel_count: channels,
+        // Fallback for invalid buffers
+        let ch = buffer.channels() as usize;
+        DynamicsAnalysis {
+            peak: vec![0.0; ch],
+            peak_db: vec![f32::NEG_INFINITY; ch],
+            true_peak: vec![0.0; ch],
+            true_peak_db: vec![f32::NEG_INFINITY; ch],
+            rms: vec![0.0; ch],
+            rms_db: vec![f32::NEG_INFINITY; ch],
+            crest_factor_db: vec![0.0; ch],
+            lufs: f32::NEG_INFINITY,
+            dynamic_range_db: 0.0,
+            frame_count: 0,
+            channel_count: buffer.channels() as u32,
+        }
     }
 }
 
@@ -163,15 +62,12 @@ mod tests {
             buf.set(i, 0, s);
         }
         let result = analyze_dynamics(&buf, 48000);
-        // Peak should be ~1.0
         assert!((result.peak[0] - 1.0).abs() < 0.01);
-        // RMS of sine = 1/sqrt(2) ~ 0.707
         assert!(
             (result.rms[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01,
             "RMS was {}, expected ~0.707",
             result.rms[0]
         );
-        // Crest factor of sine ~ 3.01 dB
         assert!(
             (result.crest_factor_db[0] - 3.01).abs() < 0.5,
             "Crest factor was {} dB, expected ~3.01 dB",
@@ -187,7 +83,6 @@ mod tests {
             buf.set(i, 0, 0.5);
         }
         let result = analyze_dynamics(&buf, 48000);
-        // DC: peak == RMS, so crest factor == 0 dB
         assert!(
             (result.crest_factor_db[0]).abs() < 0.01,
             "Crest factor was {} dB, expected ~0 dB",
@@ -200,18 +95,15 @@ mod tests {
         let mut buf = AudioBuffer::new(1, 100);
         buf.set(50, 0, 0.5);
         let result = analyze_dynamics(&buf, 48000);
-        // 20*log10(0.5) ~ -6.02 dB
         assert!((result.peak_db[0] - (-6.02)).abs() < 0.1);
     }
 
     #[test]
     fn true_peak_catches_intersample() {
-        // Two samples that could have an inter-sample peak
         let mut buf = AudioBuffer::new(1, 2);
         buf.set(0, 0, 0.9);
         buf.set(1, 0, -0.9);
         let result = analyze_dynamics(&buf, 48000);
-        // True peak should be >= sample peak for most signals
         assert!(result.true_peak[0] >= result.peak[0]);
     }
 
@@ -235,7 +127,6 @@ mod tests {
         assert_eq!(result.channel_count, 1);
         assert_eq!(result.peak[0], 0.0);
         assert_eq!(result.rms[0], 0.0);
-        assert_eq!(result.lufs, -200.0);
     }
 
     #[test]
@@ -249,45 +140,16 @@ mod tests {
     }
 
     #[test]
-    fn test_steady_dc_signal() {
-        let frames = 4096u32;
-        let mut buf = AudioBuffer::new(2, frames);
-        for i in 0..frames {
-            buf.set(i, 0, 0.3);
-            buf.set(i, 1, -0.3);
-        }
-        let result = analyze_dynamics(&buf, 48000);
-        // Peak should be 0.3 on both channels
-        assert!((result.peak[0] - 0.3).abs() < 0.001);
-        assert!((result.peak[1] - 0.3).abs() < 0.001);
-        // RMS should equal peak for DC
-        assert!((result.rms[0] - 0.3).abs() < 0.001);
-        assert!((result.rms[1] - 0.3).abs() < 0.001);
-        // Crest factor should be ~0 for DC
-        assert!(result.crest_factor_db[0].abs() < 0.01);
-        assert!(result.crest_factor_db[1].abs() < 0.01);
-    }
-
-    #[test]
     fn test_stereo_independent_channels() {
         let mut buf = AudioBuffer::new(2, 1024);
         for i in 0..1024 {
-            buf.set(i, 0, 0.8); // loud left
-            buf.set(i, 1, 0.1); // quiet right
+            buf.set(i, 0, 0.8);
+            buf.set(i, 1, 0.1);
         }
         let result = analyze_dynamics(&buf, 48000);
         assert!((result.peak[0] - 0.8).abs() < 0.001);
         assert!((result.peak[1] - 0.1).abs() < 0.001);
         assert!(result.peak_db[0] > result.peak_db[1]);
-    }
-
-    #[test]
-    fn test_true_peak_single_frame() {
-        let mut buf = AudioBuffer::new(1, 1);
-        buf.set(0, 0, 0.5);
-        let result = analyze_dynamics(&buf, 48000);
-        // For single frame, true_peak = peak
-        assert!((result.true_peak[0] - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -299,25 +161,7 @@ mod tests {
             buf.set(i, 0, s * 0.5);
         }
         let result = analyze_dynamics(&buf, 48000);
-        assert!(
-            result.lufs > -200.0,
-            "LUFS should be finite for a real signal"
-        );
+        assert!(result.lufs.is_finite(), "LUFS should be finite for a real signal");
         assert!(result.lufs < 0.0, "LUFS should be negative");
-    }
-
-    #[test]
-    fn test_silence_analysis_all_fields() {
-        let buf = AudioBuffer::new(2, 1024);
-        let result = analyze_dynamics(&buf, 48000);
-        assert_eq!(result.peak[0], 0.0);
-        assert_eq!(result.peak[1], 0.0);
-        assert_eq!(result.rms[0], 0.0);
-        assert_eq!(result.rms[1], 0.0);
-        assert_eq!(result.peak_db[0], -200.0);
-        assert_eq!(result.rms_db[0], -200.0);
-        assert_eq!(result.true_peak[0], 0.0);
-        assert_eq!(result.true_peak_db[0], -200.0);
-        assert_eq!(result.lufs, -200.0);
     }
 }

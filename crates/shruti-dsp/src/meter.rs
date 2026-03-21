@@ -1,13 +1,11 @@
 use crate::buffer::AudioBuffer;
-use crate::constants::{
-    DB_FLOOR, LINEAR_FLOOR, LUFS_BLOCK_DURATION, LUFS_OFFSET, MAX_LUFS_BLOCKS,
-    PEAK_DECAY_COEFFICIENT,
-};
 
 // Lock-free peak meters from dhvani (for RT-safe metering).
-pub use dhvani::meter::{MeterBank, PeakMeter, SharedMeterBank, shared_meter_bank};
+pub use dhvani::meter::{LevelMeter, MeterBank, PeakMeter, SharedMeterBank, shared_meter_bank};
 
 /// Audio level meter with peak, RMS, and LUFS measurements.
+///
+/// Wraps dhvani's [`LevelMeter`] with shruti `AudioBuffer` conversion.
 #[derive(Debug, Clone)]
 pub struct Meter {
     /// Current peak level per channel (linear).
@@ -17,16 +15,7 @@ pub struct Meter {
     /// Integrated LUFS value (mono/stereo).
     pub lufs: f32,
     channels: usize,
-    // RMS accumulator state
-    rms_sum: Vec<f64>,
-    rms_count: u64,
-    // LUFS gating state (simplified EBU R128)
-    lufs_blocks: Vec<f64>,
-    lufs_buffer: Vec<f64>,
-    lufs_buffer_pos: usize,
-    /// Peak hold with decay
-    peak_hold: Vec<f32>,
-    peak_decay: f32,
+    inner: LevelMeter,
 }
 
 impl Meter {
@@ -34,177 +23,54 @@ impl Meter {
         Self {
             peak: vec![0.0; channels],
             rms: vec![0.0; channels],
-            lufs: DB_FLOOR,
+            lufs: -200.0,
             channels,
-            rms_sum: vec![0.0; channels],
-            rms_count: 0,
-            lufs_blocks: Vec::new(),
-            lufs_buffer: vec![0.0; (sample_rate * LUFS_BLOCK_DURATION) as usize],
-            lufs_buffer_pos: 0,
-            peak_hold: vec![0.0; channels],
-            peak_decay: PEAK_DECAY_COEFFICIENT,
+            inner: LevelMeter::new(channels, sample_rate),
         }
     }
 
     /// Analyze an audio buffer and update all meter values.
     pub fn process(&mut self, buffer: &AudioBuffer) {
-        let frames = buffer.frames();
-        let channels = buffer.channels() as usize;
-        let active_channels = channels.min(self.channels);
-
-        // Reset peak for this block
-        for ch_peak in &mut self.peak {
-            *ch_peak = 0.0;
+        if let Ok(dbuf) = dhvani::buffer::AudioBuffer::from_interleaved(
+            buffer.as_interleaved().to_vec(),
+            buffer.channels() as u32,
+            48000, // sample rate not used for metering math
+        ) {
+            self.inner.process(&dbuf);
+            // Sync public fields from dhvani's inner state
+            let ch = self.channels.min(self.inner.peak.len());
+            self.peak[..ch].copy_from_slice(&self.inner.peak[..ch]);
+            self.rms[..ch].copy_from_slice(&self.inner.rms[..ch]);
+            self.lufs = self.inner.lufs;
         }
-
-        for frame in 0..frames {
-            // EBU R128 compliant LUFS: average per-channel mean-square values
-            let mut channel_sq_sum: f64 = 0.0;
-
-            for ch in 0..active_channels {
-                let sample = buffer.get(frame, ch as u16);
-                let abs = sample.abs();
-
-                // Peak detection
-                if abs > self.peak[ch] {
-                    self.peak[ch] = abs;
-                }
-
-                // RMS accumulation
-                let sq = (sample as f64).powi(2);
-                self.rms_sum[ch] += sq;
-
-                // LUFS: sum squared samples per channel
-                channel_sq_sum += sq;
-            }
-
-            self.rms_count += 1;
-
-            // LUFS: average RMS-squared per channel, then accumulate into 400ms blocks
-            let mean_sq = if active_channels > 0 {
-                channel_sq_sum / active_channels as f64
-            } else {
-                0.0
-            };
-            if self.lufs_buffer_pos < self.lufs_buffer.len() {
-                self.lufs_buffer[self.lufs_buffer_pos] = mean_sq;
-                self.lufs_buffer_pos += 1;
-            }
-
-            if self.lufs_buffer_pos >= self.lufs_buffer.len() {
-                // Complete a 400ms block
-                let block_power: f64 =
-                    self.lufs_buffer.iter().sum::<f64>() / self.lufs_buffer.len() as f64;
-                self.lufs_blocks.push(block_power);
-                self.lufs_buffer_pos = 0;
-                self.compute_lufs();
-            }
-        }
-
-        // Update RMS
-        if self.rms_count > 0 {
-            for ch in 0..self.channels {
-                self.rms[ch] = (self.rms_sum[ch] / self.rms_count as f64).sqrt() as f32;
-            }
-        }
-
-        // Update peak hold with decay
-        for ch in 0..self.channels {
-            if self.peak[ch] > self.peak_hold[ch] {
-                self.peak_hold[ch] = self.peak[ch];
-            } else {
-                self.peak_hold[ch] *= self.peak_decay;
-            }
-        }
-    }
-
-    /// Compute integrated LUFS using simplified EBU R128 gating.
-    /// Uses in-place iteration to avoid temporary Vec allocations.
-    fn compute_lufs(&mut self) {
-        if self.lufs_blocks.is_empty() {
-            self.lufs = DB_FLOOR;
-            return;
-        }
-        if self.lufs_blocks.len() > MAX_LUFS_BLOCKS {
-            let drain_count = self.lufs_blocks.len() - MAX_LUFS_BLOCKS;
-            self.lufs_blocks.drain(..drain_count);
-        }
-
-        // Absolute gate: -70 LUFS
-        let abs_gate = 10.0_f64.powf(-70.0 / 10.0);
-
-        // First pass: compute count and sum of blocks above absolute gate
-        let mut gated_count: usize = 0;
-        let mut gated_sum: f64 = 0.0;
-        for &p in &self.lufs_blocks {
-            if p > abs_gate {
-                gated_count += 1;
-                gated_sum += p;
-            }
-        }
-
-        if gated_count == 0 {
-            self.lufs = DB_FLOOR;
-            return;
-        }
-
-        // Relative gate: mean - 10 LUFS
-        let mean_power = gated_sum / gated_count as f64;
-        let rel_gate = mean_power * 10.0_f64.powf(-10.0 / 10.0);
-
-        // Second pass: compute count and sum of blocks above both gates
-        let mut final_count: usize = 0;
-        let mut final_sum: f64 = 0.0;
-        for &p in &self.lufs_blocks {
-            if p > abs_gate && p > rel_gate {
-                final_count += 1;
-                final_sum += p;
-            }
-        }
-
-        if final_count == 0 {
-            self.lufs = DB_FLOOR;
-            return;
-        }
-
-        let integrated = final_sum / final_count as f64;
-        self.lufs = (LUFS_OFFSET + 10.0 * integrated.log10()) as f32;
     }
 
     /// Get peak level in dB for a channel.
     pub fn peak_db(&self, channel: usize) -> f32 {
-        linear_to_db(self.peak.get(channel).copied().unwrap_or(0.0))
+        self.inner.peak_db(channel)
     }
 
     /// Get RMS level in dB for a channel.
     pub fn rms_db(&self, channel: usize) -> f32 {
-        linear_to_db(self.rms.get(channel).copied().unwrap_or(0.0))
+        self.inner.rms_db(channel)
     }
 
     /// Get peak hold level in dB for a channel.
     pub fn peak_hold_db(&self, channel: usize) -> f32 {
-        linear_to_db(self.peak_hold.get(channel).copied().unwrap_or(0.0))
+        self.inner.peak_hold_db(channel)
+    }
+
+    /// Peak hold values per channel (linear).
+    pub fn peak_hold(&self) -> &[f32] {
+        self.inner.peak_hold()
     }
 
     /// Reset all meter state.
     pub fn reset(&mut self) {
+        self.inner.reset();
         self.peak.fill(0.0);
         self.rms.fill(0.0);
-        self.lufs = DB_FLOOR;
-        self.rms_sum.fill(0.0);
-        self.rms_count = 0;
-        self.lufs_blocks.clear();
-        self.lufs_buffer.fill(0.0);
-        self.lufs_buffer_pos = 0;
-        self.peak_hold.fill(0.0);
-    }
-}
-
-fn linear_to_db(linear: f32) -> f32 {
-    if linear < LINEAR_FLOOR {
-        DB_FLOOR
-    } else {
-        20.0 * linear.log10()
+        self.lufs = -200.0;
     }
 }
 
@@ -247,13 +113,6 @@ mod tests {
             (meter.rms[0] - 0.5).abs() < 0.001,
             "RMS of constant 0.5 signal"
         );
-    }
-
-    #[test]
-    fn test_meter_db_conversion() {
-        assert!((linear_to_db(1.0)).abs() < 0.001);
-        assert!((linear_to_db(0.5) - (-6.02)).abs() < 0.1);
-        assert!(linear_to_db(0.0) < -100.0);
     }
 
     #[test]
@@ -308,7 +167,7 @@ mod tests {
         meter.process(&buf1);
 
         assert!(
-            (meter.peak_hold[0] - 0.8).abs() < 0.001,
+            (meter.peak_hold()[0] - 0.8).abs() < 0.001,
             "Peak hold should capture 0.8"
         );
         let hold_db = meter.peak_hold_db(0);
@@ -324,11 +183,11 @@ mod tests {
         meter.process(&buf2);
 
         assert!(
-            meter.peak_hold[0] > 0.0,
+            meter.peak_hold()[0] > 0.0,
             "Peak hold should still be positive after decay"
         );
         assert!(
-            meter.peak_hold[0] < 0.8,
+            meter.peak_hold()[0] < 0.8,
             "Peak hold should have decayed below 0.8"
         );
     }
@@ -381,7 +240,7 @@ mod tests {
 
         // Verify something was accumulated
         assert!(meter.rms[0] > 0.0);
-        assert!(meter.peak_hold[0] > 0.0);
+        assert!(meter.peak_hold()[0] > 0.0);
 
         meter.reset();
 
@@ -390,12 +249,8 @@ mod tests {
         assert_eq!(meter.rms[0], 0.0);
         assert_eq!(meter.rms[1], 0.0);
         assert_eq!(meter.lufs, -200.0);
-        assert_eq!(meter.peak_hold[0], 0.0);
-        assert_eq!(meter.peak_hold[1], 0.0);
-        // Internal state should be cleared
-        assert_eq!(meter.rms_count, 0);
-        assert!(meter.lufs_blocks.is_empty());
-        assert_eq!(meter.lufs_buffer_pos, 0);
+        assert_eq!(meter.peak_hold()[0], 0.0);
+        assert_eq!(meter.peak_hold()[1], 0.0);
     }
 
     #[test]

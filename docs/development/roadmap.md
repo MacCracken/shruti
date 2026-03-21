@@ -1,6 +1,6 @@
 # Shruti Roadmap — Path to MVP v1
 
-> **Version**: 2026.3.20-1 | **Last Updated**: 2026-03-20-1
+> **Version**: 2026.3.21 | **Last Updated**: 2026-03-21
 > **Status**: All MVP phases complete (1–8G, 16A) — remaining work is post-MVP (synth expansion, MIDI 2.0, AI instruments)
 > **Tests**: 1963 passing, 0 clippy warnings, 0 audit vulnerabilities
 
@@ -52,6 +52,7 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 | 9B — AI Player Agents | AiPlayer InstrumentNode | 3 playback modes (Improvisation/Accompaniment/CallAndResponse), 5 AiPlayerParam controls, sine placeholder rendering, note-on triggers generation |
 | — Hoosh Integration | AI inference gateway | HooshRuntime (real LLM via hoosh server), transcription pipeline (Whisper STT), LLM content description, feature-gated `hoosh` |
 | — Hoosh Full Inclusion | Inference gateway wiring | hoosh 0.20.4 from crates.io; AgentApi hoosh client; MCP `shruti_models` tool; transcribe/describe actions; `/api/models` endpoint; `list_available_models()`; dead code cleanup (ModelManager, prepare_transcription) |
+| — Full Dhvani Integration | Complete audio engine | dhvani 0.20.4 with midi+graph features; 9 new DSP effects (biquad, graphic EQ, de-esser, modulated delay, oscillator, LFO, envelope, gain smoother, free functions); 5 analysis wrappers (chromagram, onset, STFT, R128 loudness, silence); clock, MIDI, graph, metering modules; buffer utilities (resample, format conversion, mixing) |
 
 ---
 
@@ -141,11 +142,9 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ---
 
-## Engineering Backlog (2026.3.20 Audit)
+## Engineering Backlog
 
 Issues identified in code audit, triaged as Medium/Low. Critical/High issues were fixed inline.
-
-## Engineering Backlog
 
 ### Performance (from hot-path audit)
 
@@ -183,7 +182,7 @@ Issues identified in code audit, triaged as Medium/Low. Critical/High issues wer
 | Crate | Purpose | Status |
 |-------|---------|--------|
 | `shruti-engine` | Real-time audio engine, cpal backend, lock-free graph, MIDI I/O (midir) | Active |
-| `shruti-dsp` | Audio buffers, format types, file I/O, effects, metering | Active |
+| `shruti-dsp` | Audio buffers, format types, file I/O, 14 effects, analysis (FFT, R128, chromagram, onset, STFT), MIDI, graph, clock, metering | Active |
 | `shruti-session` | Session, tracks, regions, timeline, transport, undo, MIDI, preferences | Active |
 | `shruti-plugin` | Plugin hosting: CLAP, VST3, native Rust | Active |
 | `shruti-ui` | GPU-accelerated DAW UI (egui + eframe) | Active |
@@ -202,4 +201,4 @@ Issues identified in code audit, triaged as Medium/Low. Critical/High issues wer
 
 Pure egui rendering files (~2500 lines across 16 view/widget files) are excluded from coverage measurement — they contain only `fn(&mut Ui)` callbacks with no extractable logic. All testable computation has been extracted into `logic.rs`, widget test modules, or standalone pure functions.
 
-*Last Updated: 2026-03-20*
+*Last Updated: 2026-03-21*

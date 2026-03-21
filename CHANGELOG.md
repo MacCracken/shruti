@@ -49,24 +49,18 @@ Integrates all remaining [dhvani](https://crates.io/crates/dhvani) 0.20.4 capabi
 
 ---
 
-## 2026.3.20-1 — Hoosh Full Integration
+## 2026.3.20 — Tarang 0.20.3 Upgrade, Hoosh & New Features
 
 ### Hoosh Inference Gateway (0.20.4)
-- Switched hoosh from local path dep to crates.io `version = "0.20.4"`
-- **AgentApi**: optional `HooshClient` field with `with_hoosh(url)` constructor; async methods for `list_models()`, `hoosh_health()`, `transcribe_audio()`, `describe_audio()`
-- **MCP tools**: new `shruti_models` tool (list available AI models); extended `shruti_analysis` with `transcribe` and `describe` actions; extended `shruti_hardware` with `hoosh_health` action
-- **HTTP serve**: new `POST /api/models` endpoint; `HOOSH_URL` env-based client construction; hoosh client cloned outside lock for Send-safe async futures
-- **shruti-ml**: new `list_available_models()` function for querying hoosh model registry
-- Replaced transcription chat-API workaround with proper `hoosh::InferenceRequest`; typed `HooshError` instead of `Box<dyn Error>`
-
-### Dead Code Removal
-- Removed `ModelManager` (local `.shruti-model` file scanner) — replaced by `hoosh::list_models()`
-- Removed `prepare_transcription()` — replaced by hoosh transcription pipeline
-- Removed unused re-exports: `TranscriptionResult`, `TranscriptionSegment`
-
----
-
-## 2026.3.20 — Tarang 0.20.3 Upgrade & New Features
+- `+` Switched hoosh from local path dep to crates.io `version = "0.20.4"`
+- `+` **AgentApi**: optional `HooshClient` field with `with_hoosh(url)` constructor; async methods for `list_models()`, `hoosh_health()`, `transcribe_audio()`, `describe_audio()`
+- `+` **MCP tools**: new `shruti_models` tool (list available AI models); extended `shruti_analysis` with `transcribe` and `describe` actions; extended `shruti_hardware` with `hoosh_health` action
+- `+` **HTTP serve**: new `POST /api/models` endpoint; `HOOSH_URL` env-based client construction; hoosh client cloned outside lock for Send-safe async futures
+- `+` **shruti-ml**: new `list_available_models()` function for querying hoosh model registry
+- `~` Replaced transcription chat-API workaround with proper `hoosh::InferenceRequest`; typed `HooshError` instead of `Box<dyn Error>`
+- `-` Removed `ModelManager` (local `.shruti-model` file scanner) — replaced by `hoosh::list_models()`
+- `-` Removed `prepare_transcription()` — replaced by hoosh transcription pipeline
+- `-` Removed unused re-exports: `TranscriptionResult`, `TranscriptionSegment`
 
 ### Dependency Upgrades
 - Upgraded `tarang` from 0.19.3 to 0.20.3

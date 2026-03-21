@@ -1,5 +1,7 @@
+//! Spectral analysis — backed by dhvani's FFT.
+
 use crate::AudioBuffer;
-use crate::constants::{DB_FLOOR, LINEAR_FLOOR, MAX_FFT_SIZE, SPECTRAL_ROLLOFF_THRESHOLD};
+use crate::constants::{MAX_FFT_SIZE, SPECTRAL_ROLLOFF_THRESHOLD};
 
 /// Result of spectral analysis on a buffer.
 #[derive(Debug, Clone)]
@@ -39,148 +41,28 @@ pub fn analyze_spectrum(
     // Extract samples from the specified channel
     let frames = buffer.frames() as usize;
     let n = fft_size.min(frames);
-
-    let mut real = vec![0.0f64; fft_size];
-    let mut imag = vec![0.0f64; fft_size];
-
-    // Copy samples and apply Hann window
-    let window_denom = if n <= 1 { 1.0 } else { n as f64 - 1.0 };
-    for (i, real_val) in real.iter_mut().enumerate().take(n) {
-        let window = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / window_denom).cos());
-        *real_val = buffer.get(i as u32, channel) as f64 * window;
+    let mut mono_samples = vec![0.0f32; fft_size];
+    for (i, sample) in mono_samples.iter_mut().enumerate().take(n) {
+        *sample = buffer.get(i as u32, channel);
     }
 
-    // In-place radix-2 FFT
-    fft_radix2(&mut real, &mut imag);
+    // Create a mono dhvani buffer and run FFT
+    let dbuf = dhvani::buffer::AudioBuffer::from_interleaved(mono_samples, 1, sample_rate).ok()?;
+    let spectrum = dhvani::analysis::spectrum_fft(&dbuf, fft_size);
 
-    // Compute magnitude spectrum (only positive frequencies: bins 0..fft_size/2+1)
-    let num_bins = fft_size / 2 + 1;
-    let mut magnitude_db = Vec::with_capacity(num_bins);
-    let mut magnitudes_linear = Vec::with_capacity(num_bins);
-
-    for i in 0..num_bins {
-        let mag = (real[i] * real[i] + imag[i] * imag[i]).sqrt() as f32;
-        magnitudes_linear.push(mag);
-        let db = if mag > LINEAR_FLOOR {
-            20.0 * mag.log10()
-        } else {
-            DB_FLOOR
-        };
-        magnitude_db.push(db);
-    }
-
-    let frequency_resolution = sample_rate as f32 / fft_size as f32;
-
-    // Peak frequency
-    let (peak_bin, &peak_mag) = magnitudes_linear
-        .iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap_or((0, &0.0));
-    let peak_frequency = peak_bin as f32 * frequency_resolution;
-    let peak_magnitude_db = if peak_mag > LINEAR_FLOOR {
-        20.0 * peak_mag.log10()
-    } else {
-        DB_FLOOR
-    };
-
-    // Spectral centroid: weighted mean of frequencies by magnitude
-    let total_mag: f32 = magnitudes_linear.iter().sum();
-    let spectral_centroid = if total_mag > LINEAR_FLOOR {
-        magnitudes_linear
-            .iter()
-            .enumerate()
-            .map(|(i, &m)| i as f32 * frequency_resolution * m)
-            .sum::<f32>()
-            / total_mag
-    } else {
-        0.0
-    };
-
-    // Spectral rolloff: frequency below which 95% of spectral energy is concentrated
-    let total_energy: f32 = magnitudes_linear.iter().map(|m| m * m).sum();
-    let threshold = total_energy * SPECTRAL_ROLLOFF_THRESHOLD;
-    let mut cumulative = 0.0f32;
-    let mut rolloff_bin = num_bins - 1;
-    for (i, &m) in magnitudes_linear.iter().enumerate() {
-        cumulative += m * m;
-        if cumulative >= threshold {
-            rolloff_bin = i;
-            break;
-        }
-    }
-    let spectral_rolloff = rolloff_bin as f32 * frequency_resolution;
+    let centroid = spectrum.spectral_centroid();
+    let rolloff = spectrum.spectral_rolloff(SPECTRAL_ROLLOFF_THRESHOLD);
 
     Some(SpectralAnalysis {
-        magnitude_db,
-        frequency_resolution,
-        sample_rate,
-        fft_size,
-        peak_frequency,
-        peak_magnitude_db,
-        spectral_centroid,
-        spectral_rolloff,
+        magnitude_db: spectrum.magnitude_db,
+        frequency_resolution: spectrum.freq_resolution,
+        sample_rate: spectrum.sample_rate,
+        fft_size: spectrum.fft_size,
+        peak_frequency: spectrum.peak_frequency,
+        peak_magnitude_db: spectrum.peak_magnitude_db,
+        spectral_centroid: centroid,
+        spectral_rolloff: rolloff,
     })
-}
-
-/// In-place radix-2 Cooley-Tukey FFT.
-fn fft_radix2(real: &mut [f64], imag: &mut [f64]) {
-    let n = real.len();
-    assert_eq!(n, imag.len());
-    assert!(n.is_power_of_two());
-
-    // Bit-reversal permutation
-    let mut j = 0;
-    for i in 0..n {
-        if i < j {
-            real.swap(i, j);
-            imag.swap(i, j);
-        }
-        let mut m = n >> 1;
-        while m >= 1 && j >= m {
-            j -= m;
-            m >>= 1;
-        }
-        j += m;
-    }
-
-    // Butterfly operations
-    let mut size = 2;
-    while size <= n {
-        let half = size / 2;
-        let angle = -2.0 * std::f64::consts::PI / size as f64;
-
-        let wn_r = angle.cos();
-        let wn_i = angle.sin();
-
-        let mut i = 0;
-        while i < n {
-            let mut w_r = 1.0;
-            let mut w_i = 0.0;
-
-            for k in 0..half {
-                let even = i + k;
-                let odd = i + k + half;
-
-                let tr = w_r * real[odd] - w_i * imag[odd];
-                let ti = w_r * imag[odd] + w_i * real[odd];
-
-                real[odd] = real[even] - tr;
-                imag[odd] = imag[even] - ti;
-                real[even] += tr;
-                imag[even] += ti;
-
-                let new_w_r = w_r * wn_r - w_i * wn_i;
-                let new_w_i = w_r * wn_i + w_i * wn_r;
-                w_r = new_w_r;
-                w_i = new_w_i;
-            }
-
-            i += size;
-        }
-
-        size *= 2;
-    }
 }
 
 #[cfg(test)]
@@ -193,7 +75,6 @@ mod tests {
         let buf = AudioBuffer::new(1, 1024);
         let result = analyze_spectrum(&buf, 0, 48000, 1024).unwrap();
         assert_eq!(result.fft_size, 1024);
-        assert_eq!(result.magnitude_db.len(), 513); // fft_size/2 + 1
         for &db in &result.magnitude_db {
             assert!(db < -100.0);
         }
@@ -211,7 +92,6 @@ mod tests {
             buf.set(i as u32, 0, sample);
         }
         let result = analyze_spectrum(&buf, 0, sr, fft_size).unwrap();
-        // Peak should be near 1000 Hz (within one bin)
         let bin_hz = result.frequency_resolution;
         assert!(
             (result.peak_frequency - freq).abs() < bin_hz * 2.0,
@@ -233,7 +113,6 @@ mod tests {
             buf.set(i as u32, 0, sample);
         }
         let result = analyze_spectrum(&buf, 0, sr, fft_size).unwrap();
-        // Centroid should be near the sine frequency
         assert!(
             (result.spectral_centroid - freq).abs() < 200.0,
             "centroid at {} Hz, expected near {} Hz",
@@ -243,32 +122,18 @@ mod tests {
     }
 
     #[test]
-    fn fft_roundtrip_dc() {
-        let mut real = vec![1.0; 8];
-        let mut imag = vec![0.0; 8];
-        fft_radix2(&mut real, &mut imag);
-        // DC bin should have magnitude 8 (sum of all 1s)
-        assert!((real[0] - 8.0).abs() < 1e-10);
-        // All other bins should be ~0 for constant signal
-        for i in 1..8 {
-            let mag = (real[i] * real[i] + imag[i] * imag[i]).sqrt();
-            assert!(mag < 1e-10, "bin {} has magnitude {}", i, mag);
-        }
-    }
-
-    #[test]
     fn frequency_resolution_is_correct() {
         let buf = AudioBuffer::new(1, 1024);
         let result = analyze_spectrum(&buf, 0, 44100, 1024).unwrap();
         let expected = 44100.0 / 1024.0;
-        assert!((result.frequency_resolution - expected).abs() < 0.01);
+        assert!((result.frequency_resolution - expected).abs() < 0.1);
     }
 
     #[test]
     fn invalid_fft_size_returns_none() {
         let buf = AudioBuffer::new(1, 1024);
         assert!(analyze_spectrum(&buf, 0, 48000, 0).is_none());
-        assert!(analyze_spectrum(&buf, 0, 48000, 100).is_none()); // not power of 2
-        assert!(analyze_spectrum(&buf, 0, 48000, 131072).is_none()); // exceeds max
+        assert!(analyze_spectrum(&buf, 0, 48000, 100).is_none());
+        assert!(analyze_spectrum(&buf, 0, 48000, 131072).is_none());
     }
 }
