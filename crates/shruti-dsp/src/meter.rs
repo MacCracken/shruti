@@ -4,6 +4,9 @@ use crate::constants::{
     PEAK_DECAY_COEFFICIENT,
 };
 
+// Lock-free peak meters from dhvani (for RT-safe metering).
+pub use dhvani::meter::{MeterBank, PeakMeter, SharedMeterBank, shared_meter_bank};
+
 /// Audio level meter with peak, RMS, and LUFS measurements.
 #[derive(Debug, Clone)]
 pub struct Meter {

@@ -12,7 +12,7 @@ opus-enc = ["tarang", "tarang/opus-enc"]
 aac-enc = ["tarang", "tarang/aac-enc"]
 
 [dependencies]
-dhvani = { version = "0.20.4", default-features = false, features = ["dsp", "analysis", "simd"] }
+dhvani = { version = "0.20.4", default-features = false, features = ["dsp", "analysis", "simd", "midi", "graph"] }
 tarang = { version = "0.20.3", optional = true }
 bytes = { workspace = true, optional = true }
 hound = { workspace = true }

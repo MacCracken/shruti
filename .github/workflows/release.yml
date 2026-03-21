@@ -105,19 +105,44 @@ jobs:
         id: version
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
-      - name: Generate changelog
+      - name: Extract changelog section
         id: changelog
         run: |
-          TAG_COUNT=$(git tag --sort=-version:refname | wc -l)
-          if [ "$TAG_COUNT" -ge 2 ]; then
-            PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
-            CHANGELOG=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
-          else
-            CHANGELOG=$(git log --oneline --no-decorate)
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Extract the CHANGELOG.md section for this version.
+          # Matches from "## <version>" up to the next "## " heading or EOF.
+          SECTION=$(awk -v ver="$VERSION" '
+            BEGIN { found=0 }
+            /^## / {
+              if (found) exit
+              if (index($0, ver)) { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          # Fallback to git log if no CHANGELOG section found.
+          if [ -z "$SECTION" ]; then
+            TAG_COUNT=$(git tag --sort=-version:refname | wc -l)
+            if [ "$TAG_COUNT" -ge 2 ]; then
+              PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+              SECTION=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
+            else
+              SECTION=$(git log --oneline --no-decorate)
+            fi
           fi
+
           echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "$SECTION" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Collect release stats
+        id: stats
+        run: |
+          TEST_COUNT=$(cargo test --workspace -- --list 2>/dev/null | grep -c ': test$' || echo "?")
+          CRATE_COUNT=$(cargo metadata --no-deps --format-version=1 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)['packages']))" 2>/dev/null || echo "?")
+          echo "tests=$TEST_COUNT" >> "$GITHUB_OUTPUT"
+          echo "crates=$CRATE_COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -129,43 +154,83 @@ jobs:
         with:
           name: Shruti ${{ steps.version.outputs.version }}
           body: |
+            <div align="center">
+
             # Shruti ${{ steps.version.outputs.version }}
 
-            A Rust-native Digital Audio Workstation — sample-accurate, real-time, cross-platform.
+            **A Rust-native Digital Audio Workstation**
+            *Sample-accurate | Real-time | Cross-platform*
+
+            ![Rust](https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust)
+            ![Tests](https://img.shields.io/badge/tests-${{ steps.stats.outputs.tests }}%20passing-brightgreen)
+            ![Crates](https://img.shields.io/badge/crates-${{ steps.stats.outputs.crates }}-blue)
+            ![License](https://img.shields.io/badge/license-GPL--3.0-purple)
+
+            </div>
 
             ---
 
-            ### What's Changed
+            ## Highlights
 
             ${{ steps.changelog.outputs.changelog }}
 
             ---
 
-            ### Downloads
+            ## Downloads
 
-            | Platform | Architecture | Archive | Checksum |
-            |----------|-------------|---------|----------|
-            | Linux | x86_64 | `shruti-${{ steps.version.outputs.version }}-linux.tar.gz` | `.sha256` |
-            | macOS | arm64 (Apple Silicon) | `shruti-${{ steps.version.outputs.version }}-macos-arm64.tar.gz` | `.sha256` |
-            | Windows | x86_64 | `shruti-${{ steps.version.outputs.version }}-windows.zip` | `.sha256` |
+            > All binaries are statically linked and require no additional dependencies.
 
-            ### Install
+            | | Platform | Architecture | Archive | Checksum |
+            |---|----------|-------------|---------|----------|
+            | :penguin: | **Linux** | x86_64 | [`shruti-${{ steps.version.outputs.version }}-linux.tar.gz`] | [sha256] |
+            | :apple: | **macOS** | arm64 (Apple Silicon) | [`shruti-${{ steps.version.outputs.version }}-macos-arm64.tar.gz`] | [sha256] |
+            | :window: | **Windows** | x86_64 | [`shruti-${{ steps.version.outputs.version }}-windows.zip`] | [sha256] |
 
-            **Linux / macOS**
+            ## Quick Start
+
+            <details>
+            <summary><b>Linux / macOS</b></summary>
+
             ```sh
+            # Download and extract
             tar xzf shruti-${{ steps.version.outputs.version }}-<platform>.tar.gz
-            ./shruti-${{ steps.version.outputs.version }}-<platform>/shruti
+            cd shruti-${{ steps.version.outputs.version }}-<platform>
+
+            # Run the DAW
+            ./shruti
+
+            # Or start the headless server for AI agent integration
+            ./shruti serve --port 8050
             ```
+            </details>
 
-            **Windows**
+            <details>
+            <summary><b>Windows</b></summary>
+
             Extract the `.zip` and run `shruti.exe`.
+            </details>
 
-            ### Verify
+            <details>
+            <summary><b>Verify download integrity</b></summary>
 
-            Each download has a matching `.sha256` checksum file. Verify with:
+            Each archive has a matching `.sha256` checksum file:
             ```sh
             sha256sum -c shruti-${{ steps.version.outputs.version }}-<platform>.tar.gz.sha256
             ```
+            </details>
+
+            ---
+
+            ## Ecosystem
+
+            Shruti is part of the **Sanskrit Stack** for the [AGNOS](https://github.com/MacCracken/agnosticos) AI-native Linux OS:
+
+            | Crate | Role |
+            |-------|------|
+            | [dhvani](https://crates.io/crates/dhvani) | Core audio engine (DSP, analysis, MIDI, graph) |
+            | [tarang](https://crates.io/crates/tarang) | Media framework (codecs, streaming, muxing) |
+            | [hoosh](https://crates.io/crates/hoosh) | Music LLM inference gateway |
+            | **shruti** | Digital Audio Workstation |
           files: |
             release-artifacts/release-linux/*
             release-artifacts/release-macos-arm64/*

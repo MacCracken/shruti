@@ -1,7 +1,53 @@
 # Changelog
 
-All notable changes to Shruti are documented here.
-Format: CalVer `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
+All notable changes to [Shruti](https://github.com/MacCracken/shruti) are documented here.
+
+> **Format:** [CalVer](https://calver.org/) `YYYY.M.D` or `YYYY.M.D-N` for same-day patches.
+> **Legend:** `+` new &ensp; `~` changed &ensp; `-` removed &ensp; `!` fixed
+
+---
+
+## 2026.3.21 — Full Dhvani Integration
+
+**55 new tests** | **17 new files** | **7 modified files**
+
+Integrates all remaining [dhvani](https://crates.io/crates/dhvani) 0.20.4 capabilities into `shruti-dsp`, expanding from 5 wrapped effects to the full audio engine.
+
+### New DSP Effects
+- `+` **BiquadFilter** — low/high/band-pass, notch, allpass, peaking, shelving filters
+- `+` **GraphicEq** — 10-band ISO EQ with 9 named presets (rock, pop, jazz, classical, bass, treble, vocal, electronic, acoustic)
+- `+` **DeEsser** — sibilance reduction with configurable frequency, threshold, and Q
+- `+` **ModulatedDelay** — chorus/flanger with LFO-modulated delay line
+- `+` **Oscillator** — anti-aliased PolyBLEP waveform generator (sine, saw, square, triangle, noise)
+- `+` **LFO** — 6-shape modulation source (sine, triangle, square, saw up/down, sample-and-hold)
+- `+` **Envelope** — ADSR generator with trigger/release/tick per-sample API
+- `+` **GainSmoother** — EMA-based smooth gain transitions (prevents pumping)
+- `+` Free functions: `noise_gate()`, `hard_limiter()`, `normalize()`, `amplitude_to_db()`, `db_to_amplitude()`
+
+### New Analysis
+- `+` **Chromagram** — pitch class energy distribution (detects dominant key)
+- `+` **Onset detection** — transient boundaries via spectral flux
+- `+` **STFT spectrogram** — time-frequency analysis for visualization
+- `+` **EBU R128 loudness** — integrated LUFS, range, short-term, momentary
+- `+` **Silence detection** and **gain suggestion** for normalization
+
+### New Modules
+- `+` **Clock** — sample-accurate transport with tempo, beats, PTS for A/V sync
+- `+` **MIDI** — NoteEvent, ControlChange, MidiClip, MidiEvent, VoiceManager (polyphonic voice allocation with steal modes)
+- `+` **Graph** — RT-safe node-based audio processing with topological execution and double-buffered plan swap
+- `+` **Metering** — lock-free PeakMeter and MeterBank via atomics (RT-safe, no mutex)
+
+### Buffer Utilities
+- `+` `resample_linear()` and `resample_sinc()` — dhvani-backed resampling (no tarang dependency)
+- `+` `mono_to_stereo()`, `mix_buffers()` — buffer operations
+- `+` `i16_to_f32()`, `f32_to_i16()` — SIMD-accelerated format conversion
+- `+` `ResampleQuality` enum (Draft / Good / Best)
+
+### Infrastructure
+- `~` dhvani features: added `midi` and `graph` to Cargo.toml
+- `+` 14 new default constants for de-esser, LFO, envelope, gain smoother, modulated delay
+
+---
 
 ## 2026.3.20-1 — Hoosh Full Integration
 

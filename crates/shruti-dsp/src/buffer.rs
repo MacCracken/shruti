@@ -118,6 +118,77 @@ impl AudioBuffer {
     }
 }
 
+// ── dhvani buffer utilities ──────────────────────────────────────
+
+pub use dhvani::buffer::resample::ResampleQuality;
+
+/// Re-export raw format conversion functions (operate on slices, not AudioBuffer).
+pub use dhvani::buffer::convert::{f32_to_i16, i16_to_f32};
+
+/// Helper: convert shruti AudioBuffer to dhvani AudioBuffer.
+fn to_dhvani(buf: &AudioBuffer, sample_rate: u32) -> Option<dhvani::buffer::AudioBuffer> {
+    dhvani::buffer::AudioBuffer::from_interleaved(
+        buf.as_interleaved().to_vec(),
+        buf.channels() as u32,
+        sample_rate,
+    )
+    .ok()
+}
+
+/// Helper: convert dhvani AudioBuffer back to shruti AudioBuffer.
+fn from_dhvani(dbuf: &dhvani::buffer::AudioBuffer) -> AudioBuffer {
+    AudioBuffer::from_interleaved(dbuf.samples.clone(), dbuf.channels as u16)
+}
+
+/// Resample using linear interpolation (fast, lower quality).
+pub fn resample_linear(
+    buf: &AudioBuffer,
+    sample_rate: u32,
+    target_rate: u32,
+) -> Option<AudioBuffer> {
+    if sample_rate == target_rate {
+        return Some(buf.clone());
+    }
+    let dbuf = to_dhvani(buf, sample_rate)?;
+    dhvani::buffer::resample_linear(&dbuf, target_rate)
+        .ok()
+        .map(|r| from_dhvani(&r))
+}
+
+/// Resample using windowed sinc interpolation (high quality).
+pub fn resample_sinc(
+    buf: &AudioBuffer,
+    sample_rate: u32,
+    target_rate: u32,
+    quality: ResampleQuality,
+) -> Option<AudioBuffer> {
+    if sample_rate == target_rate {
+        return Some(buf.clone());
+    }
+    let dbuf = to_dhvani(buf, sample_rate)?;
+    dhvani::buffer::resample::resample_sinc(&dbuf, target_rate, quality)
+        .ok()
+        .map(|r| from_dhvani(&r))
+}
+
+/// Convert a mono buffer to stereo (duplicate channels).
+pub fn mono_to_stereo(buf: &AudioBuffer, sample_rate: u32) -> Option<AudioBuffer> {
+    let dbuf = to_dhvani(buf, sample_rate)?;
+    dhvani::buffer::convert::mono_to_stereo(&dbuf)
+        .ok()
+        .map(|r| from_dhvani(&r))
+}
+
+/// Mix multiple buffers together (additive sum).
+pub fn mix_buffers(buffers: &[&AudioBuffer], sample_rate: u32) -> Option<AudioBuffer> {
+    let dhvani_bufs: Vec<dhvani::buffer::AudioBuffer> = buffers
+        .iter()
+        .filter_map(|b| to_dhvani(b, sample_rate))
+        .collect();
+    let refs: Vec<&dhvani::buffer::AudioBuffer> = dhvani_bufs.iter().collect();
+    dhvani::buffer::mix(&refs).ok().map(|r| from_dhvani(&r))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +402,60 @@ mod tests {
             ptr, ptr2,
             "Mutable and immutable interleaved access should point to the same data"
         );
+    }
+
+    // ── dhvani buffer utility tests ──────────────────────────────
+
+    #[test]
+    fn resample_linear_changes_length() {
+        let samples: Vec<f32> = (0..200).map(|i| (i as f32 * 0.01).sin()).collect();
+        let buf = AudioBuffer::from_interleaved(samples, 2);
+        let result = resample_linear(&buf, 44100, 48000).unwrap();
+        assert!(result.frames() > buf.frames());
+        assert_eq!(result.channels(), 2);
+    }
+
+    #[test]
+    fn resample_linear_same_rate_noop() {
+        let buf = AudioBuffer::from_interleaved(vec![0.1, -0.1, 0.2, -0.2], 2);
+        let result = resample_linear(&buf, 44100, 44100).unwrap();
+        assert_eq!(result.frames(), buf.frames());
+    }
+
+    #[test]
+    fn resample_sinc_changes_length() {
+        let samples: Vec<f32> = (0..200).map(|i| (i as f32 * 0.01).sin()).collect();
+        let buf = AudioBuffer::from_interleaved(samples, 2);
+        let result = resample_sinc(&buf, 44100, 48000, ResampleQuality::Good).unwrap();
+        assert!(result.frames() > buf.frames());
+    }
+
+    #[test]
+    fn i16_f32_roundtrip() {
+        let original: Vec<i16> = vec![16384, -16384, 0, 32767];
+        let floats = i16_to_f32(&original);
+        let back = f32_to_i16(&floats);
+        for (o, b) in original.iter().zip(back.iter()) {
+            assert!((*o as i32 - *b as i32).abs() <= 1, "{o} != {b}");
+        }
+    }
+
+    #[test]
+    fn mono_to_stereo_doubles_channels() {
+        let buf = AudioBuffer::from_interleaved(vec![0.5, -0.5, 0.3, -0.3], 1);
+        let stereo = mono_to_stereo(&buf, 48000).unwrap();
+        assert_eq!(stereo.channels(), 2);
+        assert_eq!(stereo.frames(), buf.frames());
+    }
+
+    #[test]
+    fn mix_buffers_sums() {
+        let a = AudioBuffer::from_interleaved(vec![0.3, 0.3, 0.3, 0.3], 2);
+        let b = AudioBuffer::from_interleaved(vec![0.2, 0.2, 0.2, 0.2], 2);
+        let mixed = mix_buffers(&[&a, &b], 48000).unwrap();
+        assert_eq!(mixed.channels(), 2);
+        for s in mixed.as_interleaved() {
+            assert!((s - 0.5).abs() < 0.01, "expected 0.5, got {s}");
+        }
     }
 }

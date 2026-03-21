@@ -64,6 +64,50 @@ pub const PEAK_DECAY_COEFFICIENT: f32 = 0.9995;
 /// Maximum number of LUFS blocks retained (~10 minutes of 400ms blocks).
 pub const MAX_LUFS_BLOCKS: usize = 1500;
 
+// ── De-Esser ─────────────────────────────────────────────────────
+/// Default de-esser center frequency in Hz.
+pub const DEFAULT_DEESSER_FREQ_HZ: f32 = 6000.0;
+/// Default de-esser threshold in dB.
+pub const DEFAULT_DEESSER_THRESHOLD_DB: f32 = -20.0;
+/// Default de-esser reduction in dB.
+pub const DEFAULT_DEESSER_REDUCTION_DB: f32 = 6.0;
+/// Default de-esser Q factor.
+pub const DEFAULT_DEESSER_Q: f32 = 2.0;
+
+// ── LFO ──────────────────────────────────────────────────────────
+/// Default LFO rate in Hz.
+pub const DEFAULT_LFO_RATE: f32 = 1.0;
+/// Default LFO depth (0.0–1.0).
+pub const DEFAULT_LFO_DEPTH: f32 = 0.5;
+
+// ── Envelope (ADSR) ──────────────────────────────────────────────
+/// Default envelope attack time in seconds.
+pub const DEFAULT_ENVELOPE_ATTACK: f32 = 0.01;
+/// Default envelope decay time in seconds.
+pub const DEFAULT_ENVELOPE_DECAY: f32 = 0.1;
+/// Default envelope sustain level (0.0–1.0).
+pub const DEFAULT_ENVELOPE_SUSTAIN: f32 = 0.7;
+/// Default envelope release time in seconds.
+pub const DEFAULT_ENVELOPE_RELEASE: f32 = 0.3;
+
+// ── Gain Smoother ────────────────────────────────────────────────
+/// Default gain smoother attack coefficient.
+pub const DEFAULT_GAIN_SMOOTHER_ATTACK: f32 = 0.3;
+/// Default gain smoother release coefficient.
+pub const DEFAULT_GAIN_SMOOTHER_RELEASE: f32 = 0.05;
+
+// ── Modulated Delay ──────────────────────────────────────────────
+/// Default modulated delay base delay in ms.
+pub const DEFAULT_MOD_DELAY_BASE_MS: f32 = 7.0;
+/// Default modulated delay depth in ms.
+pub const DEFAULT_MOD_DELAY_DEPTH_MS: f32 = 3.0;
+/// Default modulated delay rate in Hz.
+pub const DEFAULT_MOD_DELAY_RATE_HZ: f32 = 0.5;
+/// Default modulated delay feedback.
+pub const DEFAULT_MOD_DELAY_FEEDBACK: f32 = 0.3;
+/// Default modulated delay mix.
+pub const DEFAULT_MOD_DELAY_MIX: f32 = 0.5;
+
 // ── Spectral analysis ──────────────────────────────────────────────
 /// Maximum allowed FFT size to prevent excessive memory allocation.
 pub const MAX_FFT_SIZE: usize = 65536;
@@ -114,5 +158,47 @@ mod tests {
         assert!(DEFAULT_COMPRESSOR_ATTACK > 0.0);
         assert!(DEFAULT_COMPRESSOR_RELEASE > 0.0);
         assert!(DEFAULT_COMPRESSOR_KNEE >= 0.0);
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn deesser_defaults_reasonable() {
+        assert!(DEFAULT_DEESSER_FREQ_HZ > 1000.0);
+        assert!(DEFAULT_DEESSER_THRESHOLD_DB < 0.0);
+        assert!(DEFAULT_DEESSER_REDUCTION_DB > 0.0);
+        assert!(DEFAULT_DEESSER_Q > 0.0);
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn lfo_defaults_reasonable() {
+        assert!(DEFAULT_LFO_RATE > 0.0);
+        assert!((0.0..=1.0).contains(&DEFAULT_LFO_DEPTH));
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn envelope_defaults_reasonable() {
+        assert!(DEFAULT_ENVELOPE_ATTACK > 0.0);
+        assert!(DEFAULT_ENVELOPE_DECAY > 0.0);
+        assert!((0.0..=1.0).contains(&DEFAULT_ENVELOPE_SUSTAIN));
+        assert!(DEFAULT_ENVELOPE_RELEASE > 0.0);
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn gain_smoother_defaults_reasonable() {
+        assert!((0.0..=1.0).contains(&DEFAULT_GAIN_SMOOTHER_ATTACK));
+        assert!((0.0..=1.0).contains(&DEFAULT_GAIN_SMOOTHER_RELEASE));
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn mod_delay_defaults_reasonable() {
+        assert!(DEFAULT_MOD_DELAY_BASE_MS > 0.0);
+        assert!(DEFAULT_MOD_DELAY_DEPTH_MS > 0.0);
+        assert!(DEFAULT_MOD_DELAY_RATE_HZ > 0.0);
+        assert!((0.0..1.0).contains(&DEFAULT_MOD_DELAY_FEEDBACK));
+        assert!((0.0..=1.0).contains(&DEFAULT_MOD_DELAY_MIX));
     }
 }
