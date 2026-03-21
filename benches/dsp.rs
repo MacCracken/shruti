@@ -23,10 +23,12 @@ fn sine_buffer_1s() -> AudioBuffer {
 // ── EQ ──────────────────────────────────────────────────────────────
 
 fn eq_process(c: &mut Criterion) {
-    let mut eq = ParametricEq::new(SAMPLE_RATE);
-    eq.add_band(EqBand::new(FilterType::LowShelf, 200.0, 3.0, 0.707));
-    eq.add_band(EqBand::new(FilterType::Peak, 1000.0, -2.0, 1.0));
-    eq.add_band(EqBand::new(FilterType::HighShelf, 8000.0, 2.0, 0.707));
+    let bands = vec![
+        EqBand::new(FilterType::LowShelf, 200.0, 3.0, 0.707),
+        EqBand::new(FilterType::Peak, 1000.0, -2.0, 1.0),
+        EqBand::new(FilterType::HighShelf, 8000.0, 2.0, 0.707),
+    ];
+    let mut eq = ParametricEq::new(bands, SAMPLE_RATE, CHANNELS);
 
     c.bench_function("eq_process", |b| {
         b.iter_batched(
@@ -55,7 +57,6 @@ fn compressor_process(c: &mut Criterion) {
         b.iter_batched(
             sine_buffer_1s,
             |mut buf| {
-                comp.reset();
                 comp.process(&mut buf);
             },
             criterion::BatchSize::SmallInput,
