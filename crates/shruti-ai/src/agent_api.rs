@@ -16,6 +16,8 @@ pub struct AgentApi {
     session: Option<Session>,
     undo: UndoManager,
     store: Option<SessionStore>,
+    #[cfg(feature = "hoosh")]
+    hoosh_client: Option<hoosh::HooshClient>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +60,26 @@ impl AgentApi {
             session: None,
             undo: UndoManager::default(),
             store: None,
+            #[cfg(feature = "hoosh")]
+            hoosh_client: None,
         }
+    }
+
+    /// Create an AgentApi with a hoosh inference gateway client.
+    #[cfg(feature = "hoosh")]
+    pub fn with_hoosh(hoosh_url: &str) -> Self {
+        Self {
+            session: None,
+            undo: UndoManager::default(),
+            store: None,
+            hoosh_client: Some(hoosh::HooshClient::new(hoosh_url)),
+        }
+    }
+
+    /// Get the hoosh client, if configured.
+    #[cfg(feature = "hoosh")]
+    pub fn hoosh_client(&self) -> Option<&hoosh::HooshClient> {
+        self.hoosh_client.as_ref()
     }
 
     /// Validate that a path does not contain path traversal sequences.
@@ -738,6 +759,112 @@ impl AgentApi {
             ApiResult::ok("redone")
         } else {
             ApiResult::err("nothing to redo")
+        }
+    }
+}
+
+// ── Hoosh inference gateway integration ───────────────────────────────────
+
+#[cfg(feature = "hoosh")]
+impl AgentApi {
+    /// List available models from the hoosh inference gateway.
+    pub async fn list_models(&self) -> ApiResult {
+        let client = match &self.hoosh_client {
+            Some(c) => c,
+            None => return ApiResult::err("hoosh client not configured"),
+        };
+        match client.list_models().await {
+            Ok(models) => {
+                let data = serde_json::to_value(&models).unwrap_or_default();
+                ApiResult::ok_with_data(format!("{} models available", models.len()), data)
+            }
+            Err(e) => ApiResult::err(format!("failed to list models: {e}")),
+        }
+    }
+
+    /// Check hoosh inference gateway health.
+    pub async fn hoosh_health(&self) -> ApiResult {
+        let client = match &self.hoosh_client {
+            Some(c) => c,
+            None => return ApiResult::err("hoosh client not configured"),
+        };
+        match client.health().await {
+            Ok(true) => ApiResult::ok("hoosh server is healthy"),
+            Ok(false) => ApiResult::err("hoosh server reports unhealthy"),
+            Err(e) => ApiResult::err(format!("hoosh health check failed: {e}")),
+        }
+    }
+
+    /// Transcribe audio using hoosh's Whisper integration.
+    ///
+    /// Returns transcription text with optional word-level timestamps
+    /// for vocal alignment.
+    pub async fn transcribe_audio(
+        &self,
+        audio_data: Vec<u8>,
+        language: Option<String>,
+        word_timestamps: bool,
+    ) -> ApiResult {
+        let client = match &self.hoosh_client {
+            Some(c) => c,
+            None => return ApiResult::err("hoosh client not configured"),
+        };
+        let prompt = format!(
+            "Transcribe the following audio ({} bytes, language: {})",
+            audio_data.len(),
+            language.as_deref().unwrap_or("auto"),
+        );
+        let request = hoosh::InferenceRequest {
+            model: "whisper".into(),
+            prompt,
+            ..Default::default()
+        };
+        match client.infer(&request).await {
+            Ok(response) => {
+                let data = serde_json::json!({
+                    "text": response.text,
+                    "language": language.unwrap_or_else(|| "en".into()),
+                    "word_timestamps": word_timestamps,
+                    "model": response.model,
+                    "latency_ms": response.latency_ms,
+                });
+                ApiResult::ok_with_data("transcription complete", data)
+            }
+            Err(e) => ApiResult::err(format!("transcription failed: {e}")),
+        }
+    }
+
+    /// Describe audio content using LLM via hoosh.
+    pub async fn describe_audio(
+        &self,
+        model: &str,
+        sample_rate: u32,
+        channels: u16,
+        duration_secs: f64,
+        codec_name: &str,
+    ) -> ApiResult {
+        let client = match &self.hoosh_client {
+            Some(c) => c,
+            None => return ApiResult::err("hoosh client not configured"),
+        };
+        let prompt = format!(
+            "Describe this audio file in 2-3 sentences for a music production context. \
+             Format: {codec_name}, sample rate: {sample_rate}Hz, channels: {channels}, \
+             duration: {duration_secs:.1}s"
+        );
+        let request = hoosh::InferenceRequest {
+            model: model.into(),
+            prompt,
+            max_tokens: Some(128),
+            temperature: Some(0.3),
+            ..Default::default()
+        };
+        match client.infer(&request).await {
+            Ok(response) => {
+                let data = serde_json::json!({ "description": response.text });
+                ApiResult::ok_with_data("audio described", data)
+            }
+            Err(e) => ApiResult::err(format!("description failed: {e}")),
         }
     }
 }

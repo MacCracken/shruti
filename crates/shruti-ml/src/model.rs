@@ -398,6 +398,14 @@ mod hoosh_runtime {
 #[cfg(feature = "hoosh")]
 pub use hoosh_runtime::HooshRuntime;
 
+/// List available models from a hoosh inference gateway.
+#[cfg(feature = "hoosh")]
+pub async fn list_available_models(
+    client: &hoosh::HooshClient,
+) -> Result<Vec<hoosh::ModelInfo>, hoosh::HooshError> {
+    client.list_models().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

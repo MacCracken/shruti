@@ -81,6 +81,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/export", post(handle_export))
         .route("/api/mixer", post(handle_mixer))
         .route("/api/analysis", post(handle_analysis))
+        .route("/api/models", post(handle_models))
         .route("/api/mcp", post(handle_mcp))
         .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
         // Only allow requests from localhost origins — the agent API is
@@ -99,8 +100,16 @@ pub fn app(state: AppState) -> Router {
 
 /// Start the HTTP server on the given port.
 pub async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "hoosh")]
+    let api = match std::env::var("HOOSH_URL") {
+        Ok(url) => AgentApi::with_hoosh(&url),
+        Err(_) => AgentApi::new(),
+    };
+    #[cfg(not(feature = "hoosh"))]
+    let api = AgentApi::new();
+
     let shared = SharedState {
-        api: AgentApi::new(),
+        api,
         rate_limiter: RateLimiter::new(RATE_LIMIT_RPS),
     };
     let state = Arc::new(Mutex::new(shared));
@@ -417,6 +426,58 @@ async fn handle_analysis(
         StatusCode::BAD_REQUEST
     };
     (status, Json(result))
+}
+
+// --- Models endpoint ---
+
+#[derive(Deserialize)]
+struct ModelsRequest {
+    action: String,
+}
+
+async fn handle_models(
+    State(state): State<AppState>,
+    Json(req): Json<ModelsRequest>,
+) -> (StatusCode, Json<ApiResult>) {
+    if let Err(e) = check_rate_limit(&state).await {
+        return e;
+    }
+    // Clone the hoosh client before dropping the lock to keep the future Send.
+    #[cfg(feature = "hoosh")]
+    let client = {
+        let shared = state.lock().await;
+        shared.api.hoosh_client().cloned()
+    };
+    #[cfg(feature = "hoosh")]
+    {
+        let result = match (req.action.as_str(), client) {
+            ("list", Some(client)) => match client.list_models().await {
+                Ok(models) => {
+                    let data = serde_json::to_value(&models).unwrap_or_default();
+                    ApiResult::ok_with_data(format!("{} models available", models.len()), data)
+                }
+                Err(e) => ApiResult::err(format!("failed to list models: {e}")),
+            },
+            ("list", None) => ApiResult::err("hoosh client not configured"),
+            _ => ApiResult::err(format!("unknown models action: {}", req.action)),
+        };
+        let status = if result.success {
+            StatusCode::OK
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        (status, Json(result))
+    }
+    #[cfg(not(feature = "hoosh"))]
+    {
+        let _ = req;
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResult::err(
+                "hoosh feature not enabled — rebuild with --features hoosh",
+            )),
+        )
+    }
 }
 
 // --- Raw MCP dispatch endpoint ---

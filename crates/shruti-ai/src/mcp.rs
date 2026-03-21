@@ -155,22 +155,34 @@ impl McpTools {
             },
             McpToolDescription {
                 name: "shruti_analysis".into(),
-                description: "Analyze audio tracks and get AI-assisted suggestions (spectrum, dynamics, auto-mix, composition)".into(),
+                description: "Analyze audio tracks and get AI-assisted suggestions (spectrum, dynamics, auto-mix, composition, transcribe, describe)".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["spectrum", "dynamics", "auto_mix", "composition"],
+                            "enum": ["spectrum", "dynamics", "auto_mix", "composition", "transcribe", "describe"],
                             "description": "Analysis action to perform"
                         },
                         "track": {
                             "type": "string",
-                            "description": "Track name (required for spectrum and dynamics)"
+                            "description": "Track name (required for spectrum, dynamics, transcribe, describe)"
                         },
                         "fft_size": {
                             "type": "integer",
                             "description": "FFT size for spectral analysis (default: 4096, must be power of 2)"
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Language hint for transcription (e.g. 'en', 'es')"
+                        },
+                        "word_timestamps": {
+                            "type": "boolean",
+                            "description": "Include word-level timestamps in transcription (default: false)"
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Model name for describe action (uses first available if omitted)"
                         }
                     },
                     "required": ["action"]
@@ -194,14 +206,31 @@ impl McpTools {
             McpToolDescription {
                 name: "shruti_hardware".into(),
                 description:
-                    "Query AI hardware accelerator capabilities (GPUs, NPUs, TPUs)".into(),
+                    "Query AI hardware accelerator capabilities and inference gateway status"
+                        .into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["detect"],
+                            "enum": ["detect", "hoosh_health"],
                             "description": "Hardware action"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
+            McpToolDescription {
+                name: "shruti_models".into(),
+                description: "List and query available AI models from the hoosh inference gateway"
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list"],
+                            "description": "Models action"
                         }
                     },
                     "required": ["action"]
@@ -211,6 +240,10 @@ impl McpTools {
     }
 
     /// Dispatch an MCP tool call to the appropriate AgentApi method.
+    ///
+    /// Sync dispatch for all tools. Hoosh-dependent actions (transcribe, describe,
+    /// hoosh_health, model list) return an error directing callers to use the
+    /// async HTTP endpoints (`/api/models`, `/api/analysis`) instead.
     pub fn dispatch(
         api: &mut AgentApi,
         tool_name: &str,
@@ -224,6 +257,7 @@ impl McpTools {
             "shruti_analysis" => Self::handle_analysis(api, args),
             "shruti_mixer" => Self::handle_mixer(api, args),
             "shruti_hardware" => Self::handle_hardware(args),
+            "shruti_models" => Self::handle_models(args),
             _ => McpToolResult {
                 content: vec![McpContentBlock {
                     content_type: "text".into(),
@@ -335,6 +369,9 @@ impl McpTools {
             }
             "auto_mix" => McpToolResult::from_api(api.auto_mix_suggest()),
             "composition" => McpToolResult::from_api(api.composition_suggest()),
+            "transcribe" | "describe" => McpToolResult::from_api(ApiResult::err(
+                "transcribe/describe require async — use the /api/analysis HTTP endpoint",
+            )),
             _ => McpToolResult {
                 content: vec![McpContentBlock {
                     content_type: "text".into(),
@@ -364,7 +401,21 @@ impl McpTools {
                 let data = serde_json::to_value(&info).unwrap_or_default();
                 ApiResult::ok_with_data("hardware detected", data)
             }
+            "hoosh_health" => ApiResult::err(
+                "hoosh_health requires async — use the /api/hardware HTTP endpoint",
+            ),
             _ => ApiResult::err(format!("unknown hardware action: {action}")),
+        };
+        McpToolResult::from_api(result)
+    }
+
+    fn handle_models(args: &serde_json::Value) -> McpToolResult {
+        let action = args["action"].as_str().unwrap_or("");
+        let result = match action {
+            "list" => ApiResult::err(
+                "model listing requires async — use the /api/models HTTP endpoint",
+            ),
+            _ => ApiResult::err(format!("unknown models action: {action}")),
         };
         McpToolResult::from_api(result)
     }
@@ -377,7 +428,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_manifest() {
         let tools = McpTools::tool_manifest();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"shruti_session"));
@@ -387,6 +438,7 @@ mod tests {
         assert!(names.contains(&"shruti_analysis"));
         assert!(names.contains(&"shruti_mixer"));
         assert!(names.contains(&"shruti_hardware"));
+        assert!(names.contains(&"shruti_models"));
     }
 
     #[test]
@@ -397,10 +449,12 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Agent Song" }),
-        );
+        )
+        ;
         assert!(!result.is_error);
 
-        let result = McpTools::dispatch(&mut api, "shruti_session", &json!({ "action": "info" }));
+        let result =
+            McpTools::dispatch(&mut api, "shruti_session", &json!({ "action": "info" }));
         assert!(!result.is_error);
         assert!(result.content[0].text.contains("Agent Song"));
     }
@@ -412,23 +466,27 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Test" }),
-        );
+        )
+        ;
 
         let result = McpTools::dispatch(
             &mut api,
             "shruti_tracks",
             &json!({ "action": "add", "name": "Drums", "kind": "audio" }),
-        );
+        )
+        ;
         assert!(!result.is_error);
 
         let result = McpTools::dispatch(
             &mut api,
             "shruti_tracks",
             &json!({ "action": "gain", "name": "Drums", "value": 0.7 }),
-        );
+        )
+        ;
         assert!(!result.is_error);
 
-        let result = McpTools::dispatch(&mut api, "shruti_tracks", &json!({ "action": "list" }));
+        let result =
+            McpTools::dispatch(&mut api, "shruti_tracks", &json!({ "action": "list" }));
         assert!(!result.is_error);
         assert!(result.content[0].text.contains("Drums"));
     }
@@ -440,10 +498,11 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Test" }),
-        );
+        )
+        ;
 
         assert!(
-            !McpTools::dispatch(&mut api, "shruti_transport", &json!({ "action": "play" }),)
+            !McpTools::dispatch(&mut api, "shruti_transport", &json!({ "action": "play" }))
                 .is_error
         );
 
@@ -464,13 +523,15 @@ mod tests {
             &mut api,
             "shruti_session",
             &json!({ "action": "create", "name": "Test" }),
-        );
+        )
+        ;
 
         let result = McpTools::dispatch(
             &mut api,
             "shruti_analysis",
             &json!({ "action": "composition" }),
-        );
+        )
+        ;
         assert!(!result.is_error);
     }
 

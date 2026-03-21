@@ -16,5 +16,5 @@ shruti-instruments = { path = "../shruti-instruments" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-hoosh = { version = "0.20.3", optional = true }
+hoosh = { version = "0.20.4", optional = true }
 tokio = { workspace = true, optional = true }
