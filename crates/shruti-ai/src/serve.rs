@@ -432,6 +432,7 @@ async fn handle_analysis(
 
 #[derive(Deserialize)]
 struct ModelsRequest {
+    #[allow(dead_code)]
     action: String,
 }
 
