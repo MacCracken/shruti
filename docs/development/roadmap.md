@@ -69,16 +69,44 @@ Shruti MVP v1 is a functional DAW capable of recording, editing, mixing, and exp
 
 ## Post-MVP
 
-### Synthesizers
+### Synthesizers → Migrated to dhvani
 
-| # | Item | Effort | Notes |
-|---|------|--------|-------|
-| 1 | FM synth | Large | 4–6 operator FM, algorithm selection (classic DX7-style: 32 algorithms), ratio/detune/feedback per operator, FM matrix routing, velocity→operator level scaling |
-| 2 | Additive synth | Large | 64–256 harmonic partials with individual amplitude envelopes, spectral editing (draw/morph), resynthesis from audio (FFT→partials), real-time partial manipulation |
-| 3 | Wavetable synth | Large | Wavetable loading (.wav frames, single-cycle), wavetable morphing (smooth interpolation between frames), position modulation via LFO/envelope, built-in factory tables (analog, digital, vocal, organic) |
-| 4 | Physical modeling synth | Large | Karplus-Strong string model, waveguide resonators (plucked/bowed/struck), exciter types (noise burst, impulse, bow), body resonance modeling, material parameters (brightness, decay, stiffness) |
-| 5 | Granular synth | Large | Grain cloud engine (position, density, size, pitch, spread), real-time granulation of loaded samples, freeze/scatter/spray modes, per-grain envelope (Gaussian/trapezoid), stereo grain panning |
-| 6 | Vocoder | Large | 16–32 band analysis/synthesis filter bank, carrier (synth oscillator or noise) + modulator (mic/audio input), band envelope followers, sibilance detection, formant shift, unvoiced noise injection, freeze mode |
+**All synthesis engines now live in dhvani (shared audio crate).** Shruti consumes dhvani's synthesis via feature flags. No duplicate code across consumers. See [dhvani roadmap](https://github.com/MacCracken/dhvani) for full synthesis engine specs.
+
+**Migration plan**:
+1. Migrate shruti-instruments synthesis core (subtractive synth, oscillator, voice management, filter, envelope, LFO, mod matrix, drum machine, sampler) into dhvani
+2. shruti-instruments becomes a thin layer: preset management, UI parameter mapping, DAW-specific wiring over dhvani engines
+3. New synthesis engines (FM, additive, wavetable, physical modeling, granular, vocoder, voice synth) are built directly in dhvani — shruti gets them for free
+
+**What stays in shruti**: InstrumentNode trait, InstrumentPreset (JSON), DAW-specific instrument UI (editors, piano roll, rack), step sequencer UI, plugin hosting (VST3/CLAP). Everything that's DAW, not DSP.
+
+**What moves to dhvani**: Oscillator, envelope, LFO, SVF filter, mod matrix, voice manager, effect chain, drum synthesis, sampler engine. Everything that's DSP, not DAW.
+
+| # | Engine | Location | Shruti Role |
+|---|--------|----------|-------------|
+| 1 | Subtractive synth | **dhvani** (migrated from shruti-instruments) | UI + presets |
+| 2 | FM synth | **dhvani** (new) | UI + presets |
+| 3 | Additive synth | **dhvani** (new) | UI + presets |
+| 4 | Wavetable synth | **dhvani** (new) | UI + presets |
+| 5 | Physical modeling | **dhvani** (new) | UI + presets |
+| 6 | Granular synth | **dhvani** (new) | UI + presets |
+| 7 | Vocoder | **dhvani** (new) | UI + presets |
+| 8 | Drum synth | **dhvani** (migrated from shruti-instruments) | UI + step sequencer |
+| 9 | Sampler engine | **dhvani** (migrated from shruti-instruments) | UI + zone editor |
+| 10 | Voice synth (formant) | **dhvani** (new) | Vocoder UI in DAW |
+
+**Other consumers that benefit**: jalwa (synthesis effects), kiran/joshua (game audio + NPC voices), vansh (TTS), SY (agent speech), hoosh (audio response mode)
+
+### Goonj Integration (room acoustics for mixing)
+
+- [ ] **Room simulation reverb**: Use `goonj::impulse::generate_ir()` to simulate virtual room acoustics for mixing; expose room dimensions + material as reverb plugin parameters
+- [ ] **Room analysis display**: Show `goonj::analysis` metrics (C50, C80, D50, STI) in mixer to help users assess reverb quality
+- [ ] **Binaural monitoring**: Use `goonj::binaural::generate_binaural_ir()` for headphone-based spatial monitoring of virtual room placement
+- [ ] **Absorption advisor**: Use `goonj::analysis::suggest_absorption_placement()` to recommend acoustic treatment for virtual mix rooms
+- [ ] **Coupled studio rooms**: Use `goonj::coupled::coupled_room_decay()` for live room + control room simulation
+- [ ] **FDN reverb plugin**: Use `goonj::fdn::Fdn` as real-time reverb effect with room-derived parameters
+- [ ] **Ambisonics bus**: Use `goonj::ambisonics::BFormatIr` for spatial reverb sends
+- [ ] **Speaker directivity**: Use `goonj::directivity::DirectivityPattern` for monitor placement simulation
 
 ### MIDI 2.0
 
